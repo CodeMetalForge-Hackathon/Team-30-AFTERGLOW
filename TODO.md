@@ -53,7 +53,7 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
 - [ ] ~~GPS NMEA by a window (I5).~~ **Blocked:** we have only the ANN-MB5 antenna, no receiver. Ask the hardware desk for any u-blox board with a UART; if one turns up, wire it to the reserved pins, set `gps = "/dev/ttyAMA2"` and run `check_hw.py --only gps`. Until then, position comes from waypoint taps.
 - [ ] If the Pi user isn't `pi` or the clone isn't at `/home/pi/afterglow`, fix `User=` and the paths in `pi/systemd/afterglow@.service`.
 
-**Software (SW), on the fake bus**
+**Software (SW), on the fake bus: done** (reviewed and pushed Sat 7 Nov)
 - [x] Dashboard skeleton (`dashboard.py` + `afterglow/web/`): the event stream with its full-state resend, a Leaflet map with trails and zones, live pose and raw observations, all running on the fake bus. **(I3: pins and coverage move, checked in both profiles.)**
   - The badge (LIVE, SIMULATED or REPLAY) comes from the pose's `src`. The park map carries the OSM credit.
   - Ages use the latest pose's `t`, not the browser clock. Using the newest `t` overall broke: a retained message from a 40× fake run sat hours in the future.
