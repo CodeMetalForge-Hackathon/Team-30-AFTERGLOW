@@ -127,15 +127,18 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 - [ ] **`lora_out.py` (UT)** sends `ag/target` through `alert.encode` from the RFM95W (`radio.open_pod_radio(cfg["lora"])`, then `rfm.send(pkt)`):
   - every 5 s per active pin, and at once when a pin's state changes or an SOS arrives;
   - P1 first; no acks, because the repeats cover lost packets;
-  - a heartbeat;
+  - a heartbeat carrying the pod's latest `x`, `y` (cot_out places the pod's ATAK marker from it);
   - obeys `lora_off` and `lora_on`;
   - ages `last_s` between repeats, takes the battery from `ag/sys`, and sends `rule: "sos"` pins as type 2.
 - [x] **`lora_rx.py` (SW, laptop):** XIAO #3's lines → `ag/alert` on the laptop's broker. It drops other teams' packets and checks the radio settings at start-up. Tested on fake lines; I4 proves it on the radios.
-- [ ] **`cot_out.py` (SW, laptop)** reads `ag/alert` and sends CoT with pytak to `239.2.3.1:6969`:
-  - callsign `P1 T1`, remarks text, and colour by priority;
-  - the pod shown as a friendly unit;
-  - the 95% circle, if ATAK draws it. Check the marker type in ATAK;
-  - **fallback:** a flag to read `ag/target` from the Pi's broker over Wi-Fi instead, so ATAK still works in the demo if the radio dies (there's no spare XIAO).
+- [x] **`cot_out.py` (SW, laptop)** reads `ag/alert` and sends CoT XML over UDP to `[atak] send_to` (default `239.2.3.1:6969`). It needs no pytak, which is now dropped from `requirements-laptop.txt`:
+  - spot markers named by pin number as on the dashboard (`P3`), coloured by priority, with a remarks line and the 95% circle;
+  - the pod is a friendly drone marker, placed from the heartbeat;
+  - **fallback:** `--wifi <pi-ip>` reads `ag/target` and `ag/pose` from the Pi's broker instead, repeats the pins as lora_out would and removes cleared pins. `--to udp://<phone-ip>:4242` sends to one phone if the router blocks multicast;
+  - **iTAK:** it takes multicast for SA only, so cot_out is also a tiny TAK server on TCP 8087 (`[atak] tcp_port`); add the laptop as a server in iTAK;
+  - tested on decoded alerts (`lora_rx --dry-run | cot_out --dry-run`), and live with `--wifi localhost` against the fake bus: a listener on the multicast group got every pin, circle and pod marker.
+  - **Contract changes, tell the team (Utility):** lora_out's heartbeat must carry the pod's latest `x`, `y` (CONTRACTS.md, "LoRa alert"). The alert's byte 1 is now the **pin number**, not the track (`alert.encode(target)` handles it; `ag/alert` has `pin` instead of `track`), so two pins on one track (every SOS-only pin is `T0`) stay two ATAK markers. There's a new `[atak]` config table in both profiles.
+  - [ ] On a real phone (iTAK over TCP; ATAK too if we can borrow one) on the travel router: check the marker type, the colours, whether the circle is the right size (it's sent as a radius), status in the remarks, and that Clear removes the marker.
 - [ ] **`thermal.py` view (UT)**: MLX90640 at about 4 Hz, written to `live/thermal.png` (temp file, then rename), and the warmest spot on `ag/thermal`.
 - [ ] **health (UT)**: `ag/sys` from `vcgencmd`, ports, disk, GPS fix and LoRa, plus `batt_pct: null`. Reuse the checks in `check_hw.py`.
 - [ ] Put ME 2's range numbers in by hour 7: the localized and pinned radii, the lane spacing and `fake_bus.py`'s RSSI model.

@@ -59,7 +59,7 @@ REQUIRED = {
     MODE: {"t", "mode"},
     CTRL: {"cmd"},
     SYS: {"t"},
-    ALERT: {"t", "kind", "track", "x", "y", "prio", "rssi"},
+    ALERT: {"t", "kind", "pin", "x", "y", "prio", "rssi"},
 }
 ALERT_KINDS = {1, 2, 3, 4}  # track, SOS, confirmed person, heartbeat (alert.TYPE_*)
 

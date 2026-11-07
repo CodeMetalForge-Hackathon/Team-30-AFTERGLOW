@@ -46,7 +46,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 | `ag/mode` (**changed**) | dashboard.py | `{"t":…,"mode":"investigate"}` | `patrol`, `night`, `investigate` or `search` (the four modes in the build doc). **Retained**, so a restarted geofence or a second dashboard knows the mode at once. With no mode yet, geofence assumes `patrol` |
 | `ag/ctrl` | dashboard.py | `{"t":…,"cmd":"ack","pin":"P3"}` | Operator commands, listed below |
 | `ag/sys` (**new**) | health (Utility) | `{"t":…,"cpu_c":61.2,"throttled":"0x0","gps_fix":true,"lora":true,"disk_free_gb":41.0,"batt_pct":null}` | Pod health for the dashboard. Optional `batt_pct` (0–100, or `null`): `null` for now, because the pod runs on a USB power bank the Pi can't read. On a drone, a voltage divider from the LiPo into a XIAO analog pin would fill it (tier 3) |
-| `ag/alert` (**new**) | lora_rx.py (**laptop only**) | `{"t":…,"rssi":-71,"snr":9.5,"version":2,"kind":1,"track":"T1","x":18.0,"y":9.0,"r95":12.0,"state":"localized","flags":{…},"c":0.82,"prio":2,"cls":"findmy","br":null,"sos":{…},"last_s":4,"battery":null,"off_trail_m":46}` | One LoRa alert heard by the laptop radio: `alert.decode`'s fields plus `t`, `rssi` and `snr`. `kind` is the alert type (1 track, 2 SOS, 3 confirmed person, 4 heartbeat). Lives on the laptop's own broker; cot_out.py and the LoRa fallback view read it |
+| `ag/alert` (**new**) | lora_rx.py (**laptop only**) | `{"t":…,"rssi":-71,"snr":9.5,"version":2,"kind":1,"pin":"P3","x":18.0,"y":9.0,"r95":12.0,"state":"localized","flags":{…},"c":0.82,"prio":2,"cls":"findmy","br":null,"sos":{…},"last_s":4,"battery":null,"off_trail_m":46}` | One LoRa alert heard by the laptop radio: `alert.decode`'s fields plus `t`, `rssi` and `snr`. `kind` is the alert type (1 track, 2 SOS, 3 confirmed person, 4 heartbeat). Lives on the laptop's own broker; cot_out.py and the LoRa fallback view read it |
 
 ### `cls` values (beacon type)
 
@@ -107,7 +107,7 @@ How tracker.py fills `ag/track`. Its numbers live in the config's `[track]` tabl
 - **Key rotation:** a new id joins an old track of the same `cls` whose id went quiet just before it (within `rotate_window_s`, heard from within `rotate_match_m`) at a matching strength, but only if the match is clear. If the key rotates while the pod is away, the new id gets a new track.
 - **`with_drone`:** set once a beacon, heard without a break, is at `with_drone_rssi` or louder at both ends of a stretch where the pod moved `with_drone_move_m`. Cleared once its median RSSI falls below `with_drone_rssi`, so a fixed beacon wrongly marked while the pod passed over it comes back. Its `x`, `y` is the pod, `state` `heard` and `c` 0. Set `with_drone_rssi` from the range test, well above what a beacon at carry height reads.
 - **`c`:** 0.2 to 0.95, mostly how tight `r95` is, then how many passes back it up.
-- **Track numbers** wrap after `T255`, because the LoRa alert has one byte for them. If all 255 are in use, the track quiet longest is dropped to make room. `T0` is the SOS-only pin.
+- **Track numbers** wrap after `T255`. If all 255 are in use, the track quiet longest is dropped to make room. `T0` is the SOS-only pin.
 
 ### How geofence fills a pin
 
@@ -234,6 +234,7 @@ lora_out.py stays a plain encoder of `ag/target`. Three details:
 - **`last_s`:** it sends `last_s + (now − t)/1000`, so the 5-second repeats keep counting even when geofence hasn't republished the pin.
 - **Battery (byte 14):** it reads `batt_pct` from the latest `ag/sys` and passes it to `alert.encode` as `battery`. `null` goes out as 255, "unknown".
 - **Type:** a pin with `rule` `"sos"` goes out as type 2 (SOS). An SOS attached to a normal pin rides in byte 11 and the SOS flag.
+- **Heartbeat** (type 4, **new**): pin 0, `x` and `y` set to the pod's latest `ag/pose` (0, 0 before the first one), `battery` as above, and everything else zero. cot_out.py places the pod's ATAK marker from it.
 
 `lora_rx.py` on the laptop decodes it onto `ag/alert`, and `cot_out.py` turns that into an ATAK marker. `code/afterglow/alert.py` implements and tests this. Use it, don't re-type it.
 
@@ -242,7 +243,7 @@ lora_out.py stays a plain encoder of `ag/target`. Three details:
 | Byte | Field | Encoding |
 |---|---|---|
 | 0 | version and type | High nibble version; low nibble type: 1 track, 2 SOS, 3 confirmed person, 4 heartbeat |
-| 1 | track | 0–255 (`T7` → 7) |
+| 1 | pin (**changed**, was the track) | The dashboard's pin number, 1–255 (`P7` → 7; past 255 it wraps, `P256` → 1). 0 = heartbeat. Pin numbers are unique, unlike tracks: every SOS-only pin is `T0` |
 | 2–3 | x | int16. **v1: decimetres** (indoor demo, ±3.2 km). **v2: metres** (park scale, ±32 km) |
 | 4–5 | y | int16, same scale as x |
 | 6 | r95 | uint8. v1 decimetres (to 25.5 m); v2 metres (to 255 m) |
@@ -272,12 +273,18 @@ Everything else is counted as another team's traffic and dropped.
 
 ## ATAK (Cursor-on-Target)
 
-- **Input:** `cot_out.py` reads `ag/alert` on the laptop. **Fallback:** if the radio link fails (there's no spare XIAO), it reads `ag/target` from the Pi's broker over Wi-Fi instead. It has the same fields, already in metres.
-- `cot_out.py` converts the alert's x and y back to latitude and longitude around the shared origin:
+- **Input:** `cot_out.py` reads `ag/alert` on the laptop. **Fallback** (`--wifi <pi-ip>`): if the radio link fails (there's no spare XIAO), it reads `ag/target` and `ag/pose` from the Pi's broker over Wi-Fi instead. They have the same fields, already in metres.
+- `cot_out.py` converts x and y back to latitude and longitude around the shared origin (`geo.to_latlon`):
   - `lat = lat0 + y / 111320`
   - `lon = lon0 + x / (111320 · cos lat0)`
-- It sends with `pytak` to ATAK's default multicast address, `239.2.3.1:6969`.
-- Callsign: `P1 T1` (priority, then track).
-- Remarks, for example: `alive 82% · iPhone (offline) · 46 m off trail · ±12 m`.
-- Draw the 95% circle if ATAK renders it. Send the pod as a friendly unit.
-- Check the marker type and colours in ATAK on Saturday. Start with a spot marker coloured by priority.
+- It sends plain CoT XML over UDP to each address in the config's `[atak] send_to`. The default is ATAK's multicast group, `239.2.3.1:6969`; this is what pytak would send, without the extra package. If the router drops multicast, add the phone's own address (`udp://<phone-ip>:4242`, ATAK's usual unicast input) or pass `--to`.
+- **iTAK (iPhone)** takes multicast for SA only, so cot_out is also a tiny TAK server: plain TCP on `[atak] tcp_port` (8087; 0 = off), no SSL, no login. In iTAK, add a server with the laptop's IP, port 8087, protocol TCP. Every connected phone gets every event, and cot_out answers its pings (`t-x-c-t` → `t-x-c-t-r`). ATAK can connect the same way.
+- **Pins:** one spot marker (`b-m-p-s-m`) per pin, uid `afterglow.P3`, coloured by priority: 1 red, 2 orange, 3 yellow, 4 grey. Both inputs use the same uid, so switching to `--wifi` moves the same markers.
+  - Callsign: the pin number, as on the dashboard (`P3`). An SOS-only pin is `P3 SOS`.
+  - Remarks, for example: `priority 2 · conf 82% · Apple Find My (separated) · 46 m off trail · ±12 m · localized · last heard 14:32:05 · LoRa -71 dBm, SNR 9.5`. A confirmed pin starts with `PERSON CONFIRMED by the ranger`, and a pin with an SOS answer with `SOS: hurt, can't walk, 2 people`. With `--wifi`, they add the status (`status investigating`).
+  - The 95% circle is a drawn circle (`u-d-c-c`, uid `afterglow.P3.r95`) with radius `r95`, unless `circles = false`.
+- **The pod:** a friendly drone marker (`a-f-A-M-H-Q`, uid `afterglow.pod`), placed from the LoRa heartbeat, or from `ag/pose` with `--wifi` (at most every `pod_every_s`).
+- **Stale and cleared:** every marker goes stale `[atak] stale_s` after its last update.
+  - Over LoRa, `lora_out.py` repeats the live pins. A cleared pin just stops coming, because the alert has no status, so it goes stale.
+  - With `--wifi`, cot_out repeats every live pin every `repeat_s`, as `lora_out.py` would. It stops once nothing has come from the Pi's broker for 3 × `repeat_s` (ag/pose comes at 5 Hz), so the markers go stale. It removes a cleared pin from ATAK at once (`t-x-d-d`).
+- Still to check in ATAK on a real phone: the marker type, the colours, and whether the circle's `major`/`minor` is a radius (as sent) or a diameter.

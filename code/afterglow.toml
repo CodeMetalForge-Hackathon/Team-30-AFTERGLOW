@@ -106,6 +106,20 @@ port = 8080
 live_dir = "live"          # live/thermal.png (thermal.py), live/camera.jpg (person.py)
 snaps_dir = "snaps"        # snaps/<t>.jpg (person.py), the path in ag/vision "snap"
 
+[atak]
+# cot_out.py (laptop): ATAK markers from ag/alert, or from ag/target over Wi-Fi with --wifi.
+# ATAK's default multicast group. If the router drops multicast, add the phone's own address,
+# "udp://<phone-ip>:4242" (ATAK's default unicast input; check Settings > Network > Manage Inputs).
+send_to = ["udp://239.2.3.1:6969"]
+iface = ""                 # the laptop's IP on the travel router, so multicast leaves there; "" = the system's choice
+# cot_out is also a tiny TAK server on this port (plain TCP, 0 = off). iTAK takes multicast for SA only,
+# so on an iPhone: iTAK Settings > Network > Servers > add this laptop's IP, this port, protocol TCP.
+tcp_port = 8087
+stale_s = 120              # a marker goes stale this long after its last update (lora_out repeats every 5 s)
+repeat_s = 5               # --wifi only: resend each live pin this often, as lora_out does over LoRa; stop after 3x this with nothing from the Pi
+pod_every_s = 2            # --wifi only: the pod marker at most this often (ag/pose comes at 5 Hz)
+circles = true             # also draw each pin's 95% circle
+
 [sim]
 # Read only by tools/fake_bus.py (and later sim.py); the pod ignores this table.
 # The fake pod's path is a dumb stand-in. Real routes come from planner.py.

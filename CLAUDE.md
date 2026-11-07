@@ -40,6 +40,7 @@ code/
     geofence.py         ag/track + map + ag/mode -> ag/target (rules, prio, the pin status guard, SOS); saves pins to runs/
     radio.py            opens the pod's RFM95W on SPI1 from the config's [lora] table (lora_out, check_hw)
     lora_rx.py          laptop: XIAO #3's USB lines -> ag/alert (drops other teams' packets)
+    cot_out.py          laptop: ag/alert (or ag/target + ag/pose with --wifi) -> CoT XML: UDP multicast for ATAK, TCP server for iTAK ([atak] table)
     dashboard.py        web server on [http] port: SSE state stream, /api/ctrl and /api/mode, live/ and snaps/
     web/                dashboard front end: app.js (Preact+htm panels), map.js (Leaflet, metres), store.js (SSE reducer)
   afterglow.toml        DEMO profile (taped indoor park); must be identical on the pod and the laptop
@@ -82,6 +83,8 @@ mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log                      # recor
 .venv/bin/python tools/fake_bus.py --print --only pose,ble --duration 600 | .venv/bin/python -m afterglow.tracker --dry-run   # tracker on fake data, no broker
 .venv/bin/python -m afterglow.lora_rx --dry-run < rx_lines.txt           # laptop radio lines, no hardware
 .venv/bin/python -m afterglow.lora_rx --print                            # laptop: real XIAO #3, print, no broker
+.venv/bin/python -m afterglow.cot_out [--wifi <pi-ip>] [--to udp://<phone-ip>:4242]   # laptop: ATAK markers (--print to see the CoT)
+.venv/bin/python -m afterglow.lora_rx --dry-run < rx_lines.txt | .venv/bin/python -m afterglow.cot_out --dry-run   # CoT, no radio, no broker
 .venv/bin/python tools/check_hw.py [--only lora omni]                    # on the Pi only
 ```
 

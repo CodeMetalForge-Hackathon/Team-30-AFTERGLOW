@@ -20,7 +20,7 @@ class Collect:
 
 
 def target(**kw):
-    m = {"track": "T3", "x": 18.0, "y": 9.0, "r95": 12.0, "c": 0.82, "prio": 2, "cls": "findmy",
+    m = {"pin": "P3", "track": "T1", "x": 18.0, "y": 9.0, "r95": 12.0, "c": 0.82, "prio": 2, "cls": "findmy",
          "state": "localized", "last_s": 4, "flags": {"thermal": True}, "off_trail_m": 46}
     m.update(kw)
     return m
@@ -44,7 +44,7 @@ def test_pod_alert_becomes_ag_alert():
     assert len(out) == 1
     topic, msg = out[0]
     assert topic == ALERT and validate(topic, msg) == []
-    assert msg["track"] == "T3" and msg["x"] == 18.0 and msg["prio"] == 2 and msg["cls"] == "findmy"
+    assert msg["pin"] == "P3" and msg["x"] == 18.0 and msg["prio"] == 2 and msg["cls"] == "findmy"
     assert msg["rssi"] == -71 and msg["snr"] == 9.5 and msg["kind"] == alert.TYPE_TRACK
 
 

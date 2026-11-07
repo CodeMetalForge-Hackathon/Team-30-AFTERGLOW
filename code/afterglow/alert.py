@@ -23,10 +23,12 @@ def _clamp(v, lo, hi):
     return max(lo, min(hi, int(round(v))))
 
 
-def _track_num(track) -> int:
-    if isinstance(track, str):
-        track = "".join(ch for ch in track if ch.isdigit()) or "0"
-    return _clamp(int(track), 0, 255)
+def _pin_num(pin) -> int:
+    """'P7' -> 7. Past 255 it wraps to 1 (P256 -> 1); 0 is the heartbeat, which has no pin."""
+    if isinstance(pin, str):
+        pin = "".join(ch for ch in pin if ch.isdigit()) or "0"
+    n = max(0, int(pin))
+    return (n - 1) % 255 + 1 if n > 255 else n
 
 
 def encode(m: dict, version: int = 2, kind: int = TYPE_TRACK) -> bytes:
@@ -46,7 +48,7 @@ def encode(m: dict, version: int = 2, kind: int = TYPE_TRACK) -> bytes:
     return struct.pack(
         FMT,
         ((version & 0x0F) << 4) | (kind & 0x0F),
-        _track_num(m.get("track", 0)),
+        _pin_num(m.get("pin") or 0),
         _clamp(m["x"] * s, -32768, 32767),
         _clamp(m["y"] * s, -32768, 32767),
         _clamp(m.get("r95", 0) * s, 0, 255),
@@ -64,7 +66,7 @@ def encode(m: dict, version: int = 2, kind: int = TYPE_TRACK) -> bytes:
 def decode(pkt: bytes) -> dict:
     if len(pkt) != SIZE:
         raise ValueError(f"alert must be {SIZE} bytes, got {len(pkt)}")
-    (vt, track, x, y, r95, sf, conf, pc, br, sos, last_s, batt, off) = struct.unpack(FMT, pkt)
+    (vt, pin, x, y, r95, sf, conf, pc, br, sos, last_s, batt, off) = struct.unpack(FMT, pkt)
     version, kind = vt >> 4, vt & 0x0F
     if version not in SCALE:
         raise ValueError(f"unknown alert version {version}")
@@ -73,7 +75,7 @@ def decode(pkt: bytes) -> dict:
     return {
         "version": version,
         "kind": kind,
-        "track": f"T{track}",
+        "pin": f"P{pin}",
         "x": x / s,
         "y": y / s,
         "r95": r95 / s,

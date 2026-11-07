@@ -27,7 +27,8 @@ def test_alert_is_16_bytes_and_round_trips():
     pkt = alert.encode(m, version=2)
     assert len(pkt) == 16
     d = alert.decode(pkt)
-    assert d["track"] == "T7" and d["x"] == 412.0 and d["y"] == -88.0 and d["r95"] == 12.0
+    assert d["pin"] == "P3" and "track" not in d  # the pin number, as on the dashboard; not the track
+    assert d["x"] == 412.0 and d["y"] == -88.0 and d["r95"] == 12.0
     assert d["state"] == "localized" and d["prio"] == 2 and d["cls"] == "findmy"
     assert d["flags"] == m["flags"]
     assert abs(d["c"] - 0.82) < 1 / 255
@@ -53,6 +54,12 @@ def test_alert_random_round_trip():
                           r95=rng.uniform(0, 250), c=rng.random(), prio=rng.randint(1, 4))
         d = alert.decode(alert.encode(m))
         assert abs(d["x"] - m["x"]) <= 0.5 and abs(d["y"] - m["y"]) <= 0.5 and d["prio"] == m["prio"]
+
+
+def test_alert_pin_number_wraps_past_255():
+    pins = {p: alert.decode(alert.encode(sample_target(pin=p)))["pin"] for p in ("P1", "P255", "P256", "P600")}
+    assert pins == {"P1": "P1", "P255": "P255", "P256": "P1", "P600": "P90"}
+    assert alert.decode(alert.encode({"x": 0, "y": 0}, kind=alert.TYPE_HEARTBEAT))["pin"] == "P0"
 
 
 def test_alert_rejects_wrong_length():

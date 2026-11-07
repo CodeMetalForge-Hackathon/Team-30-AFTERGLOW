@@ -24,7 +24,7 @@ Hour 0 is Saturday 10:00. Hard cutoff is Sunday 12:00.
 | `lora_out.py` | Pi | `ag/target`, `ag/sys`, `ag/ctrl` | 16-byte alerts on the RFM95W (SPI1) | 1 | Utility | ✅ `afterglow/alert.py`, `afterglow/radio.py` |
 | lora_rx (firmware) | XIAO #3 + RFM95W, on the laptop's USB | LoRa radio | USB `rx` lines | 1 | Utility | ✅ `firmware/lora_rx/` |
 | `lora_rx.py` | Laptop | XIAO #3 over USB | `ag/alert` (laptop broker) | 1 | Software | ✅ done |
-| `cot_out.py` | Laptop | `ag/alert` (fallback: `ag/target` over Wi-Fi) | CoT to ATAK | 1 | Software | ✅ `geo.py` |
+| `cot_out.py` | Laptop | `ag/alert` (fallback: `ag/target` over Wi-Fi) | CoT to ATAK | 1 | Software | ✅ done; check on a real ATAK phone |
 | `thermal.py` | Pi | MLX90640 | `ag/thermal` + `live/thermal.png` | 1 view, 2 flag | Utility | |
 | health | Pi | vcgencmd, ports | `ag/sys` | 1 | Utility | `tools/check_hw.py` has the checks |
 | `planner.py` | Pi | `ag/target`, `ag/pose`, `ag/ctrl` | `ag/plan` | 2 | Software | |

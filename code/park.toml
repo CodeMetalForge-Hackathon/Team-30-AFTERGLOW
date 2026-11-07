@@ -89,6 +89,16 @@ port = 8080
 live_dir = "live"
 snaps_dir = "snaps"
 
+[atak]
+# Same as afterglow.toml. The markers land around this profile's origin (Blackwoods).
+send_to = ["udp://239.2.3.1:6969"]
+iface = ""
+tcp_port = 8087
+stale_s = 120
+repeat_s = 5
+pod_every_s = 2
+circles = true
+
 [sim]
 # Lanes over the search box ([locate] area_m).
 # A dumb stand-in path; real routes come from planner.py.
