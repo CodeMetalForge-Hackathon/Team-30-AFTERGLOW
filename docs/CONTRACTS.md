@@ -141,7 +141,23 @@ dashboard.py serves everything on one port (`[http] port`, 8080), so there are n
 
 - Write each live frame to a temporary file and rename it over the old one, so a reader never gets half a frame.
 - The folders are `[http] live_dir` and `snaps_dir`, relative to `code/`. Neither is committed.
-- Until the dashboard exists, `python -m http.server 8080` run from `code/` serves the same URLs.
+- `python -m afterglow.dashboard` serves these URLs. Without it, `python -m http.server 8080` run from `code/` serves the same paths.
+
+## Dashboard HTTP
+
+`dashboard.py` serves the page and this API on the same port. The browser is its only client today; the LoRa fallback view (tier 3) would reuse it.
+
+| Method and path | What |
+|---|---|
+| `GET /api/map` | Once per page load: the profile (`profile`, `name`, `origin`, `waypoints`, `radii`, `offtrail_m`, `detect_m`, `cell_m`) and the map in metres (`map`: `bounds`, `lines`, `zones`, `credit`), from `parkmap.py` |
+| `GET /api/events` | Server-Sent Events. `state` (the full state) comes first on every connect and reconnect. Then a `msg` (`{"topic":…,"msg":…}`) for each bus message, and a `status` (`broker`, `bus_t`, `clients`, `counts`) about every 2 s |
+| `GET /api/state` | The same full state as one JSON object, for debugging |
+| `POST /api/ctrl` | A click: `{"cmd":"ack","pin":"P1"}`, `{"cmd":"waypoint","n":3}` and so on. The server keeps only `cmd`, `pin`, `id` and `n`, stamps `t`, runs `validate()` and checks that pin commands carry `pin`, leg commands carry `id` and `waypoint` carries a configured `n`. Then it publishes to `ag/ctrl`. Answers `{"ok":true,"msg":…}`, or `400` / `503` with `{"ok":false,"problems":[…]}` |
+| `POST /api/mode` | `{"mode":"night"}`, published to `ag/mode` the same way |
+
+- The full state holds the latest pose per drone (`drone` field, or `"pod"`), each drone's path, and the latest `ag/target` per pin, `ag/track` per track and `ag/plan` per id. It also holds a summary per heard id with the last 60 raw observations, the latest message on every other topic, and per-topic counts.
+- **The dashboard's clock** (`bus_t`) is the latest pose's `t`, or the newest `t` before any pose arrives. Ages on the page are measured against it, because fake and replayed time isn't wall time.
+- The dashboard publishes only when someone clicks. It never sends `ag/ctrl` or `ag/mode` by itself.
 
 ## Serial lines from the ESP32 boards
 

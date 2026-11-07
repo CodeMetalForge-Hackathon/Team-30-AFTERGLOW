@@ -115,15 +115,16 @@ class FakePod:
         self.dt = 1.0 / cfg["pose"]["publish_hz"]
         self.L = cfg["track"]["localized_r95_m"]
         self.P = cfg["track"]["pinned_r95_m"]
-        self.area = tuple(sim["area_m"]) if sim.get("area_m") else pm.bounds()
+        area = sim["area_m"] if sim.get("area_m") else pm.bounds()
+        self.area = tuple(round(v, 2) for v in area)  # the map's lon/lat round trip leaves float dust
         self.phones = [Phone(p["name"], p["cls"], p.get("x"), p.get("y")) for p in sim["phones"]]
         # A pass counts for a phone once it's heard at least as loud as the model gives at detect_m
         self.strong = self.model_rssi(math.hypot(cfg["locate"]["detect_m"], sim["height_m"]))
         # Coverage grid over the area
         self.cell = cfg["locate"]["cell_m"]
         x0, y0, x1, y1 = self.area
-        self.nx = max(1, math.ceil((x1 - x0) / self.cell))
-        self.ny = max(1, math.ceil((y1 - y0) / self.cell))
+        self.nx = max(1, math.ceil((x1 - x0) / self.cell - 1e-6))
+        self.ny = max(1, math.ceil((y1 - y0) / self.cell - 1e-6))
         self.covered = bytearray(self.nx * self.ny)
         self.n_tracks = self.n_pins = 0
 
@@ -182,7 +183,8 @@ class FakePod:
         if k == 0:  # only faint so far: somewhere near the loudest spot
             _, lx, ly = ph.loudest
             return lx, ly, min(255.0, 3 * self.L), 0
-        r95 = min(255.0, 2.5 * self.L / k ** 1.5)  # heard, then localized at 2-3 passes, pinned at 4
+        # heard, then localized at 2-3 passes, pinned at 4; never tighter than 60% of the pinned radius
+        r95 = min(255.0, max(0.6 * self.P, 2.5 * self.L / k ** 1.5))
         if ph.err[2] != k:  # new strong pass: draw a new error, so the pin moves once per pass
             s = r95 / 2.45  # 95% of a 2-D Gaussian lies within 2.45 sigma
             ph.err = (self.rng.gauss(0, s), self.rng.gauss(0, s), k)

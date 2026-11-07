@@ -1,0 +1,378 @@
+"""dashboard.py (tier 1, Software): the ranger's dashboard, one web server on [http] port.
+
+    python -m afterglow.dashboard                       # demo profile, broker from the config
+    python -m afterglow.dashboard --config park.toml    # park profile (realistic view)
+    python -m afterglow.dashboard --broker 10.0.0.5     # on the laptop, against the pod's broker
+    python -m afterglow.dashboard --dry-run             # no broker: serves the page, prints commands
+
+Then open http://<host>:8080. The server subscribes to ag/#, keeps the latest state and
+streams it to every browser with Server-Sent Events (/api/events): the full state first,
+on every (re)connect, then each message as it arrives. Buttons POST to /api/ctrl and
+/api/mode; the server stamps t, runs validate() and publishes.
+
+It never acts on its own: every ag/ctrl and ag/mode message it sends comes from a click.
+
+HTTP API (docs/CONTRACTS.md, "Dashboard HTTP"):
+    GET  /api/map      profile, settings and the map in metres (once per page load)
+    GET  /api/state    the full state as JSON (debugging)
+    GET  /api/events   SSE: "state" (full), "msg" ({topic, msg}), "status" (every 2 s)
+    POST /api/ctrl     {"cmd": "ack", "pin": "P1"} etc.; t is added here
+    POST /api/mode     {"mode": "night"}
+    GET  /live/..., /snaps/...   image files from [http] live_dir and snaps_dir
+"""
+import argparse
+import json
+import logging
+import math
+import mimetypes
+import os
+import queue
+import socket
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from . import config as cfgmod
+from .bus import Bus, PrintBus
+from .contracts import (ALL, CTRL, MODE, OBS_BLE, OBS_WIFI, PLAN, POSE, TARGET, TRACK, now_ms,
+                        validate)
+from .parkmap import ParkMap
+
+log = logging.getLogger("dashboard")
+
+WEB = Path(__file__).resolve().parent / "web"
+PIN_CMDS = {"ack", "investigate", "clear", "confirm"}
+LEG_CMDS = {"accept_leg", "reject_leg"}
+MAX_BODY = 4096
+OBS_IDS = 300  # raw-observation summaries kept (oldest dropped)
+OBS_LOG = 60  # recent raw observations kept
+TRAIL_MAX = 4000  # breadcrumb points per drone
+QUEUE_MAX = 5000  # messages buffered per browser before it's dropped (it reconnects)
+STATUS_S = 2.0
+
+
+class State:
+    """Everything the browser needs, kept by topic. app.js's reducer mirrors apply()."""
+
+    def __init__(self, trail_step_m: float):
+        self.lock = threading.Lock()
+        self.clients: set[queue.Queue] = set()
+        self.trail_step = trail_step_m
+        self.poses = {}  # drone -> latest ag/pose ("pod" until there's a drone field)
+        self.trails = {}  # drone -> [[x, y], ...]
+        self.pins = {}  # pin -> latest ag/target
+        self.tracks = {}  # track -> latest ag/track
+        self.plans = {}  # plan id -> latest ag/plan
+        self.obs = {}  # hashed id -> summary of ag/obs/ble and ag/obs/wifi
+        self.obs_log = []  # newest first: {"topic", "msg"}
+        self.latest = {}  # every other topic -> latest message
+        self.counts = {}  # topic -> messages seen
+        # The dashboard's clock: the latest pose's t (fake and replayed time isn't wall time).
+        # Before any pose, the newest t seen. Not the newest t overall: a retained message from
+        # an earlier run (say a fake bus at --speed 40) can sit hours in the future.
+        self.bus_t = 0
+        self.pose_seen = False
+        self.broker = False
+
+    # Runs on paho's network thread: keep it fast.
+    def on_msg(self, topic: str, msg: dict):
+        data = json.dumps({"topic": topic, "msg": msg}, separators=(",", ":"))
+        with self.lock:
+            self.apply(topic, msg)
+            for q in list(self.clients):
+                try:
+                    q.put_nowait(("msg", data))
+                except queue.Full:  # a stuck browser: drop it; EventSource reconnects and gets full state
+                    self.clients.discard(q)
+                    q.queue.clear()
+                    q.put_nowait((None, None))
+
+    def apply(self, topic: str, msg: dict):
+        self.counts[topic] = self.counts.get(topic, 0) + 1
+        t = msg.get("t")
+        if isinstance(t, (int, float)):
+            if topic == POSE:
+                self.bus_t, self.pose_seen = int(t), True
+            elif not self.pose_seen and t > self.bus_t:
+                self.bus_t = int(t)
+        if topic == POSE:
+            d = str(msg.get("drone", "pod"))
+            self.poses[d] = msg
+            trail = self.trails.setdefault(d, [])
+            x, y = msg.get("x"), msg.get("y")
+            if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                if not trail or math.hypot(x - trail[-1][0], y - trail[-1][1]) >= self.trail_step:
+                    trail.append([x, y])
+                    del trail[:-TRAIL_MAX]
+        elif topic in (OBS_BLE, OBS_WIFI):
+            oid = msg.get("id")
+            o = self.obs.get(oid)
+            if o is None:
+                o = self.obs[oid] = {"id": oid, "n": 0, "first": msg.get("t"), "best": -999}
+                if len(self.obs) > OBS_IDS:
+                    oldest = min(self.obs.values(), key=lambda v: v.get("t") or 0)
+                    del self.obs[oldest["id"]]
+            rssi = msg.get("rssi")
+            o.update(kind="wifi" if topic == OBS_WIFI else "ble", cls=msg.get("cls", "wifi"),
+                     rssi=rssi, t=msg.get("t"), src=msg.get("src"), n=o["n"] + 1)
+            if isinstance(rssi, (int, float)) and rssi > o["best"]:
+                o["best"] = rssi
+            self.obs_log.insert(0, {"topic": topic, "msg": msg})
+            del self.obs_log[OBS_LOG:]
+        elif topic == TARGET and "pin" in msg:
+            self.pins[msg["pin"]] = msg
+        elif topic == TRACK and "track" in msg:
+            self.tracks[msg["track"]] = msg
+        elif topic == PLAN and "id" in msg:
+            self.plans[msg["id"]] = msg
+        else:
+            self.latest[topic] = msg
+
+    def snapshot(self) -> dict:
+        return {"poses": self.poses, "trails": self.trails, "pins": self.pins, "tracks": self.tracks,
+                "plans": self.plans, "obs": self.obs, "obs_log": self.obs_log, "latest": self.latest,
+                "counts": self.counts, "bus_t": self.bus_t, "pose_seen": self.pose_seen, "broker": self.broker}
+
+    def status(self) -> dict:
+        with self.lock:
+            return {"broker": self.broker, "bus_t": self.bus_t, "clients": len(self.clients),
+                    "counts": dict(self.counts), "wall": now_ms()}
+
+    def subscribe(self) -> queue.Queue:
+        """A queue that starts with the full state; no message can fall between the two."""
+        q = queue.Queue(maxsize=QUEUE_MAX)
+        with self.lock:
+            q.put_nowait(("state", json.dumps(self.snapshot(), separators=(",", ":"))))
+            self.clients.add(q)
+        return q
+
+    def unsubscribe(self, q):
+        with self.lock:
+            self.clients.discard(q)
+
+
+class Commands:
+    """Turns a click into an ag/ctrl or ag/mode message: stamps t, validates, publishes."""
+
+    def __init__(self, bus_ref, waypoints):
+        self.bus_ref = bus_ref  # callable returning the Bus, or None while it's connecting
+        self.waypoints = set(waypoints)
+
+    def ctrl(self, body: dict) -> tuple[int, dict]:
+        allowed = {"cmd", "pin", "id", "n"}
+        msg = {k: v for k, v in body.items() if k in allowed}
+        msg["t"] = now_ms()
+        problems = validate(CTRL, msg)
+        cmd = msg.get("cmd")
+        if cmd in PIN_CMDS and not isinstance(msg.get("pin"), str):
+            problems.append(f"{cmd} needs a pin")
+        if cmd in LEG_CMDS and not isinstance(msg.get("id"), str):
+            problems.append(f"{cmd} needs a leg id")
+        if cmd == "waypoint" and (not isinstance(msg.get("n"), int) or msg["n"] not in self.waypoints):
+            problems.append(f"waypoint needs n, one of {sorted(self.waypoints)}")
+        return self._publish(CTRL, msg, problems)
+
+    def mode(self, body: dict) -> tuple[int, dict]:
+        msg = {"t": now_ms(), "mode": body.get("mode")}
+        return self._publish(MODE, msg, validate(MODE, msg))
+
+    def _publish(self, topic, msg, problems):
+        if problems:
+            return 400, {"ok": False, "problems": problems}
+        bus = self.bus_ref()
+        if bus is None:
+            return 503, {"ok": False, "problems": ["not connected to the MQTT broker"]}
+        bus.publish(topic, msg)
+        log.info("operator: %s %s", topic, json.dumps(msg, separators=(",", ":")))
+        return 200, {"ok": True, "msg": msg}
+
+
+def make_meta(cfg: dict, pm: ParkMap) -> dict:
+    m, http = cfg["mission"], cfg["http"]
+    return {
+        "profile": Path(cfg["_path"]).stem,
+        "name": m.get("name", Path(cfg["_path"]).stem),
+        "origin": [m["origin_lat"], m["origin_lon"]],
+        "waypoints": {str(k): list(v) for k, v in sorted(cfg["waypoints"].items())},
+        "radii": {"localized": cfg["track"]["localized_r95_m"], "pinned": cfg["track"]["pinned_r95_m"]},
+        "offtrail_m": cfg["rules"]["offtrail_m"],
+        "detect_m": cfg["locate"]["detect_m"],
+        "cell_m": cfg["locate"]["cell_m"],
+        "trail_step_m": trail_step(cfg),
+        "live": {"thermal": "/live/thermal.png", "camera": "/live/camera.jpg"},
+        "dirs": {"live": http["live_dir"], "snaps": http["snaps_dir"]},
+        "map": pm.to_json(),
+    }
+
+
+def trail_step(cfg) -> float:
+    return max(0.2, cfg["locate"]["cell_m"] / 2)
+
+
+def safe_file(base: Path, rel: str) -> Path | None:
+    """base/rel if it's a file inside base (no ../ escapes), else None."""
+    try:
+        p = (base / rel.lstrip("/")).resolve()
+    except (OSError, ValueError):
+        return None
+    return p if p.is_relative_to(base.resolve()) and p.is_file() else None
+
+
+def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict):
+    meta_json = json.dumps(meta, separators=(",", ":")).encode()
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "afterglow-dashboard"
+
+        def log_message(self, fmt, *args):  # quiet: one line per request is too much at 5 Hz
+            log.debug("%s %s", self.address_string(), fmt % args)
+
+        def send_json(self, code: int, obj):
+            body = obj if isinstance(obj, bytes) else json.dumps(obj, separators=(",", ":")).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def send_file(self, path: Path | None, cache: bool):
+            if path is None:
+                self.send_error(404)
+                return
+            body = path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "max-age=3600" if cache else "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            path = urlsplit(self.path).path
+            if path == "/api/events":
+                return self.events()
+            if path == "/api/map":
+                return self.send_json(200, meta_json)
+            if path == "/api/state":
+                with state.lock:
+                    snap = json.dumps(state.snapshot(), separators=(",", ":")).encode()
+                return self.send_json(200, snap)
+            for prefix in ("live", "snaps"):
+                if path.startswith(f"/{prefix}/"):
+                    return self.send_file(safe_file(dirs[prefix], path[len(prefix) + 2:]), cache=False)
+            if path == "/":
+                path = "/index.html"
+            return self.send_file(safe_file(WEB, path), cache=path.startswith("/vendor/"))
+
+        def do_POST(self):
+            path = urlsplit(self.path).path
+            if path not in ("/api/ctrl", "/api/mode"):
+                return self.send_error(404)
+            try:
+                n = int(self.headers.get("Content-Length", 0))
+                if n > MAX_BODY:
+                    raise ValueError("body too large")
+                body = json.loads(self.rfile.read(n) or b"{}")
+                if not isinstance(body, dict):
+                    raise ValueError("body must be a JSON object")
+            except ValueError as e:
+                return self.send_json(400, {"ok": False, "problems": [str(e)]})
+            code, out = cmds.ctrl(body) if path == "/api/ctrl" else cmds.mode(body)
+            self.send_json(code, out)
+
+        def events(self):
+            q = state.subscribe()
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                self.wfile.write(b"retry: 1500\n\n")
+                next_status = 0.0
+                while True:
+                    try:
+                        ev, data = q.get(timeout=STATUS_S)
+                    except queue.Empty:
+                        ev, data = "status", None
+                    if ev is None:  # dropped for falling behind
+                        break
+                    if ev == "status" or time.monotonic() >= next_status:
+                        self.wfile.write(f"event: status\ndata: {json.dumps(state.status())}\n\n".encode())
+                        next_status = time.monotonic() + STATUS_S
+                    if data is not None:
+                        self.wfile.write(f"event: {ev}\ndata: {data}\n\n".encode())
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                pass
+            finally:
+                state.unsubscribe(q)
+
+    return Handler
+
+
+def connect(host, port, state: State, holder: dict, stop: threading.Event):
+    """Connect to the broker, retrying every 2 s, so the page is up even when the broker isn't."""
+    name = f"dashboard-{socket.gethostname()}-{os.getpid()}"  # unique: the Pi's and the laptop's can share a broker
+    while not stop.is_set():
+        try:
+            bus = Bus(host, port, name)
+            bus.subscribe(ALL, state.on_msg)
+            holder["bus"] = bus
+            log.info("connected to MQTT at %s:%d", host, port)
+            break
+        except OSError as e:
+            log.warning("MQTT %s:%d: %s; retrying in 2 s", host, port, e)
+            stop.wait(2)
+    while not stop.is_set():  # keep the status light honest
+        bus = holder.get("bus")
+        state.broker = bool(bus and bus.c.is_connected())
+        stop.wait(1)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--config")
+    ap.add_argument("--broker", help="MQTT host[:port], overrides [mqtt] (run the dashboard on the laptop)")
+    ap.add_argument("--host", default="0.0.0.0", help="address to serve on (default: every interface)")
+    ap.add_argument("--port", type=int, help="HTTP port (default: [http] port)")
+    ap.add_argument("--dry-run", action="store_true", help="no broker: serve the page, print commands")
+    a = ap.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+
+    cfg = cfgmod.load(a.config)
+    pm = ParkMap.load(cfg)
+    meta = make_meta(cfg, pm)
+    state = State(meta["trail_step_m"])
+    holder, stop = {}, threading.Event()
+    if a.dry_run:
+        holder["bus"] = PrintBus()
+    else:
+        host, port = cfg["mqtt"]["host"], cfg["mqtt"]["port"]
+        if a.broker:
+            host, _, p = a.broker.partition(":")
+            port = int(p) if p else port
+        threading.Thread(target=connect, args=(host, port, state, holder, stop), daemon=True).start()
+    cmds = Commands(lambda: holder.get("bus"), cfg["waypoints"])
+    dirs = {k: cfgmod.resolve(cfg, cfg["http"][f"{k}_dir"]) for k in ("live", "snaps")}
+
+    server = ThreadingHTTPServer((a.host, a.port or cfg["http"]["port"]), make_handler(state, cmds, meta, dirs))
+    server.daemon_threads = True
+    log.info("dashboard (%s) on http://%s:%d", meta["name"], "localhost" if a.host == "0.0.0.0" else a.host,
+             server.server_address[1])
+    try:
+        server.serve_forever(poll_interval=0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop.set()
+        server.server_close()
+        if holder.get("bus"):
+            holder["bus"].close()
+
+
+if __name__ == "__main__":
+    main()

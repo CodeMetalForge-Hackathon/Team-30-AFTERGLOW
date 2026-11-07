@@ -7,6 +7,7 @@
 # Same keys as afterglow.toml (tests/test_parkmap.py checks), so add a new key to both.
 
 [mission]
+name = "Acadia NP, Blackwoods"   # shown in the dashboard header
 # Blackwoods Campground, Acadia NP: the launch point for the park scenario.
 origin_lat = 44.3091
 origin_lon = -68.2056

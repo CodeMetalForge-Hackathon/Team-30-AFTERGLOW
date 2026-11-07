@@ -7,6 +7,7 @@
 # (tests/test_parkmap.py checks), so add a new key to both.
 
 [mission]
+name = "Taped indoor park"   # shown in the dashboard header
 # Mission origin: every module works in metres east (x) and north (y) of here.
 # Leave both at 0.0 to use the GPS's first good fix (position.py prints it; copy it
 # here and onto the laptop). For the indoor demo, set it to the coordinates you map

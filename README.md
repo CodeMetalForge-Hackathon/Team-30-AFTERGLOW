@@ -26,9 +26,10 @@ code/
   afterglow.toml     DEMO profile: the taped indoor park, real pod (identical on pod and laptop)
   park.toml          PARK profile: realistic view on real Acadia trails, laptop only, simulated
   afterglow/         contracts.py, alert.py, geo.py, bus.py, config.py, parkmap.py,
-                     bridge.py, position.py, radio.py and lora_rx.py (tier 1, working)
+                     bridge.py, position.py, radio.py, lora_rx.py and dashboard.py (tier 1, working)
+    web/             the dashboard front end (Preact + htm, Leaflet; vendored, no CDN)
   data/              trails.geojson, zones.geojson (indoor); park_trails.geojson, park_zones.geojson (OSM)
-  tools/             check_hw.py, fake_bus.py, make_indoor_map.py, make_park_map.py, draw_map.py
+  tools/             check_hw.py, fake_bus.py, replay.py, make_indoor_map.py, make_park_map.py, draw_map.py
   tests/             pytest
 pi/                  setup_pi.sh, config.txt.append, udev rules, Mosquitto config, systemd service
 firmware/            README.md: what the ESP32 boards must send (Serial1 on D9/D10); lora_rx/: the laptop radio's sketch
@@ -42,7 +43,14 @@ cd code && python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop
 .venv/bin/python -m pytest -q
 .venv/bin/python tools/fake_bus.py --speed 5     # fake pod + hidden phones, indoor; or --print without a broker
 .venv/bin/python tools/fake_bus.py --config park.toml --speed 10   # the same at park scale
+.venv/bin/python -m afterglow.dashboard          # then open http://localhost:8080 (add --config park.toml for the park)
 mosquitto_sub -v -t 'ag/#'                       # watch the bus
+```
+
+Run the dashboard and the fake bus with the same profile. To record a run and play it back, the demo backup:
+```
+mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log
+.venv/bin/python tools/replay.py runs/1432.log --loop
 ```
 
 **Two profiles.** We don't fly, so there are two views of the same system:

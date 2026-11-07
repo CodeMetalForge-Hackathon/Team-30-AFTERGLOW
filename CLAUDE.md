@@ -37,10 +37,13 @@ code/
     position.py         GPS NMEA or taped waypoints -> ag/pose (no GPS receiver yet: waypoints only)
     radio.py            opens the pod's RFM95W on SPI1 from the config's [lora] table (lora_out, check_hw)
     lora_rx.py          laptop: XIAO #3's USB lines -> ag/alert (drops other teams' packets)
+    dashboard.py        web server on [http] port: SSE state stream, /api/ctrl and /api/mode, live/ and snaps/
+    web/                dashboard front end: app.js (Preact+htm panels), map.js (Leaflet, metres), store.js (SSE reducer)
   afterglow.toml        DEMO profile (taped indoor park); must be identical on the pod and the laptop
   park.toml             PARK profile (realistic view, real Acadia trails), laptop only; same keys as afterglow.toml
   data/                 trails/zones.geojson (indoor) and park_trails/park_zones.geojson (OSM); all lon/lat
   tools/fake_bus.py     fake pod per the profile's [sim] table, plus stand-in track/target/coverage
+  tools/replay.py       replays a mosquitto_sub -v log with the original timing (debugging, demo backup)
   tools/make_park_map.py  data/park_*.geojson from OpenStreetMap (needs internet)
   tools/check_hw.py     PASS/FAIL/SKIP for each pod part (run on the Pi); --only lora sends one heartbeat
   tools/make_indoor_map.py  writes data/*.geojson from the origin and waypoints
@@ -66,6 +69,10 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop.txt   # la
 .venv/bin/python tools/fake_bus.py --speed 5                             # fake data to local Mosquitto (demo profile)
 .venv/bin/python tools/fake_bus.py --config park.toml --speed 10         # park profile (realistic view)
 mosquitto_sub -v -t 'ag/#'                                               # watch the whole bus
+.venv/bin/python -m afterglow.dashboard [--config park.toml]             # dashboard on http://localhost:8080
+.venv/bin/python -m afterglow.dashboard --broker <pi-ip>                 # laptop dashboard against the pod's broker
+mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log                      # record a run
+.venv/bin/python tools/replay.py runs/1432.log [--loop] [--topics 'ag/obs/#,ag/pose']   # replay it
 .venv/bin/python -m afterglow.bridge --dry-run < lines.txt               # no hardware, no broker
 .venv/bin/python -m afterglow.position --dry-run < nmea.txt
 .venv/bin/python -m afterglow.lora_rx --dry-run < rx_lines.txt           # laptop radio lines, no hardware
@@ -100,6 +107,7 @@ Anything past `--print` or `--dry-run` needs Mosquitto on the laptop (`brew inst
 - **USB serial.** Never hard-code `ttyACM0`. On the Pi, use `/dev/radar` or `/dev/serial/by-id/…`. On the laptop, `lora_rx.py` finds XIAO #3 or takes `--port`.
 - **LoRa radio settings** live in the config's `[lora]` table and are copied into `firmware/lora_rx/lora_rx.ino`. Change both together; `tests/test_lora_rx.py` checks they match.
 - **Test against fake data first.** Every new module should run against `tools/fake_bus.py` before it touches hardware.
+- **Dashboard.** It only relays clicks: nothing in it publishes `ag/ctrl` or `ag/mode` on its own. `web/store.js` `apply()` mirrors `State.apply()` in `dashboard.py`, so change both. Its clock is the latest pose's `t`, never the browser clock. No CDN and no build step: libraries live in `web/vendor/`.
 
 ## Privacy rules (non-negotiable)
 

@@ -54,14 +54,20 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
 - [ ] If the Pi user isn't `pi` or the clone isn't at `/home/pi/afterglow`, fix `User=` and the paths in `pi/systemd/afterglow@.service`.
 
 **Software (SW), on the fake bus**
+- [x] Dashboard skeleton (`dashboard.py` + `afterglow/web/`): the event stream with its full-state resend, a Leaflet map with trails and zones, live pose and raw observations, all running on the fake bus. **(I3: pins and coverage move, checked in both profiles.)**
+  - The badge (LIVE, SIMULATED or REPLAY) comes from the pose's `src`. The park map carries the OSM credit.
+  - Ages use the latest pose's `t`, not the browser clock. Using the newest `t` overall broke: a retained message from a 40× fake run sat hours in the future.
+  - Run it with `python -m afterglow.dashboard [--config park.toml] [--broker host]` and open `http://localhost:8080`.
+- [x] `tools/replay.py`: replay a `mosquitto_sub -v` log into the same topics with the original timing. It's the 3 a.m. debugging tool and the demo backup.
+  - It marks the pose `replay` and moves `t` to now.
+  - It shrinks pauses longer than 10 s, and `--topics` replays only the raw input.
+  - It skips `ag/ctrl` and `ag/mode` unless you pass `--with-ctrl`, because a recorded Confirm shouldn't be made again unasked.
 - [x] **Two config profiles.** Pick one with `--config` or `AFTERGLOW_CONFIG`; `tests/test_parkmap.py` fails if their keys drift apart.
   - **Demo**, `afterglow.toml`: the taped indoor park and real pod data. Now has indoor-scale placeholders: `offtrail_m` 3, `detect_m` 4, and a new `[track]` table with the localized and pinned radii.
   - **Park**, `park.toml`: realistic view at Blackwoods Campground, Acadia, using real OSM trails and roads (`data/park_*.geojson`, made by `tools/make_park_map.py`; picture in `docs/maps/park_map.png`). Laptop only.
 - [x] Sim stub: `fake_bus.py` follows the profile's new `[sim]` table (path, hidden phones, RSSI model). It walks the waypoint loop indoors and flies lanes in the park. It also fakes `ag/track`, `ag/target` and a retained `ag/coverage`, so pins and coverage move for I3. Use `--only pose,ble` once the real modules land. Its tracker cheats (it knows the true positions), so never take accuracy numbers from it.
 - [x] **Contract change, tell the team:** `ag/pose` `src` can now be `sim`, and `validate()` checks `src`. The dashboard badges `sim` and `replay` data.
-- [ ] Dashboard skeleton (`dashboard.py` + `afterglow/web/`): the event stream with its full-state resend, a Leaflet map with trails and zones, live pose and raw observations, all running on the fake bus. **(I3)** Show a SIMULATED or REPLAY badge from the pose's `src`, show the OSM credit on the park map, and measure ages against the newest `t` on the bus, not the browser clock (fake and replayed time isn't wall time).
 - [x] `geofence.py` geometry: distance to the nearest trail and point-in-zone, with tests. It's in `afterglow/parkmap.py` (`ParkMap.load(cfg)`, `dist_to_trail`, `zone_at`, `bounds`, `to_json`), because the dashboard and the fake bus use it too.
-- [ ] `tools/replay.py`: replay a `mosquitto_sub -v` log into the same topics with the original timing. It's the 3 a.m. debugging tool and the demo backup.
 
 ## Phase 2: Tier 1 core pipeline (hours 3–12, until 22:00, checkpoints I6 and I7)
 
@@ -84,13 +90,16 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - updates the pin status on `ack`, `investigate`, `clear` and `confirm`;
   - copies `state` and `last_s` from the track, and sets `state` to `confirmed` only on Confirm;
   - attaches `ag/sos` answers to the investigating pin, or opens an SOS-only `T0` pin at the pod.
-- [ ] **`dashboard.py` (SW)**:
-  - pins with Acknowledge, Investigate, Clear and Confirm buttons;
-  - a mode switch for patrol, night, investigate and search;
-  - Baseline and New search buttons, plus waypoint taps for the indoor park;
-  - the coverage overlay, pod health from `ag/sys`, and the thermal and camera panel (it reloads the `live/` images about once a second);
-  - serves `live/` and `snaps/` on port 8080;
-  - takes a `--broker` flag (it overrides `[mqtt] host`), so it also runs on the laptop.
+- [ ] **`dashboard.py` (SW)**. Most of this landed with the Phase 1 skeleton:
+  - [x] pins with Acknowledge, Investigate, Clear and Confirm buttons. Confirm needs two clicks and only works while the pin is being investigated. Each button shows "waiting for geofence" until the status changes, and warns if it never does;
+  - [x] a mode switch for patrol, night, investigate and search;
+  - [ ] Baseline and New search buttons;
+  - [x] waypoint taps for the indoor park, on the map and as a 0–7 strip in the Pod panel;
+  - [x] the coverage and probability overlays, and pod health from `ag/sys`;
+  - [ ] the thermal and camera panel (it reloads the `live/` images about once a second);
+  - [x] serves `live/` and `snaps/` on port 8080;
+  - [x] takes a `--broker` flag (it overrides `[mqtt] host`), so it also runs on the laptop. Each instance has its own MQTT client id, so the Pi's and the laptop's can share a broker;
+  - [ ] draw `ag/plan` legs, with Accept and Reject (`accept_leg`, `reject_leg`), once `planner.py` exists.
 - [ ] **`lora_out.py` (UT)** sends `ag/target` through `alert.encode` from the RFM95W (`radio.open_pod_radio(cfg["lora"])`, then `rfm.send(pkt)`):
   - every 5 s per active pin, and at once when a pin's state changes or an SOS arrives;
   - P1 first; no acks, because the repeats cover lost packets;
