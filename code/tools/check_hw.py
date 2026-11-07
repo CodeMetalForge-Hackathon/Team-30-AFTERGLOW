@@ -45,6 +45,14 @@ def run(cmd, timeout=15):
         return None, "timed out"
 
 
+MAC = re.compile(r"\b[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}\b")
+
+
+def redact(line):
+    """Privacy rule: never show a raw Bluetooth or Wi-Fi address on screen."""
+    return MAC.sub("xx:xx:xx:xx:xx:xx", line)
+
+
 def listen(port, baud, seconds, want):
     """Read lines from a serial port; count lines for which want(line) is True."""
     try:
@@ -66,7 +74,7 @@ def listen(port, baud, seconds, want):
                 total += 1
                 if want(line):
                     good += 1
-                    sample = sample or line[:90]
+                    sample = sample or redact(line)[:90]
     except Exception as e:
         return "FAIL", str(e)
     if good:
