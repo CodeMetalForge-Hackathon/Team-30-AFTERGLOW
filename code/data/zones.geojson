@@ -1,0 +1,75 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "camp_1",
+        "name": "Campground",
+        "kind": "campground"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -68.2732372,
+              44.3385641
+            ],
+            [
+              -68.273187,
+              44.3385641
+            ],
+            [
+              -68.273187,
+              44.338591
+            ],
+            [
+              -68.2732372,
+              44.338591
+            ],
+            [
+              -68.2732372,
+              44.3385641
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "park",
+        "name": "Taped park",
+        "kind": "park"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -68.2733251,
+              44.3385551
+            ],
+            [
+              -68.2731618,
+              44.3385551
+            ],
+            [
+              -68.2731618,
+              44.3386629
+            ],
+            [
+              -68.2733251,
+              44.3386629
+            ],
+            [
+              -68.2733251,
+              44.3385551
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

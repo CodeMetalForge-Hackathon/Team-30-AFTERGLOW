@@ -14,15 +14,15 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
 - [x] Fix `requirements-laptop.txt`, which was missing `pynmea2`, so the tests couldn't even import on a laptop.
 - [x] Set up the laptop venv. All 13 tests pass.
 - [ ] Push to the team GitHub repo. Teammates clone it, and the Pi clones it to `/home/pi/afterglow`.
-- [ ] Install Mosquitto on the laptop (`brew install mosquitto`). Run `fake_bus.py --speed 5` and watch it with `mosquitto_sub -v -t 'ag/#'`.
+- [x] Install Mosquitto on the laptop (`brew install mosquitto`). Run `fake_bus.py --speed 5` and watch it with `mosquitto_sub -v -t 'ag/#'`. It runs as a `brew services` service, localhost only.
 - [ ] Settle these contract gaps at kickoff. Edit `contracts.py` and `CONTRACTS.md` together.
   - [ ] **`ag/target` has no `state` or `last_s`, but `alert.encode` reads both.** As specified, every LoRa alert would decode as "heard" with last-heard 0 s. Proposal: geofence copies `state` and `last_s` from the track into the target.
   - [ ] **Alert bytes 11 (SOS) and 14 (pod battery) have no source.** Neither field is on `ag/target`, and `ag/sys` has no battery field. Decide how `lora_out.py` joins in `ag/sos` and the battery level.
   - [ ] **No transport for locate's probability grid, 95% circle or coverage overlay.** Proposal: a new low-rate `ag/coverage` topic with a coarse grid, or an HTTP endpoint.
   - [ ] **No HTTP endpoints for thermal frames and camera snapshots.** Decide who serves them and on which port.
 - [ ] Decide the dashboard stack; nothing for it is in the requirements yet. Suggestion: a small Python web server on the Pi that bridges MQTT to a websocket, with the map drawn in local metres (SVG or canvas) from the GeoJSON. That avoids online map tiles, since the travel router may have no internet.
-- [ ] Create `code/data/trails.geojson` and `code/data/zones.geojson` for the taped indoor park. `afterglow.toml` already points at them, but neither file exists. Decide on units: lon/lat (the GeoJSON standard, converted with `geo.to_xy` on load) or local metres.
-- [ ] Set `origin_lat` and `origin_lon` in `afterglow.toml`; indoors, that's the point taped waypoint 0 maps to. Keep the file identical on the pod and the laptop.
+- [x] Create `code/data/trails.geojson` and `code/data/zones.geojson` for the taped indoor park. Units: lon/lat (the GeoJSON standard, converted with `geo.to_xy` on load). `tools/make_indoor_map.py` generates them from the origin and waypoints; rerun it after changing either.
+- [x] Set `origin_lat` and `origin_lon` in `afterglow.toml`; indoors, that's the point taped waypoint 0 maps to. Keep the file identical on the pod and the laptop. It's set to Acadia for now; switch it to the venue if the ATAK markers should appear there.
 - [ ] Set the private Meshtastic channel name and key on every board by hour 1. **Keep the key out of the repo.**
 - [ ] Record the FPV details: model, props, battery, flight-controller firmware and control link (ELRS 2.4 GHz or 900 MHz). The control link decides which radio coexistence test matters.
 

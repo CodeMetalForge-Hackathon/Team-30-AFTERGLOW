@@ -6,8 +6,11 @@
 # Leave both at 0.0 to use the GPS's first good fix (position.py prints it; copy it
 # here and onto the laptop). For the indoor demo, set it to the coordinates you map
 # taped waypoint 0 to.
-origin_lat = 0.0
-origin_lon = 0.0
+# Indoor demo: Acadia, the same point the CONTRACTS.md examples use. To put the ATAK
+# markers at the venue instead, change these two values and rerun
+# tools/make_indoor_map.py, because the map files are in lon/lat around this point.
+origin_lat = 44.3386
+origin_lon = -68.2733
 # Salt for hashing device addresses. Empty = a new random salt each run.
 salt = ""
 

@@ -5,4 +5,5 @@ pynmea2>=1.19
 meshtastic>=2.3
 pytak
 numpy
+matplotlib
 pytest

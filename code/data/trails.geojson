@@ -1,0 +1,33 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "trail_1",
+        "name": "Taped trail"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -68.2733,
+            44.3386
+          ],
+          [
+            -68.2732623,
+            44.3386
+          ],
+          [
+            -68.2732246,
+            44.3386
+          ],
+          [
+            -68.273187,
+            44.3386
+          ]
+        ]
+      }
+    }
+  ]
+}
