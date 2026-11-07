@@ -35,6 +35,7 @@ code/
     parkmap.py          trails, roads and zones in metres: dist_to_trail, zone_at, bounds (geofence, dashboard, fake bus)
     bridge.py           ESP32 serial -> ag/obs/ble, ag/obs/wifi, ag/sos (hashes addresses)
     position.py         GPS NMEA or taped waypoints -> ag/pose (no GPS receiver yet: waypoints only)
+    tracker.py          ag/obs/* + ag/pose -> ag/track (grid fit of the [track] RSSI model) and ag/pass
     radio.py            opens the pod's RFM95W on SPI1 from the config's [lora] table (lora_out, check_hw)
     lora_rx.py          laptop: XIAO #3's USB lines -> ag/alert (drops other teams' packets)
     dashboard.py        web server on [http] port: SSE state stream, /api/ctrl and /api/mode, live/ and snaps/
@@ -75,6 +76,7 @@ mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log                      # recor
 .venv/bin/python tools/replay.py runs/1432.log [--loop] [--topics 'ag/obs/#,ag/pose']   # replay it
 .venv/bin/python -m afterglow.bridge --dry-run < lines.txt               # no hardware, no broker
 .venv/bin/python -m afterglow.position --dry-run < nmea.txt
+.venv/bin/python tools/fake_bus.py --print --only pose,ble --duration 600 | .venv/bin/python -m afterglow.tracker --dry-run   # tracker on fake data, no broker
 .venv/bin/python -m afterglow.lora_rx --dry-run < rx_lines.txt           # laptop radio lines, no hardware
 .venv/bin/python -m afterglow.lora_rx --print                            # laptop: real XIAO #3, print, no broker
 .venv/bin/python tools/check_hw.py [--only lora omni]                    # on the Pi only
@@ -87,7 +89,7 @@ Anything past `--print` or `--dry-run` needs Mosquitto on the laptop (`brew inst
 - Modules are separate processes that talk only over MQTT: Mosquitto on the Pi at `localhost:1883`. Each message is one JSON object, and every topic starts with `ag/`. Only `ag/coverage` and `ag/mode` are retained (`contracts.RETAINED`). Only the 16-byte alert leaves the pod.
 - `t` is Unix time in milliseconds, stamped on the Pi by `contracts.now_ms()`. The ESP32s keep no clock.
 - Positions are in local metres: `x` is east and `y` is north of the mission origin set in `afterglow.toml`. Only `position.py` (inbound) and `cot_out.py` (outbound) convert lat/lon, both through `geo.py`.
-- Data flow: bridge → `ag/obs/*`; position → `ag/pose`; tracker → `ag/track`; locate → `ag/pass`, `ag/coverage`; geofence (also reads `ag/sos`) → `ag/target`; lora_out → pod RFM95W (SPI1) → 915 MHz → XIAO #3 + RFM95W → lora_rx → `ag/alert` (laptop broker) → cot_out → ATAK. The dashboard writes `ag/ctrl` and `ag/mode`.
+- Data flow: bridge → `ag/obs/*`; position → `ag/pose`; tracker → `ag/track`, `ag/pass`; locate → `ag/coverage`; geofence (also reads `ag/sos`) → `ag/target`; lora_out → pod RFM95W (SPI1) → 915 MHz → XIAO #3 + RFM95W → lora_rx → `ag/alert` (laptop broker) → cot_out → ATAK. The dashboard writes `ag/ctrl` and `ag/mode`.
 - `ag/target` is the one record per pin that the dashboard, the LoRa alert and ATAK all consume. `geofence.py` owns it.
 
 ## Conventions

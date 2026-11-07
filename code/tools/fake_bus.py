@@ -21,7 +21,7 @@ The stand-in tracker CHEATS: it knows where each phone really is and adds an err
 shrinks with every strong pass (r95 = 2.5 x localized_r95_m / passes^1.5). It only makes
 the dashboard look right; accuracy numbers (I6, I8) must come from the real modules.
 Fake pins stay at status "new": only the ranger changes a pin.
-Each phone's id rotates every 15 minutes, like Find My. `t` runs on simulated time, so
+Each phone's id rotates every 15 minutes, like Find My, each at its own moment. `t` runs on simulated time, so
 with --speed 5 it runs 5x faster than the wall clock.
 """
 import argparse
@@ -63,6 +63,11 @@ class Phone:
     @property
     def with_drone(self):
         return self.x is None
+
+    @property
+    def phase(self):
+        """Each phone rotates its key at its own moment, as real ones do, not all at once."""
+        return int(hashlib.sha256(self.name.encode()).hexdigest()[:8], 16) % ROTATE_MS
 
 
 def walk(verts, step):
@@ -150,7 +155,7 @@ class FakePod:
                 rssi = round(self.model_rssi(d) + self.rng.gauss(0, self.sim["rssi_sigma"]))
                 if rssi < self.sim["rssi_floor"]:
                     continue
-                pid = hashlib.sha256(f"{ph.name}-{t // ROTATE_MS}".encode()).hexdigest()[:8]
+                pid = hashlib.sha256(f"{ph.name}-{(t + ph.phase) // ROTATE_MS}".encode()).hexdigest()[:8]
                 self.heard(ph, pid, t, x, y, rssi, pass_no)
                 if "ble" in self.only:
                     yield OBS_BLE, {"t": t, "src": "omni", "id": pid, "cls": ph.cls, "rssi": rssi}, False
@@ -207,7 +212,8 @@ class FakePod:
             if "track" in self.only:
                 yield TRACK, {"t": t, "track": ph.track, "ids": ph.ids[-4:], "cls": ph.cls,
                               "x": round(ex, 1), "y": round(ey, 1), "r95": round(r95, 1), "state": st,
-                              "passes": len(ph.best), "last_s": last_s, "with_drone": ph.with_drone}, False
+                              "passes": len(ph.best), "last_s": last_s, "with_drone": ph.with_drone,
+                              "baseline": False, "c": 0.0 if ph.with_drone else c}, False
             if ph.with_drone or ph.cls not in ALWAYS_REPORTED or k == 0:
                 continue
             if ph.pin is None:

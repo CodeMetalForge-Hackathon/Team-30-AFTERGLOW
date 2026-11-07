@@ -17,8 +17,8 @@ Hour 0 is Saturday 10:00. Hard cutoff is Sunday 12:00.
 | wifi_listener (firmware) | WIFI board | Wi-Fi radio | serial `wifi` lines | 1 | Utility | plan doc + `firmware/README.md` |
 | `bridge.py` | Pi | ttyAMA0, ttyAMA3, `ag/ctrl` | `ag/obs/ble`, `ag/obs/wifi`, `ag/sos` | 1 | Utility | ✅ |
 | `position.py` | Pi | ttyAMA2 NMEA, `ag/ctrl` waypoint | `ag/pose` | 1 | Utility | ✅ (IMU roll/pitch still to add) |
-| `tracker.py` | Pi | `ag/obs/*`, `ag/pose`, `ag/ctrl` | `ag/track` | 1 | Software | |
-| locate (`bearing.py` + map) | Pi | `ag/obs/ble`, `ag/pose` | `ag/pass`, `ag/coverage` (retained) | 1 | Software | |
+| `tracker.py` | Pi | `ag/obs/*`, `ag/pose`, `ag/ctrl` | `ag/track`, `ag/pass` | 1 | Software | ✅ done; see CONTRACTS.md, "Tracks" |
+| locate (map) | Pi | `ag/track`, `ag/pass`, `ag/pose` | `ag/coverage` (retained) | 1 | Software | the tracker now posts `ag/pass` |
 | `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl`, `ag/sos`, `ag/pose` | `ag/target` | 1 | Software | ✅ geometry in `afterglow/parkmap.py`. Confirm only from `investigating` (CONTRACTS.md, "Pin states") |
 | `dashboard.py` | Pi, viewed on the laptop | everything; serves the images on port 8080 | `ag/ctrl`, `ag/mode` (retained) | 1 | Software | ✅ skeleton (I3); see TODO for what's left |
 | `lora_out.py` | Pi | `ag/target`, `ag/sys`, `ag/ctrl` | 16-byte alerts on the RFM95W (SPI1) | 1 | Utility | ✅ `afterglow/alert.py`, `afterglow/radio.py` |
@@ -65,7 +65,7 @@ python3 tools/fake_bus.py --config park.toml --speed 10  # park profile: lanes a
 python3 tools/fake_bus.py --only pose,ble                # once tracker, locate and geofence are real
 python3 -m afterglow.dashboard                           # http://localhost:8080 (same --config as the fake bus)
 mosquitto_sub -v -t 'ag/#'                               # watch everything
-python3 -m pytest -q                                     # contracts, alert packing, NMEA, hashing, map, fake bus, dashboard, replay
+python3 -m pytest -q                                     # contracts, alert packing, NMEA, hashing, map, fake bus, dashboard, replay, tracker
 ```
 
 `fake_bus.py` reads the profile's `[sim]` table, which sets the path, the hidden phones and the RSSI model. It publishes:
@@ -80,7 +80,7 @@ Hidden phones (positions are in each profile's `[sim] phones`):
 - a switched-off Pixel (`findhub`) near a trail: a `search` pin only;
 - a team phone that rides on the pod, which `tracker.py`'s "moves with the drone" filter should drop.
 
-Each changes its hashed ID every 15 minutes, like Find My.
+Each changes its hashed ID every 15 minutes, like Find My, each at its own moment.
 
 ## Habits that save the demo
 

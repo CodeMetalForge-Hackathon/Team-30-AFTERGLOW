@@ -54,6 +54,15 @@ publish_hz = 5
 # Outdoor placeholders from docs/CONTRACTS.md until ME 2's range test.
 localized_r95_m = 25.0
 pinned_r95_m = 10.0
+pass_gap_s = 10
+rotate_window_s = 60
+rotate_match_m = 80.0
+with_drone_rssi = -55
+with_drone_move_m = 30.0
+rssi_p0 = -48.0
+rssi_p0_sd = 6.0
+rssi_n = 2.4
+rssi_sigma = 4.0
 
 [rules]
 offtrail_m = 30

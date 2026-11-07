@@ -198,7 +198,8 @@ export class MapView {
           }).bindTooltip('', { direction: 'top', className: 'm-tip' }).addTo(this.layers.tracks);
         }
         m.setLatLng(ll(t.x, t.y));
-        m.setTooltipContent(`${t.track} · ${t.cls} · ${t.state} ±${fmt(t.r95)} m`);
+        m.setStyle({ opacity: t.baseline ? 0.35 : 1 });  // heard during the baseline: background
+        m.setTooltipContent(`${t.track} · ${t.cls} · ${t.state} ±${fmt(t.r95)} m${t.baseline ? ' · baseline' : ''}`);
       }
     }
     for (const id of Object.keys(this.trackLayers)) {

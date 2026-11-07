@@ -47,8 +47,9 @@ REQUIRED = {
     OBS_WIFI: {"t", "id", "rand", "rssi", "ch"},
     SOS: {"t", "hurt", "walk", "count"},
     POSE: {"t", "x", "y", "z", "src"},
-    PASS: {"t", "track", "peak_x", "peak_y", "sharp"},
+    PASS: {"t", "track", "peak_x", "peak_y", "sharp"},  # tracker.py; optional n (sightings)
     COVERAGE: {"t", "x0", "y0", "cell_m", "nx", "ny", "covered", "p", "pct"},
+    # optional: ids, passes, with_drone, baseline (heard during the baseline: never pinned), c (0-1)
     TRACK: {"t", "track", "cls", "x", "y", "r95", "state", "last_s"},
     TARGET: {"t", "pin", "track", "x", "y", "r95", "c", "prio", "cls", "status", "state", "last_s"},
     THERMAL: {"t", "max_c", "hot"},
@@ -80,6 +81,8 @@ def validate(topic: str, msg: dict) -> list[str]:
         problems.append(f"bad cls {msg.get('cls')!r}")
     if topic == TRACK and msg.get("state") not in TRACK_STATES:
         problems.append(f"bad track state {msg.get('state')!r}")
+    if topic == TRACK and "c" in msg and not (isinstance(msg["c"], (int, float)) and 0 <= msg["c"] <= 1):
+        problems.append(f"track c must be 0-1, not {msg['c']!r}")
     if topic == TARGET and msg.get("state") not in STATES:
         problems.append(f"bad state {msg.get('state')!r}")
     if topic == TARGET and "rule" in msg and msg["rule"] not in RULES:

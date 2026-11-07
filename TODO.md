@@ -82,27 +82,32 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
 
 The modules are listed roughly in data-flow order, and each one feeds the next. Write tests that check every message with `validate()`.
 
-- [ ] **`tracker.py` (SW)** reads `ag/obs/*` and `ag/pose` and writes `ag/track`:
-  - merges sightings across passes;
-  - follows the 15-minute Find My key rotation by place and time (the `ids` list);
-  - sets the `with_drone` filter for beacons that stay loud wherever the drone goes (`fake_bus.py`'s team phone);
-  - turns beacons seen between `baseline_start` and `baseline_stop` grey, and clears on `new_search`;
-  - assigns the state (heard, localized or pinned, with radii from config) and the confidence `c`.
-- [ ] **locate: `bearing.py` + map (SW)**:
-  - finds each pass's RSSI peak and publishes `ag/pass` (`sharp` = dB above the pass median);
-  - keeps the probability grid;
-  - computes the 95% radius (`r95`) and the coverage overlay;
+- [x] **`tracker.py` (SW)** reads `ag/obs/*` and `ag/pose` and writes `ag/track` and `ag/pass` (CONTRACTS.md, "Tracks"):
+  - a grid fit of the `[track]` RSSI model gives `x`, `y` and an honest `r95`; state follows `r95`;
+  - follows key rotation by time and signal strength, and refuses an unclear match (a duplicate track beats merging two beacons);
+  - `with_drone` for beacons that stay loud while the pod moves; `baseline` for beacons heard during the baseline; `new_search` clears;
+  - confidence `c`; each finished pass on `ag/pass`;
+  - on the fake bus (20 seeds, 33 min indoors): exactly one track per phone through every rotation, worst error 1.5 m. Live through Mosquitto too.
+  - **Contract change, tell the team:** `ag/track` gains optional `baseline` and `c`; `ag/pass` now comes from the tracker, with optional `n`; geofence must never pin `with_drone` or `baseline` tracks. New `[track]` keys (pass gap, rotation, `with_drone`, RSSI model) in both profiles.
+  - Fixed in `bus.py`: a module that subscribed while connecting could lose paho's thread and go deaf.
+  - Known limit, park sim only: a key that rotates while the pod is away starts a new track, so a phone can split. Fix later by merging tracks whose estimates agree (needs a contract change for the merged-away track).
+  - Set the `[track]` RSSI model (`rssi_p0`, `rssi_n`, `rssi_sigma`) from ME 2's range test.
+  - [ ] Set `with_drone_rssi` (both profiles) from the range test: measure our phone strapped to the pod and a phone at carry height (3 m), and pick a value between them. At -55, a phone much louder than the model, right under the path, gets marked `with_drone` (grey, never pinned) while the pod is near it. Then let `fake_bus.py`'s team phone read as loud as 0.5 m (it stops at 1 m now), or its with_drone test breaks. Until then, the baseline covers it (Phase 4).
+- [ ] **locate: map (SW)**, now just the grids, since the tracker posts `ag/pass` and `r95`:
+  - keeps the probability grid (from `ag/track`: `x`, `y`, `r95`, `c`; skip `with_drone` and `baseline`);
+  - the coverage overlay from `ag/pose`;
   - publishes `ag/coverage` about once a second, **retained**.
 - [ ] **`geofence.py` (SW)** writes `ag/target`:
   - applies the `day_offtrail`, `night_outside_camp` and `search` rules according to `ag/mode` (retained, so it's there at start-up; patrol until the first click);
   - sets priority 1–4 and assigns pin IDs (`P1`, `P2`, …);
   - updates the pin status on `ack`, `investigate`, `clear` and `confirm`, using only the allowed changes in CONTRACTS.md. **Confirm only while the pin is investigating:** the dashboard greys the button, but its server doesn't check, so geofence is the guard. Test it;
-  - copies `state` and `last_s` from the track, and sets `state` to `confirmed` only on Confirm;
+  - never pins a `with_drone` or `baseline` track;
+  - copies `state`, `last_s` and `c` from the track, and sets `state` to `confirmed` only on Confirm;
   - attaches `ag/sos` answers to the investigating pin, or opens an SOS-only `T0` pin at the pod.
 - [ ] **`dashboard.py` (SW)**. Most of this landed with the Phase 1 skeleton:
   - [x] pins with Acknowledge, Investigate, Clear and Confirm buttons. Confirm needs two clicks and only works while the pin is being investigated. Each button shows "waiting for geofence" until the status changes, and warns if it never does;
   - [x] a mode switch for patrol, night, investigate and search;
-  - [ ] Baseline and New search buttons;
+  - [ ] Baseline and New search buttons. New search should also drop old tracks and pins from the dashboard's state (`dashboard.py` and `store.js`), since the tracker forgets them. Baseline tracks already show grey;
   - [x] waypoint taps for the indoor park, on the map and as a 0–7 strip in the Pod panel;
   - [x] the coverage and probability overlays, and pod health from `ag/sys`;
   - [ ] the thermal and camera panel (it reloads the `live/` images about once a second);
@@ -161,7 +166,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 
 - [ ] Load the best run's replay and test it, as the backup if the hardware fails.
 - [ ] Demo setup:
-  - a 10-minute baseline at the demo spot;
+  - a 10-minute baseline at the demo spot, with any team trackers on the pod, so they show grey instead of relying on `with_drone`;
   - a team iPhone switched off at least 20 minutes early and hidden;
   - the travel router on, with the pod and the laptop on it, never the venue Wi-Fi: the dashboard has no login, so anyone on the same network could click;
   - everything charged.

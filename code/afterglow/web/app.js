@@ -374,10 +374,11 @@ function ObsPanel({ s, st, big }) {
           <table>
             <thead><tr><th>Track</th><th>Type</th><th>State</th><th class="r">±</th><th class="r">Passes</th><th class="r">Last</th><th></th></tr></thead>
             <tbody>${tracks.map((t) => html`
-              <tr key=${t.track} class=${t.with_drone ? 'dim' : ''}>
+              <tr key=${t.track} class=${t.with_drone || t.baseline ? 'dim' : ''}>
                 <td class="mono">${t.track}</td><td>${CLS[t.cls] || t.cls}</td><td>${t.state}</td>
                 <td class="r mono">${fmtM(t.r95, big)}</td><td class="r mono">${t.passes ?? '—'}</td><td class="r">${t.last_s} s</td>
-                <td>${t.with_drone ? html`<i class="flag">ON POD</i>` : pinOf[t.track] ? html`<i class="flag f-pin">${pinOf[t.track]}</i>` : ''}</td>
+                <td>${t.with_drone ? html`<i class="flag">ON POD</i>` : t.baseline ? html`<i class="flag">BASELINE</i>`
+                  : pinOf[t.track] ? html`<i class="flag f-pin">${pinOf[t.track]}</i>` : ''}</td>
               </tr>`)}</tbody>
           </table>
           ${tracks.length === 0 && html`<div class="empty">No tracks yet (ag/track from tracker.py).</div>`}`}

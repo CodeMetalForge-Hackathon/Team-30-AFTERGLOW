@@ -35,9 +35,9 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 | `ag/obs/wifi` | bridge.py | `{"t":…,"id":"c01d22aa","rand":true,"rssi":-80,"ch":6}` | One Wi-Fi probe request heard |
 | `ag/sos` | bridge.py | `{"t":…,"hurt":true,"walk":false,"count":2,"rssi":-55}` | An answer from the SOS page (tier 2). geofence.py attaches it to a pin; see "SOS answers" below |
 | `ag/pose` (**changed**) | position.py | `{"t":…,"x":412.3,"y":-88.0,"z":12.0,"lat":44.3386,"lon":-68.2733,"alt_m":61.2,"course":87.5,"speed_mps":4.1,"fix":1,"sats":14,"src":"gps"}` | Where the pod is. `z` is height above take-off in metres. `src` is `gps` or `waypoint` (the real pod), `replay` (`tools/replay.py`) or `sim` (`tools/fake_bus.py`, `sim.py`); the dashboard shows a REPLAY or SIMULATED badge for the last two. Optional `roll` and `pitch` (degrees) from the IMU |
-| `ag/pass` | locate | `{"t":…,"track":"T1","peak_x":4.2,"peak_y":7.9,"sharp":6.0}` | Where one pass heard a track loudest; `sharp` is dB above the pass median |
+| `ag/pass` (**changed**) | tracker.py | `{"t":…,"track":"T1","peak_x":4.2,"peak_y":7.9,"sharp":6.0,"n":14}` | One finished pass: where the pod heard a track loudest; `sharp` is dB above the pass median, optional `n` the sightings in it. Posted by tracker.py, not locate, because the tracker already splits sightings into passes. None for `with_drone` tracks |
 | `ag/coverage` (**new**) | locate | `{"t":…,"x0":-50,"y0":-50,"cell_m":5,"nx":60,"ny":40,"covered":[0,1,1,…],"p":[0,12,255,…],"pct":0.62}` | Coverage and probability grids for the dashboard, about 1 Hz, **retained** so a reloaded dashboard gets it at once. See "Coverage grid" below. Stays on the pod, never goes over LoRa |
-| `ag/track` | tracker.py | `{"t":…,"track":"T1","ids":["7f3a9c21","e9910b4c"],"cls":"findmy","x":18.5,"y":9.0,"r95":12.0,"state":"localized","passes":2,"last_s":4,"with_drone":false}` | Best estimate for one beacon. `ids` lists the rotating keys followed through 15-minute changes. `with_drone` marks beacons that move with the drone, such as our own phones |
+| `ag/track` (**changed**) | tracker.py | `{"t":…,"track":"T1","ids":["7f3a9c21","e9910b4c"],"cls":"findmy","x":18.5,"y":9.0,"r95":12.0,"state":"localized","passes":2,"last_s":4,"with_drone":false,"baseline":false,"c":0.62}` | Best estimate for one beacon, about once a second. `ids` lists the rotating keys followed through key changes (the last 4). `with_drone` marks beacons that move with the drone, such as our own phones. Optional `baseline` (**new**): heard during the baseline, so grey and never pinned. Optional `c` (**new**): confidence 0–1, which geofence copies onto the pin. See "Tracks" below |
 | `ag/target` (**changed**) | geofence.py | `{"t":…,"pin":"P3","track":"T1","x":18.5,"y":9.0,"lat":44.3387,"lon":-68.2731,"r95":12.0,"c":0.82,"prio":2,"cls":"findmy","state":"localized","last_s":4,"off_trail_m":46,"zone":"trail_corridor","rule":"day_offtrail","status":"new","flags":{"sos":false,"thermal":true,"radar":false,"camera":true},"br":null}` | **The one record** the dashboard, LoRa alerts and ATAK use. One per pin. `state` and `last_s` come from the track (see "How geofence fills a pin"). Optional `sos` (`{"hurt":true,"walk":false,"count":2}`) once an SOS answer is attached |
 | `ag/thermal` | thermal.py | `{"t":…,"max_c":33.8,"hot":true,"col":17,"row":9,"conf":0.7}` | Warmest spot in the 32×24 frame. Frames for the panel are image files over HTTP, not MQTT (see "Images over HTTP") |
 | `ag/vision` (**new**) | person.py | `{"t":…,"kind":"person","conf":0.82,"box":[1820,940,96,140],"snap":"snaps/1731000000123.jpg","track":"T1"}` | Camera check. `kind` is `person` or `colour` (the Monviso-style colour check). `snap` is also its URL path on port 8080 |
@@ -63,8 +63,8 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 
 | `cmd` | Extra fields | Who acts on it |
 |---|---|---|
-| `new_search` | none | bridge.py (new salt), tracker.py (clear) |
-| `baseline_start`, `baseline_stop` | none | tracker.py: beacons seen during the baseline show grey |
+| `new_search` | none | bridge.py (new salt), tracker.py (clears every track; track numbers keep counting) |
+| `baseline_start`, `baseline_stop` | none | tracker.py: beacons heard between them get `baseline: true` on `ag/track` and show grey. Send `new_search` first: it changes every id |
 | `ack`, `investigate`, `clear`, `confirm` | `pin` | geofence.py updates the pin `status`, but only by the allowed changes under "Pin states and priority"; planner.py starts homing on `investigate` |
 | `accept_leg`, `reject_leg` | `id` | planner.py |
 | `waypoint` | `n` (taped waypoint number) | position.py, indoors |
@@ -96,9 +96,23 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
   - 3, yellow: localized, or 0.5 ≤ c < 0.8.
   - 4, grey: heard only.
 
+### Tracks
+
+How tracker.py fills `ag/track`. Its numbers live in the config's `[track]` table and are placeholders until ME 2's range test.
+
+- **Which beacons:** `findmy`, `findhub`, `samsung_off`, `ref`, and Wi-Fi with a fixed address (`cls` `wifi`). Live devices (`apple_other`, `other`) and randomized Wi-Fi addresses are never tracked. An id needs 3 sightings to become a track; one heard fewer times is forgotten after 30 minutes without a sighting.
+- **Position:** each sighting is tagged with the latest `ag/pose`. `x`, `y` and `r95` come from a grid fit of the RSSI model (`rssi_p0`, `rssi_n`, `rssi_sigma`); `r95` is the radius around `x`, `y` that holds 95% of the probability.
+- **`state`:** `pinned` if `r95` ≤ `pinned_r95_m`, `localized` if `r95` ≤ `localized_r95_m`, else `heard`. Never `confirmed`.
+- **Passes:** a pass ends when the signal has peaked, fallen and risen again, or after `pass_gap_s` without a sighting. Each finished pass goes out on `ag/pass`.
+- **Key rotation:** a new id joins an old track of the same `cls` whose id went quiet just before it (within `rotate_window_s`, heard from within `rotate_match_m`) at a matching strength, but only if the match is clear. If the key rotates while the pod is away, the new id gets a new track.
+- **`with_drone`:** set once a beacon, heard without a break, is at `with_drone_rssi` or louder at both ends of a stretch where the pod moved `with_drone_move_m`. Cleared once its median RSSI falls below `with_drone_rssi`, so a fixed beacon wrongly marked while the pod passed over it comes back. Its `x`, `y` is the pod, `state` `heard` and `c` 0. Set `with_drone_rssi` from the range test, well above what a beacon at carry height reads.
+- **`c`:** 0.2 to 0.95, mostly how tight `r95` is, then how many passes back it up.
+- **Track numbers** wrap after `T255`, because the LoRa alert has one byte for them. If all 255 are in use, the track quiet longest is dropped to make room. `T0` is the SOS-only pin.
+
 ### How geofence fills a pin
 
-- `state` and `last_s` are copied from the latest `ag/track` for that track.
+- Never pin a track with `with_drone` or `baseline` set.
+- `state`, `last_s` and `c` are copied from the latest `ag/track` for that track.
 - The one exception: `state` becomes `confirmed` only when the ranger presses Confirm (pin `status` `confirmed`). The tracker never sets it. That keeps the rule that the drone never decides.
 
 ### SOS answers

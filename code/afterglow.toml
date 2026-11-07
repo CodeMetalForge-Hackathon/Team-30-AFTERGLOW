@@ -67,6 +67,17 @@ publish_hz = 5
 # tracker.py sets a track's state from its r95. Placeholders until ME 2's range test.
 localized_r95_m = 5.0      # indoors 5 m (park.toml: 25 m)
 pinned_r95_m = 2.0         # indoors 2 m (park.toml: 10 m)
+pass_gap_s = 5             # this long without a sighting ends a pass (park.toml: 10)
+rotate_window_s = 60       # key rotation: a new id joins an old track whose id went quiet this recently...
+rotate_match_m = 10.0      # ...if the pod heard both within this distance (park.toml: 80)
+with_drone_rssi = -55      # a beacon whose median RSSI stays this loud...
+with_drone_move_m = 5.0    # ...while the pod moves this far rides on the pod (park.toml: 30)
+# RSSI model for the position estimate, rssi = p0 - 10 n log10(d) +- sigma, d in metres.
+# ME 2's range test sets these; until then they match [sim], so the tracker fits the fake bus.
+rssi_p0 = -48.0            # RSSI at 1 m
+rssi_p0_sd = 6.0           # how far one beacon's p0 may stray (an AirTag vs a phone)
+rssi_n = 2.4
+rssi_sigma = 4.0
 
 [rules]
 offtrail_m = 3             # indoor scale (park.toml: 30). Day patrol: pin a beacon farther than this from a trail...

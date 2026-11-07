@@ -18,7 +18,9 @@ class Bus:
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         log.info("connected to MQTT (%s)", reason_code)
-        for topic in self.handlers:  # re-subscribe after a reconnect
+        # Re-subscribe after a reconnect. A copy: the main thread may still be subscribing, and a
+        # dict that changes size mid-loop raised here and killed paho's thread (the module went deaf).
+        for topic in list(self.handlers):
             client.subscribe(topic)
 
     def _on_message(self, client, userdata, msg):
