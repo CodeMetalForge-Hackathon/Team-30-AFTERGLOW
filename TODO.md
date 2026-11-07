@@ -53,10 +53,13 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
   - Mac setup note: the venv needs Homebrew's Python 3.12 (macOS's own `python3` is 3.9 and lacks `tomllib`); brew's Mosquitto needed a `mosquitto.conf` created. `check_hw.py` now masks addresses in its sample line (it used to print them raw).
 - [ ] Put the radar's serial number in `pi/99-afterglow.rules` so `/dev/radar` exists.
 - [ ] **LoRa link (I4):**
-  - [ ] Solder the spring antennas to both RFM95Ws, and wire the pod radio to SPI1 and the other to XIAO #3 (`docs/HARDWARE.md`).
-  - [ ] Flash XIAO #3 with `firmware/lora_rx/lora_rx.ino` (Library Manager: **LoRa** by Sandeep Mistry).
-  - [ ] Laptop: `.venv/bin/python -m afterglow.lora_rx --print` logs "radio settings match the config".
-  - [ ] Pi: `check_hw.py --only lora` passes, and the heartbeat (`"kind":4`) shows up on the laptop.
+  - **Changed Sat 7 Nov:** we have only **one RFM95W**. The laptop receives with an **ADALM-PLUTO SDR** (USB to the Mac, antenna on RX) and gr-lora_sdr; XIAO #3 is now the spare. Docs updated (HARDWARE, CONTRACTS, MODULES, firmware/README). The `rx` line format is unchanged.
+  - [x] Wire the pod RFM95W to SPI1 with its spring antenna.
+  - [ ] Pi: `check_hw.py --only lora` passes ("sent a heartbeat"): proves the pod radio without any receiver.
+  - [ ] Mac: install GNU Radio + gr-lora_sdr (`conda install -c tapparelj -c conda-forge gnuradio-lora_sdr gnuradio-iio`); `iio_info -s` lists the Pluto.
+  - [ ] **SW:** write `tools/pluto_rx.py` (Pluto → gr-lora_sdr → `rx` lines on stdout, settings from `[lora]`) and a stdin mode for `lora_rx.py`, so `pluto_rx.py | lora_rx --stdin` publishes `ag/alert`.
+  - [ ] The pod's heartbeat (`"kind":4`) shows up in `ag/alert` on the Mac.
+  - Fallback if the SDR decode isn't working by I7: `cot_out --wifi <pi-ip>` gets the pins to ATAK over the hotspot; show the LoRa bursts on a Pluto waterfall.
 - [ ] ~~GPS NMEA by a window (I5).~~ **Blocked:** we have only the ANN-MB5 antenna, no receiver. Ask the hardware desk for any u-blox board with a UART; if one turns up, wire it to the reserved pins, set `gps = "/dev/ttyAMA2"` and run `check_hw.py --only gps`. Until then, position comes from waypoint taps.
 - [x] (Not needed: the user is `pi` and the clone is at `/home/pi/afterglow`.) If the Pi user isn't `pi` or the clone isn't at `/home/pi/afterglow`, fix `User=` and the paths in `pi/systemd/afterglow@.service`.
 
@@ -140,8 +143,8 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - sends one packet per loop, so a `lora_off` gets in between even at SF10; a missing radio is retried every 10 s, and each open first frees the SPI1 bus and pins the last one claimed;
   - tested with a stub radio, and the whole path with no hardware: `fake_bus --print | lora_out --dry-run | lora_rx --dry-run | cot_out --dry-run` (120 s: 104 packets, all decoded, 3 pins and the pod on ATAK).
   - **Contract change, tell the team (Utility):** new `[lora]` keys `repeat_s`, `alert_version` (1 indoors, 2 in `park.toml`) and `off_file`. lora_out owns the radio while it runs: stop it before `check_hw.py --only lora`, and health must not open the radio for `ag/sys` `lora`.
-  - [ ] **UT, on the Pi:** `python -m afterglow.lora_out` with XIAO #3 on the laptop: pins and the heartbeat reach `lora_rx.py --print`; `lora_off` silences it; then `sudo systemctl enable --now afterglow@lora_out`.
-- [x] **`lora_rx.py` (SW, laptop):** XIAO #3's lines → `ag/alert` on the laptop's broker. It drops other teams' packets and checks the radio settings at start-up. Tested on fake lines; I4 proves it on the radios.
+  - [ ] **UT, on the Pi:** `python -m afterglow.lora_out` with the Pluto receiver on the laptop: pins and the heartbeat reach `ag/alert`; `lora_off` silences it; then `sudo systemctl enable --now afterglow@lora_out`.
+- [x] **`lora_rx.py` (SW, laptop):** receiver lines (was XIAO #3, now the Pluto via `pluto_rx.py`) → `ag/alert` on the laptop's broker. It drops other teams' packets and checks the radio settings at start-up. Tested on fake lines; I4 proves it on the radios.
 - [x] **`cot_out.py` (SW, laptop)** reads `ag/alert` and sends CoT XML over UDP to `[atak] send_to` (default `239.2.3.1:6969`). It needs no pytak, which is now dropped from `requirements-laptop.txt`:
   - spot markers named by pin number as on the dashboard (`P3`), coloured by priority, with a remarks line and the 95% circle;
   - the pod is a friendly drone marker, placed from the heartbeat;

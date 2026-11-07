@@ -41,10 +41,10 @@ imu_addr = 0x4B            # SparkFun BNO086, ADR jumper open (0x4A only if ADR 
 thermal_addr = 0x33        # MLX90640, arriving later
 
 [lora]
-# Two bare RFM95W radios (SX1276): plain LoRa, a RadioHead-style 4-byte header, then the
-# 16-byte alert. Pod: Pi SPI1 (afterglow/radio.py). Laptop: XIAO #3 (firmware/lora_rx/).
-# Both radios must match: lora_rx.ino copies these numbers (tests/test_lora_rx.py checks),
-# and lora_rx.py asks the board for its settings at start-up.
+# Pod: one bare RFM95W (SX1276) on Pi SPI1 (afterglow/radio.py): plain LoRa, a RadioHead-style
+# 4-byte header, then the 16-byte alert. Laptop: ADALM-PLUTO SDR + gr-lora_sdr (tools/pluto_rx.py),
+# which reads these numbers from this file. (Old path, unused: XIAO #3 + lora_rx.ino, which copies them;
+# tests/test_lora_rx.py checks.)
 freq_mhz = 915.0
 sf = 7                     # 7 to start; 9-10 for more range at lower speed (ME 2's range test)
 bw_hz = 125000
@@ -55,7 +55,7 @@ pod_node = 0xA1            # header "from" of every pod packet
 laptop_node = 0xA2         # header "to"; lora_rx.py drops anything else (no private channel)
 cs_gpio = 18               # pod radio CS, Pi pin 12, driven by the library (config.txt moves the kernel's CS to GPIO16)
 reset_gpio = 25            # pod radio RST, Pi pin 22
-rx_port = ""               # laptop: XIAO #3's port; "" = the only /dev/cu.usbmodem* or /dev/ttyACM*
+rx_port = ""               # laptop, old XIAO #3 path only: its port; "" = the only /dev/cu.usbmodem* or /dev/ttyACM*
 rx_baud = 115200
 # lora_out.py (pod). No acks: every live pin and the heartbeat repeat this often, so a lost packet is covered.
 repeat_s = 5

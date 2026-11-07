@@ -11,7 +11,7 @@ USB-C power bank 5 V 3 A ──USB-C──► Raspberry Pi 5 16 GB + Active Cool
                                     │
    OMNI  XIAO ESP32S3 #1 ── UART0  /dev/ttyAMA0  921600 ──┤  BLE beacons (passive)
    WIFI  XIAO ESP32S3 #2 ── UART3  /dev/ttyAMA3  921600 ──┤  Wi-Fi probes, SOS page
-   LoRa  RFM95W (SX1276) ── SPI1   /dev/spidev1.0 ────────┤──► 915 MHz ──► RFM95W + XIAO #3 ── USB ── laptop ──► ATAK phone
+   LoRa  RFM95W (SX1276) ── SPI1   /dev/spidev1.0 ────────┤──► 915 MHz ──► ADALM-PLUTO SDR ── USB ── laptop ──► ATAK phone
    IMU   BNO086          ── I²C-1  0x4B, INT + RST ───────┤
    Thermal MLX90640      ── I²C-1  0x33 (arriving later, Qwiic from the IMU)
    Camera Module 3       ── CSI ribbon
@@ -20,7 +20,7 @@ USB-C power bank 5 V 3 A ──USB-C──► Raspberry Pi 5 16 GB + Active Cool
    GPS   none yet: only a u-blox ANN-MB5 antenna. UART2 (/dev/ttyAMA2) is reserved for a receiver
 ```
 
-We have three XIAO ESP32S3 boards: OMNI, WIFI and the laptop radio. **There's no spare.**
+We have three XIAO ESP32S3 boards: OMNI, WIFI and XIAO #3. There's only **one RFM95W** (the pod's), so the laptop receives LoRa with an **ADALM-PLUTO** SDR instead, and XIAO #3 is now the spare.
 
 ## Device table
 
@@ -29,7 +29,7 @@ We have three XIAO ESP32S3 boards: OMNI, WIFI and the laptop radio. **There's no
 | OMNI board (XIAO #1, BLE scanner) | Pins 8 TX, 10 RX, 2 5V, 9 GND | `/dev/ttyAMA0` | 921600 8N1 | pyserial | `tools/check_hw.py --only omni` |
 | WIFI board (XIAO #2, probes + SOS page) | Pins 24 TX, 21 RX, 2 5V, 14 GND | `/dev/ttyAMA3` | 921600 8N1 | pyserial | `--only wifi` |
 | Pod LoRa radio (Adafruit RFM95W) | SPI1: pins 12, 35, 38, 40; RST 22; G0 18; 3.3 V 17; GND 39 | `/dev/spidev1.0` | `[lora]` in the config | adafruit-circuitpython-rfm9x via Blinka; `afterglow/radio.py` | `--only lora` (sends one heartbeat) |
-| Laptop LoRa radio (RFM95W + XIAO #3) | USB to the laptop | `/dev/cu.usbmodem*` (macOS) | `firmware/lora_rx/`, 115200 | pyserial; `afterglow/lora_rx.py` | `lora_rx.py --print` logs "radio settings match" |
+| Laptop LoRa receiver (ADALM-PLUTO SDR + RX antenna) | Its **USB** micro-USB port (not PWR) to the laptop; antenna on the **RX** SMA | libiio `usb:` (or `ip:192.168.2.1`) | `[lora]` in the config; 915 MHz is inside the stock 325–3800 MHz range | GNU Radio + gr-lora_sdr (conda); `tools/pluto_rx.py` → `lora_rx.py` | `iio_info -s` lists the Pluto; then the pod's heartbeat shows in `ag/alert` |
 | IMU: SparkFun BNO086 (SEN-22857) | Pins 1, 3, 5, 6; INT pin 15 (GPIO22); RST pin 16 (GPIO23) | I²C bus 1, `0x4B` | 400 kHz | adafruit-circuitpython-bno08x | `--only i2c` |
 | Thermal MLX90640 (later) | Qwiic from the IMU | I²C bus 1, `0x33` | 32×24, a few fps at 400 kHz | adafruit-circuitpython-mlx90640 | `--only i2c` |
 | Camera Module 3 (imx708) | CSI ribbon, 22-to-15-pin | libcamera camera 0 | 4608×2592 full frame | picamera2 (apt) | `rpicam-hello --list-cameras` |
@@ -72,9 +72,7 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
 | | D10 (GPIO9), `Serial1` TX | Pi UART RX (pin 10 OMNI, 21 WIFI) |
 | | 5V, GND | Pi pin 2; GND pin 9 (OMNI) or 14 (WIFI) |
 | | D6, D7 | unused |
-| XIAO #3 (laptop radio) | D8 SCK, D9 MISO, D10 MOSI | RFM95W SCK, MISO, MOSI |
-| | D0, D1, D3 | RFM95W CS, RST, G0 |
-| | 5V, GND | RFM95W VIN, GND |
+| XIAO #3 | — | **Spare, not wired.** It was the laptop radio's host; the Pluto replaced that. `firmware/lora_rx/` still works if a second RFM95W turns up |
 
 ## Pi setup (once)
 
@@ -105,10 +103,12 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
   - The pod radio is on SPI1. adafruit_rfm9x drives CS on GPIO18 itself, so `config.txt` moves the kernel's CS to the free GPIO16 (`dtoverlay=spi1-1cs,cs0_pin=16`). Without that you get "GPIO busy".
 - **GPIO from Python:** use gpiozero, lgpio or Blinka. `RPi.GPIO` doesn't work on a Pi 5.
 - **LoRa:**
-  - Both RFM95Ws need the 915 MHz spring antenna soldered to ANT **before they power up**. Never transmit without it.
-  - The laptop radio only listens; only the pod transmits.
+  - The pod's RFM95W needs the 915 MHz spring antenna soldered to ANT **before it powers up**. Never transmit without it.
+  - The laptop side is an ADALM-PLUTO SDR on USB, receive only (antenna on RX; never transmit from it). It doesn't decode LoRa itself: GNU Radio's gr-lora_sdr does that on the laptop (`tools/pluto_rx.py`).
+  - Pluto on macOS: plug into the port marked **USB**, not PWR. Use the libiio URI `usb:`; the `ip:192.168.2.1` network link may not come up on macOS (older Pluto firmware uses RNDIS).
+  - Keep the Pluto at least 1 m from the pod: a 13 dBm transmitter next to it can overload the receiver.
   - It's plain LoRa with no encryption, so anyone on 915 MHz can read an alert. Alerts carry a pin, never a device address or ID. `lora_rx.py` drops other teams' packets by node address.
-  - If nothing arrives, check that the `cfg` line `lora_rx.py` logs matches `[lora]`. Then check that lora_out isn't silenced: a remembered `lora_off` leaves `runs/lora_off.json`, and lora_out logs "LoRa is OFF" at start-up.
+  - If nothing arrives, check that `pluto_rx.py` runs with the same `[lora]` table as the pod (same config file), and that the Pluto sees the signal at all (a waterfall at 915 MHz, e.g. in gqrx). Then check that lora_out isn't silenced: a remembered `lora_off` leaves `runs/lora_off.json`, and lora_out logs "LoRa is OFF" at start-up.
   - Only one process may drive the radio. Stop `afterglow@lora_out` before `check_hw.py --only lora`.
 - **USB serial:** the radar is the only USB device now. Still use `/dev/radar` or `/dev/serial/by-id/…`, never `ttyACM0`.
 - **Power:**

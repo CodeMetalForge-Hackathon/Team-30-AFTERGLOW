@@ -19,7 +19,7 @@ PLAN = "ag/plan"
 MODE = "ag/mode"
 CTRL = "ag/ctrl"
 SYS = "ag/sys"
-ALERT = "ag/alert"  # laptop only: a LoRa alert heard by XIAO #3, decoded by lora_rx.py
+ALERT = "ag/alert"  # laptop only: a LoRa alert heard by the laptop receiver (Pluto SDR), decoded by lora_rx.py
 ALL = "ag/#"
 # The broker keeps the latest message on these, so a module that starts late gets it at once.
 RETAINED = {COVERAGE, MODE}

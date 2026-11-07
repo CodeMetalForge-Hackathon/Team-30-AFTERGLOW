@@ -43,7 +43,10 @@ Pins and parts come from `docs/HARDWARE.md`. The line formats are in `docs/CONTR
   - The pod switches the page off if it hurts the pilot's link.
 - **Known clash:** while the SOS access point is up, the radio stays on the AP's channel, so the probe listener only hears that one channel. That's fine: the SOS page is for Investigate, when we're hovering over a pin.
 
-## Laptop LoRa radio: XIAO #3 + RFM95W (`lora_rx/`)
+## Laptop LoRa radio: XIAO #3 + RFM95W (`lora_rx/`): not used now
+
+**We have only one RFM95W**, so the laptop receives with an ADALM-PLUTO SDR and gr-lora_sdr (`code/tools/pluto_rx.py`, see `docs/HARDWARE.md`). XIAO #3 is the spare. Keep this sketch: it's the receiver again if a second RFM95W turns up.
+
 
 - `lora_rx/lora_rx.ino` is a listen-only modem. It prints every packet as a JSON line on USB, and `code/afterglow/lora_rx.py` does the filtering and decoding.
 - **Arduino IDE:** board `XIAO_ESP32S3`, USB CDC On Boot: Enabled. Library: **LoRa** by Sandeep Mistry, from the Library Manager.

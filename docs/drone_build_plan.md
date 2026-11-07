@@ -1,7 +1,7 @@
 > Offline copy of the "Drone build plan (Nov 7)" tab of the build doc, exported Sat 7 Nov 2026 at hour 0. The live doc wins if they differ.
 >
 > **Hardware is out of date here (updated Nov 7, hour 2).** The parts we actually got are in `docs/HARDWARE.md`, taken from Rohan's hardware reference (`docs/AFTERGLOW Hardware.pdf`):
-> - the LoRa link is two bare RFM95W radios (the pod's on the Pi's SPI1, the laptop's on XIAO #3), with no Meshtastic;
+> - the LoRa link is the pod's bare RFM95W (on the Pi's SPI1) to an ADALM-PLUTO SDR on the laptop (we have only one RFM95W), with no Meshtastic;
 > - the IMU is a BNO086 at `0x4B`;
 > - there's no GPS receiver, only an antenna;
 > - the XIAOs talk on D9/D10;
