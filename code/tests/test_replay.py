@@ -58,6 +58,8 @@ def test_pose_is_marked_replay_and_coverage_retained():
     poses = [m for _, t, m, _ in out if t == "ag/pose"]
     assert all(m["src"] == "replay" for m in poses)
     assert all(retain == (t == "ag/coverage") for _, t, _, retain in out)
+    out, _ = run(Opts(with_ctrl=True))
+    assert all(retain == (t in {"ag/coverage", "ag/mode"}) for _, t, _, retain in out)
     kept, _ = run(Opts(keep_src=True))
     assert all(m["src"] == "waypoint" for _, t, m, _ in kept if t == "ag/pose")
 

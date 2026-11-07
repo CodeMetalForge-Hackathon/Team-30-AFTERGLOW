@@ -164,7 +164,7 @@ function TopBar({ meta, st, theme, setTheme, setMode }) {
         <span class=${`dot ${st.link === 'live' ? 'ok' : 'bad'}`}></span>Server
         <span class=${`dot ${s.broker ? 'ok' : 'bad'}`}></span>MQTT
       </div>
-      <div class="clock" title="Bus time: the newest t on the bus (runs fast with fake_bus --speed)">${fmtClock(s.bus_t)}</div>
+      <div class="clock" title="Bus time: the latest pose's t (runs fast with fake_bus --speed)">${fmtClock(s.bus_t)}</div>
       <button class="icon" title=${`Theme: ${theme || 'system'}`} onClick=${() => setTheme(nextTheme)}>
         ${theme === 'dark' ? '☾' : theme === 'light' ? '☀' : '◐'}
       </button>
@@ -245,7 +245,7 @@ function PinsPanel({ s, sel, pick, pending, pinCmd, big }) {
             <span class=${`status s-${p.status}`}>${pending[p.pin] ? '…' : p.status}</span>
           </button>`)}
       </div>
-      ${selected && html`<${PinDetail} p=${selected} s=${s} pending=${pending[selected.pin]} pinCmd=${pinCmd} big=${big} />`}
+      ${selected && html`<${PinDetail} key=${selected.pin} p=${selected} s=${s} pending=${pending[selected.pin]} pinCmd=${pinCmd} big=${big} />`}
     </section>`;
 }
 

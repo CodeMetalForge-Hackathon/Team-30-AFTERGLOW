@@ -24,6 +24,14 @@ def test_handler_error_is_contained():
     assert got == [3]
 
 
+def test_cleared_retained_message_is_ignored_quietly(caplog):
+    b = make_bus()
+    got = []
+    b.handlers["ag/#"] = lambda t, m: got.append(m)
+    deliver(b, "ag/coverage", b"")  # what a subscriber sees when fake_bus wipes its grid
+    assert got == [] and not caplog.records
+
+
 def test_non_object_json_is_dropped():
     b = make_bus()
     got = []

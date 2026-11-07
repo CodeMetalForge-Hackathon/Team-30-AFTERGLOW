@@ -17,7 +17,8 @@ What it changes, and why:
     - Gaps longer than --max-gap seconds (default 10) shrink to that, so a paused run doesn't stall.
     - ag/ctrl and ag/mode are skipped unless --with-ctrl: a recorded ack or confirm was a person's
       decision at the time, and replaying it into a live geofence would make it again unasked.
-    - ag/coverage is republished retained, as locate does.
+    - ag/coverage (and ag/mode with --with-ctrl) is republished retained, as locate and the
+      dashboard do (contracts.RETAINED).
 
 Log format: one `topic payload` per line, as `mosquitto_sub -v` writes it. Lines that aren't
 a topic and a JSON object are skipped and counted.
@@ -33,9 +34,8 @@ import paho.mqtt.client as mqtt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from afterglow import config  # noqa: E402
-from afterglow.contracts import COVERAGE, CTRL, MODE, POSE, now_ms, validate  # noqa: E402
+from afterglow.contracts import CTRL, MODE, POSE, RETAINED, now_ms, validate  # noqa: E402
 
-RETAINED = {COVERAGE}
 OPERATOR = {CTRL, MODE}
 
 

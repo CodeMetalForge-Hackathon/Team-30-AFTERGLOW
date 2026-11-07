@@ -7,6 +7,9 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 ## Ground rules
 
 - **Message bus:** Mosquitto on the Pi, `localhost:1883`. Every message is one JSON object (UTF-8). Every topic starts with `ag/`.
+- **Retained topics:** only `ag/coverage` and `ag/mode` (`contracts.RETAINED`). The broker keeps the latest of each, so a module or dashboard that starts late gets it at once. Nothing else is retained.
+  - An empty retained message deletes one; `Bus` ignores it. `fake_bus.py` deletes its fake `ag/coverage` when it stops.
+  - To delete one by hand, for example a stale grid from the other profile: `mosquitto_pub -r -n -t ag/coverage`.
 - **Time:** `t` is Unix time in milliseconds. The Pi stamps it when a message arrives. The ESP32s keep no clock.
 - **Position:** every module works in local metres.
   - `x` is metres east and `y` is metres north of the mission origin (`origin_lat`, `origin_lon` in `afterglow.toml`).
@@ -40,7 +43,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 | `ag/vision` (**new**) | person.py | `{"t":…,"kind":"person","conf":0.82,"box":[1820,940,96,140],"snap":"snaps/1731000000123.jpg","track":"T1"}` | Camera check. `kind` is `person` or `colour` (the Monviso-style colour check). `snap` is also its URL path on port 8080 |
 | `ag/radar` | radar.py | `{"t":…,"present":true,"range_m":1.1,"br":14,"hr":72}` | Breathing and heart rate, landed only (tier 3) |
 | `ag/plan` (**new**) | planner.py | `{"t":…,"id":"L7","kind":"homing","legs":[{"to_x":20,"to_y":5,"heading_deg":72,"dist_m":35,"alt_m":8}],"status":"proposed"}` | Legs for the pilot. `kind` is `patrol`, `grid` or `homing`. The ranger accepts on the dashboard; the observer reads heading and distance to the pilot |
-| `ag/mode` (**changed**) | dashboard.py | `{"t":…,"mode":"investigate"}` | `patrol`, `night`, `investigate` or `search` (the four modes in the build doc) |
+| `ag/mode` (**changed**) | dashboard.py | `{"t":…,"mode":"investigate"}` | `patrol`, `night`, `investigate` or `search` (the four modes in the build doc). **Retained**, so a restarted geofence or a second dashboard knows the mode at once. With no mode yet, geofence assumes `patrol` |
 | `ag/ctrl` | dashboard.py | `{"t":…,"cmd":"ack","pin":"P3"}` | Operator commands, listed below |
 | `ag/sys` (**new**) | health (Utility) | `{"t":…,"cpu_c":61.2,"throttled":"0x0","gps_fix":true,"lora":true,"disk_free_gb":41.0,"batt_pct":null}` | Pod health for the dashboard. Optional `batt_pct` (0–100, or `null`): `null` for now, because the pod runs on a USB power bank the Pi can't read. On a drone, a voltage divider from the LiPo into a XIAO analog pin would fill it (tier 3) |
 | `ag/alert` (**new**) | lora_rx.py (**laptop only**) | `{"t":…,"rssi":-71,"snr":9.5,"version":2,"kind":1,"track":"T1","x":18.0,"y":9.0,"r95":12.0,"state":"localized","flags":{…},"c":0.82,"prio":2,"cls":"findmy","br":null,"sos":{…},"last_s":4,"battery":null,"off_trail_m":46}` | One LoRa alert heard by the laptop radio: `alert.decode`'s fields plus `t`, `rssi` and `snr`. `kind` is the alert type (1 track, 2 SOS, 3 confirmed person, 4 heartbeat). Lives on the laptop's own broker; cot_out.py and the LoRa fallback view read it |
@@ -62,7 +65,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 |---|---|---|
 | `new_search` | none | bridge.py (new salt), tracker.py (clear) |
 | `baseline_start`, `baseline_stop` | none | tracker.py: beacons seen during the baseline show grey |
-| `ack`, `investigate`, `clear`, `confirm` | `pin` | geofence.py updates the pin `status`; planner.py starts homing on `investigate` |
+| `ack`, `investigate`, `clear`, `confirm` | `pin` | geofence.py updates the pin `status`, but only by the allowed changes under "Pin states and priority"; planner.py starts homing on `investigate` |
 | `accept_leg`, `reject_leg` | `id` | planner.py |
 | `waypoint` | `n` (taped waypoint number) | position.py, indoors |
 | `lora_off`, `lora_on` | none | lora_out.py. Turn LoRa off if the pilot's control link drops |
@@ -76,7 +79,12 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
   - `pinned`: within 10 m outdoors (2 m indoors).
   - `confirmed`: the ranger confirmed a person. It appears only on `ag/target`; `ag/track` never carries it.
   - The radii live in the config's `[track]` table (`localized_r95_m`, `pinned_r95_m`): the indoor numbers in `afterglow.toml`, the outdoor ones in `park.toml`. Set them from ME 2's range test. These are placeholders.
-- **Pin `status`:** `new` → `acknowledged` → `investigating` → `confirmed` or `cleared`.
+- **Pin `status`:** `new` → `acknowledged` → `investigating` → `confirmed` or `cleared`. geofence.py accepts only these changes, and ignores and logs any other command:
+  - `ack`: from `new`.
+  - `investigate`: from `new` or `acknowledged`.
+  - `clear`: from anything except `confirmed` or `cleared`.
+  - `confirm`: **only from `investigating`**.
+  - The dashboard greys out the same buttons, but its server doesn't check a pin's status, so geofence is the real guard.
 - **`rule`** (why it's a pin):
   - `day_offtrail`: farther off-trail than `offtrail_m`, seen on 2 or more passes.
   - `night_outside_camp`: any beacon outside campgrounds after closing.
@@ -152,12 +160,13 @@ dashboard.py serves everything on one port (`[http] port`, 8080), so there are n
 | `GET /api/map` | Once per page load: the profile (`profile`, `name`, `origin`, `waypoints`, `radii`, `offtrail_m`, `detect_m`, `cell_m`) and the map in metres (`map`: `bounds`, `lines`, `zones`, `credit`), from `parkmap.py` |
 | `GET /api/events` | Server-Sent Events. `state` (the full state) comes first on every connect and reconnect. Then a `msg` (`{"topic":…,"msg":…}`) for each bus message, and a `status` (`broker`, `bus_t`, `clients`, `counts`) about every 2 s |
 | `GET /api/state` | The same full state as one JSON object, for debugging |
-| `POST /api/ctrl` | A click: `{"cmd":"ack","pin":"P1"}`, `{"cmd":"waypoint","n":3}` and so on. The server keeps only `cmd`, `pin`, `id` and `n`, stamps `t`, runs `validate()` and checks that pin commands carry `pin`, leg commands carry `id` and `waypoint` carries a configured `n`. Then it publishes to `ag/ctrl`. Answers `{"ok":true,"msg":…}`, or `400` / `503` with `{"ok":false,"problems":[…]}` |
-| `POST /api/mode` | `{"mode":"night"}`, published to `ag/mode` the same way |
+| `POST /api/ctrl` | A click: `{"cmd":"ack","pin":"P1"}`, `{"cmd":"waypoint","n":3}` and so on. The server keeps only `cmd`, `pin`, `id` and `n`, stamps `t`, runs `validate()` and checks that pin commands carry `pin`, leg commands carry `id` and `waypoint` carries a configured `n`. Then it publishes to `ag/ctrl`. Answers `{"ok":true,"msg":…}`, or `400` / `503` with `{"ok":false,"problems":[…]}`. The body must be sent as `Content-Type: application/json` (else `415`), so another web page can't post a click |
+| `POST /api/mode` | `{"mode":"night"}`, published to `ag/mode` the same way, **retained** |
 
 - The full state holds the latest pose per drone (`drone` field, or `"pod"`), each drone's path, and the latest `ag/target` per pin, `ag/track` per track and `ag/plan` per id. It also holds a summary per heard id with the last 60 raw observations, the latest message on every other topic, and per-topic counts.
 - **The dashboard's clock** (`bus_t`) is the latest pose's `t`, or the newest `t` before any pose arrives. Ages on the page are measured against it, because fake and replayed time isn't wall time.
 - The dashboard publishes only when someone clicks. It never sends `ag/ctrl` or `ag/mode` by itself.
+- **No login:** anyone who can reach port 8080 can click. Keep the pod and the laptop on the team's travel router, never the venue Wi-Fi.
 
 ## Serial lines from the ESP32 boards
 

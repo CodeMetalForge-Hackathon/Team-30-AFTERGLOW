@@ -9,7 +9,7 @@ import pytest
 
 from afterglow import config
 from afterglow.contracts import COVERAGE, CTRL, MODE, OBS_BLE, POSE, TARGET, TRACK, validate
-from afterglow.dashboard import Commands, State, make_handler, make_meta, safe_file
+from afterglow.dashboard import OBS_IDS, Commands, State, make_handler, make_meta, safe_file
 from afterglow.parkmap import ParkMap
 
 T = 1_731_000_000_000
@@ -18,9 +18,12 @@ T = 1_731_000_000_000
 class StubBus:
     def __init__(self):
         self.out = []
+        self.retained = []  # topics published with retain
 
     def publish(self, topic, msg, retain=False):
         self.out.append((topic, msg))
+        if retain:
+            self.retained.append(topic)
 
 
 def pose(t, x, y, **kw):
@@ -60,6 +63,15 @@ def test_obs_summary_and_log():
     o = s.obs["abcd1234"]
     assert (o["n"], o["best"], o["rssi"], o["cls"], o["kind"]) == (3, -60, -70, "findmy", "ble")
     assert s.obs_log[0]["msg"]["rssi"] == -70 and len(s.obs_log) == 3
+
+
+def test_obs_summary_drops_the_longest_silent_id_when_full():
+    s = State(0.5)
+    n = OBS_IDS + 5
+    for i in range(n):
+        s.apply(OBS_BLE, {"t": T + i, "src": "omni", "id": f"{i:08x}", "cls": "findmy", "rssi": -70})
+    assert len(s.obs) == OBS_IDS
+    assert f"{n - 1:08x}" in s.obs and f"{0:08x}" not in s.obs  # the newest is kept, the oldest went
 
 
 def test_records_are_keyed():
@@ -105,6 +117,7 @@ def test_ctrl_stamps_t_validates_and_strips_extras(cmds):
     assert code == 200
     topic, msg = bus.out[-1]
     assert topic == CTRL and set(msg) == {"cmd", "pin", "t"} and msg["t"] > T and validate(CTRL, msg) == []
+    assert bus.retained == []  # a click is a one-off; never replayed to a late subscriber
 
 
 @pytest.mark.parametrize("body, problem", [
@@ -124,6 +137,7 @@ def test_mode(cmds):
     c, bus = cmds
     assert c.mode({"mode": "night"})[0] == 200 and bus.out[-1][0] == MODE
     assert validate(MODE, bus.out[-1][1]) == []
+    assert bus.retained == [MODE]  # a restarted geofence or a second dashboard gets the mode at once
     assert c.mode({"mode": "party"})[0] == 400
 
 
@@ -167,8 +181,8 @@ def get(url):
         return r.status, r.headers.get("Content-Type"), r.read()
 
 
-def post(url, body: bytes):
-    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+def post(url, body: bytes, ctype="application/json"):
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": ctype})
     try:
         with urllib.request.urlopen(req, timeout=5) as r:
             return r.status, json.loads(r.read())
@@ -192,6 +206,15 @@ def test_http_ctrl(server):
     assert code == 200 and bus.out[-1][1]["n"] == 3
     assert post(base + "/api/ctrl", b"not json")[0] == 400
     assert post(base + "/api/ctrl", b"[1, 2]")[0] == 400
+
+
+def test_http_ctrl_refuses_non_json_content_type(server):
+    # A form or text/plain POST needs no CORS preflight, so any web page could send it.
+    base, _, bus = server
+    body = json.dumps({"cmd": "confirm", "pin": "P1"}).encode()
+    assert post(base + "/api/ctrl", body, ctype="text/plain")[0] == 415
+    assert post(base + "/api/mode", b'{"mode":"night"}', ctype="application/x-www-form-urlencoded")[0] == 415
+    assert bus.out == []
 
 
 def test_http_events_start_with_state(server):

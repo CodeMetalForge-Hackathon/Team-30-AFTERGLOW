@@ -104,6 +104,8 @@ export class MapView {
   }
 
   setLayer(name, on) {
+    // Coverage and probability share one image; drawCoverage paints whichever are on.
+    if (name === 'coverage' || name === 'probability') return;
     const layer = name === 'roads' ? this.static.roads : this.layers[name];
     if (!layer) return;
     if (on && !this.map.hasLayer(layer)) layer.addTo(this.map);

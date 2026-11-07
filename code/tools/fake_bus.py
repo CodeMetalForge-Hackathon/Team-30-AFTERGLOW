@@ -11,7 +11,7 @@ What it publishes (pick with --only):
     pose      ag/pose at [pose] publish_hz, src "sim" (the dashboard badges it SIMULATED)
     ble       ag/obs/ble, about one advert a second for each phone in range
     track     ag/track once a second per heard phone       (stand-in for tracker.py)
-    coverage  ag/coverage once a second, retained          (stand-in for locate)
+    coverage  ag/coverage once a second, retained          (stand-in for locate; wiped on exit)
     target    ag/target once a second per pin               (stand-in for geofence.py)
 
 The profile's [sim] table sets the path, the hidden phones and the RSSI model. The path is a
@@ -28,6 +28,7 @@ import argparse
 import hashlib
 import math
 import random
+import signal
 import sys
 import time
 from collections import deque
@@ -285,6 +286,7 @@ def main():
         from afterglow.bus import Bus
         bus = Bus(a.host or cfg["mqtt"]["host"], a.port or cfg["mqtt"]["port"], name="fake_bus")
 
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # `kill` cleans up like Ctrl+C
     start = time.monotonic()
     t0 = now_ms()
     try:
@@ -295,6 +297,8 @@ def main():
                     time.sleep(wait)
             bus.publish(topic, msg, retain=retain)
     finally:
+        if "coverage" in only:  # don't leave a fake grid on the broker for the next run or profile
+            bus.clear_retained(COVERAGE)
         bus.close()
 
 

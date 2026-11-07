@@ -67,6 +67,15 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
   - **Park**, `park.toml`: realistic view at Blackwoods Campground, Acadia, using real OSM trails and roads (`data/park_*.geojson`, made by `tools/make_park_map.py`; picture in `docs/maps/park_map.png`). Laptop only.
 - [x] Sim stub: `fake_bus.py` follows the profile's new `[sim]` table (path, hidden phones, RSSI model). It walks the waypoint loop indoors and flies lanes in the park. It also fakes `ag/track`, `ag/target` and a retained `ag/coverage`, so pins and coverage move for I3. Use `--only pose,ble` once the real modules land. Its tracker cheats (it knows the true positions), so never take accuracy numbers from it.
 - [x] **Contract change, tell the team:** `ag/pose` `src` can now be `sim`, and `validate()` checks `src`. The dashboard badges `sim` and `replay` data.
+- [x] Phase 1 review fixes, each reproduced in a browser first:
+  - an armed Confirm no longer carries over when you pick another pin (it took one click);
+  - `/api/ctrl` and `/api/mode` take JSON only, so another web page can't click for the ranger;
+  - the Heard list keeps adding devices past 300 (it used to freeze);
+  - turning Coverage off keeps the Probability heatmap.
+- [x] **Contract change, tell the team:**
+  - `ag/mode` is now **retained** (`contracts.RETAINED`), so a restarted geofence or a second dashboard knows the mode at once. With no mode yet, geofence assumes patrol.
+  - geofence accepts only the allowed pin status changes; above all, **Confirm only while a pin is investigating** (CONTRACTS.md, "Pin states and priority").
+  - `fake_bus.py` deletes its retained `ag/coverage` when it stops, so a fake grid doesn't leak into the next run or profile.
 - [x] `geofence.py` geometry: distance to the nearest trail and point-in-zone, with tests. It's in `afterglow/parkmap.py` (`ParkMap.load(cfg)`, `dist_to_trail`, `zone_at`, `bounds`, `to_json`), because the dashboard and the fake bus use it too.
 
 ## Phase 2: Tier 1 core pipeline (hours 3–12, until 22:00, checkpoints I6 and I7)
@@ -85,9 +94,9 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - computes the 95% radius (`r95`) and the coverage overlay;
   - publishes `ag/coverage` about once a second, **retained**.
 - [ ] **`geofence.py` (SW)** writes `ag/target`:
-  - applies the `day_offtrail`, `night_outside_camp` and `search` rules according to `ag/mode`;
+  - applies the `day_offtrail`, `night_outside_camp` and `search` rules according to `ag/mode` (retained, so it's there at start-up; patrol until the first click);
   - sets priority 1–4 and assigns pin IDs (`P1`, `P2`, …);
-  - updates the pin status on `ack`, `investigate`, `clear` and `confirm`;
+  - updates the pin status on `ack`, `investigate`, `clear` and `confirm`, using only the allowed changes in CONTRACTS.md. **Confirm only while the pin is investigating:** the dashboard greys the button, but its server doesn't check, so geofence is the guard. Test it;
   - copies `state` and `last_s` from the track, and sets `state` to `confirmed` only on Confirm;
   - attaches `ag/sos` answers to the investigating pin, or opens an SOS-only `T0` pin at the pod.
 - [ ] **`dashboard.py` (SW)**. Most of this landed with the Phase 1 skeleton:
@@ -154,7 +163,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 - [ ] Demo setup:
   - a 10-minute baseline at the demo spot;
   - a team iPhone switched off at least 20 minutes early and hidden;
-  - the travel router on;
+  - the travel router on, with the pod and the laptop on it, never the venue Wi-Fi: the dashboard has no login, so anyone on the same network could click;
   - everything charged.
 - [ ] Two clean end-to-end rehearsals of the demo script in `docs/drone_build_plan.md`.
 - [ ] **Hour 22 (Sun 08:00): freeze.** After it, only fixes that block the demo.

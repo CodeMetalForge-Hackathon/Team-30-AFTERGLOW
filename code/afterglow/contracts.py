@@ -21,6 +21,8 @@ CTRL = "ag/ctrl"
 SYS = "ag/sys"
 ALERT = "ag/alert"  # laptop only: a LoRa alert heard by XIAO #3, decoded by lora_rx.py
 ALL = "ag/#"
+# The broker keeps the latest message on these, so a module that starts late gets it at once.
+RETAINED = {COVERAGE, MODE}
 
 # Beacon classes, and their 4-bit codes in the LoRa alert
 CLS_CODES = {"other": 0, "findmy": 1, "findhub": 2, "samsung_off": 3, "ref": 4, "wifi": 5}

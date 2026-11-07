@@ -22,6 +22,8 @@ class Bus:
             client.subscribe(topic)
 
     def _on_message(self, client, userdata, msg):
+        if not msg.payload:  # an empty retained message: someone cleared that topic
+            return
         try:
             data = json.loads(msg.payload)
         except ValueError:
@@ -45,6 +47,13 @@ class Bus:
         self.handlers[topic] = fn
         self.c.subscribe(topic)
 
+    def clear_retained(self, topic: str):
+        """Delete the broker's retained message on this topic (an empty retained publish)."""
+        try:
+            self.c.publish(topic, b"", qos=0, retain=True).wait_for_publish(timeout=2)
+        except (RuntimeError, ValueError) as e:
+            log.warning("couldn't clear retained %s: %s", topic, e)
+
     def close(self):
         self.c.loop_stop()
         self.c.disconnect()
@@ -61,6 +70,9 @@ class PrintBus:
 
     def subscribe(self, topic, fn):
         self.handlers[topic] = fn
+
+    def clear_retained(self, topic):
+        pass
 
     def close(self):
         pass

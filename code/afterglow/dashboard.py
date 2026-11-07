@@ -11,6 +11,9 @@ on every (re)connect, then each message as it arrives. Buttons POST to /api/ctrl
 /api/mode; the server stamps t, runs validate() and publishes.
 
 It never acts on its own: every ag/ctrl and ag/mode message it sends comes from a click.
+ag/mode goes out retained, so a restarted geofence or a second dashboard knows the mode.
+There's no login: anyone who can reach the port can click. Run it on the team's travel
+router, never the venue Wi-Fi.
 
 HTTP API (docs/CONTRACTS.md, "Dashboard HTTP"):
     GET  /api/map      profile, settings and the map in metres (once per page load)
@@ -36,8 +39,8 @@ from urllib.parse import urlsplit
 
 from . import config as cfgmod
 from .bus import Bus, PrintBus
-from .contracts import (ALL, CTRL, MODE, OBS_BLE, OBS_WIFI, PLAN, POSE, TARGET, TRACK, now_ms,
-                        validate)
+from .contracts import (ALL, CTRL, MODE, OBS_BLE, OBS_WIFI, PLAN, POSE, RETAINED, TARGET, TRACK,
+                        now_ms, validate)
 from .parkmap import ParkMap
 
 log = logging.getLogger("dashboard")
@@ -110,10 +113,9 @@ class State:
             oid = msg.get("id")
             o = self.obs.get(oid)
             if o is None:
+                if len(self.obs) >= OBS_IDS:  # make room first: drop the id silent the longest
+                    del self.obs[min(self.obs, key=lambda k: self.obs[k].get("t") or 0)]
                 o = self.obs[oid] = {"id": oid, "n": 0, "first": msg.get("t"), "best": -999}
-                if len(self.obs) > OBS_IDS:
-                    oldest = min(self.obs.values(), key=lambda v: v.get("t") or 0)
-                    del self.obs[oldest["id"]]
             rssi = msg.get("rssi")
             o.update(kind="wifi" if topic == OBS_WIFI else "ble", cls=msg.get("cls", "wifi"),
                      rssi=rssi, t=msg.get("t"), src=msg.get("src"), n=o["n"] + 1)
@@ -184,7 +186,7 @@ class Commands:
         bus = self.bus_ref()
         if bus is None:
             return 503, {"ok": False, "problems": ["not connected to the MQTT broker"]}
-        bus.publish(topic, msg)
+        bus.publish(topic, msg, retain=topic in RETAINED)
         log.info("operator: %s %s", topic, json.dumps(msg, separators=(",", ":")))
         return 200, {"ok": True, "msg": msg}
 
@@ -271,10 +273,14 @@ def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict):
             path = urlsplit(self.path).path
             if path not in ("/api/ctrl", "/api/mode"):
                 return self.send_error(404)
+            # JSON only: a browser must ask (CORS preflight) before sending it cross-origin, and this
+            # server never says yes, so another web page can't click Confirm for the ranger.
+            if self.headers.get_content_type() != "application/json":
+                return self.send_json(415, {"ok": False, "problems": ["Content-Type must be application/json"]})
             try:
                 n = int(self.headers.get("Content-Length", 0))
-                if n > MAX_BODY:
-                    raise ValueError("body too large")
+                if not 0 <= n <= MAX_BODY:
+                    raise ValueError("bad body length")
                 body = json.loads(self.rfile.read(n) or b"{}")
                 if not isinstance(body, dict):
                     raise ValueError("body must be a JSON object")
@@ -306,7 +312,7 @@ def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict):
                     if data is not None:
                         self.wfile.write(f"event: {ev}\ndata: {data}\n\n".encode())
                     self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            except OSError:  # the browser went away (closed tab, laptop off Wi-Fi)
                 pass
             finally:
                 state.unsubscribe(q)

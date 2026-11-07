@@ -19,8 +19,8 @@ Hour 0 is Saturday 10:00. Hard cutoff is Sunday 12:00.
 | `position.py` | Pi | ttyAMA2 NMEA, `ag/ctrl` waypoint | `ag/pose` | 1 | Utility | ✅ (IMU roll/pitch still to add) |
 | `tracker.py` | Pi | `ag/obs/*`, `ag/pose`, `ag/ctrl` | `ag/track` | 1 | Software | |
 | locate (`bearing.py` + map) | Pi | `ag/obs/ble`, `ag/pose` | `ag/pass`, `ag/coverage` (retained) | 1 | Software | |
-| `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl`, `ag/sos`, `ag/pose` | `ag/target` | 1 | Software | ✅ geometry in `afterglow/parkmap.py` |
-| `dashboard.py` | Pi, viewed on the laptop | everything; serves the images on port 8080 | `ag/ctrl`, `ag/mode` | 1 | Software | ✅ skeleton (I3); see TODO for what's left |
+| `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl`, `ag/sos`, `ag/pose` | `ag/target` | 1 | Software | ✅ geometry in `afterglow/parkmap.py`. Confirm only from `investigating` (CONTRACTS.md, "Pin states") |
+| `dashboard.py` | Pi, viewed on the laptop | everything; serves the images on port 8080 | `ag/ctrl`, `ag/mode` (retained) | 1 | Software | ✅ skeleton (I3); see TODO for what's left |
 | `lora_out.py` | Pi | `ag/target`, `ag/sys`, `ag/ctrl` | 16-byte alerts on the RFM95W (SPI1) | 1 | Utility | ✅ `afterglow/alert.py`, `afterglow/radio.py` |
 | lora_rx (firmware) | XIAO #3 + RFM95W, on the laptop's USB | LoRa radio | USB `rx` lines | 1 | Utility | ✅ `firmware/lora_rx/` |
 | `lora_rx.py` | Laptop | XIAO #3 over USB | `ag/alert` (laptop broker) | 1 | Software | ✅ done |

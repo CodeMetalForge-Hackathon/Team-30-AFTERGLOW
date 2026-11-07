@@ -31,13 +31,13 @@ export function apply(s, topic, msg, trailStep) {
   } else if (topic === 'ag/obs/ble' || topic === 'ag/obs/wifi') {
     let o = s.obs[msg.id];
     if (!o) {
-      o = s.obs[msg.id] = { id: msg.id, n: 0, first: msg.t, best: -999 };
       const ids = Object.keys(s.obs);
-      if (ids.length > OBS_IDS) {
+      if (ids.length >= OBS_IDS) { // make room first: drop the id silent the longest
         let oldest = ids[0];
         for (const k of ids) if ((s.obs[k].t || 0) < (s.obs[oldest].t || 0)) oldest = k;
         delete s.obs[oldest];
       }
+      o = s.obs[msg.id] = { id: msg.id, n: 0, first: msg.t, best: -999 };
     }
     Object.assign(o, { kind: topic === 'ag/obs/wifi' ? 'wifi' : 'ble', cls: msg.cls ?? 'wifi',
                        rssi: msg.rssi, t: msg.t, src: msg.src, n: o.n + 1 });
