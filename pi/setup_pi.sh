@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time Pi setup for the AFTERGLOW pod. Raspberry Pi OS Bookworm 64-bit.
-# Run from the handoff folder:  bash pi/setup_pi.sh   (it uses sudo where needed)
+# Run from the repo root:  bash pi/setup_pi.sh   (it uses sudo where needed)
 # Safe to run twice. Reboot when it finishes.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"

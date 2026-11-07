@@ -54,7 +54,7 @@ TX always crosses to RX. The sockets on top of the AI HAT+ are **female**, so ev
 ## Pi setup (once)
 
 1. Flash Raspberry Pi OS Bookworm 64-bit. Enable SSH, Wi-Fi to the travel router and a hostname such as `afterglow`.
-2. Copy this folder to the Pi and run `bash pi/setup_pi.sh`. It:
+2. Clone the repo to `/home/pi/afterglow` and run `bash pi/setup_pi.sh`. It:
    - installs Mosquitto, i2c-tools, picamera2 and `hailo-all`;
    - appends `pi/config.txt.append` to `/boot/firmware/config.txt`;
    - turns the serial console off the GPIO UART;

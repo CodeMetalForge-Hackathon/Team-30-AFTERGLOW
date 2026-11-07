@@ -1,4 +1,4 @@
-"""The 16-byte LoRa alert (CONTRACTS.md, "LoRa alert"). Pack on the pod, unpack on the laptop.
+"""The 16-byte LoRa alert (docs/CONTRACTS.md, "LoRa alert"). Pack on the pod, unpack on the laptop.
 
     pkt = encode(target_dict)          # bytes, len 16
     msg = decode(pkt)                  # dict with the same field names

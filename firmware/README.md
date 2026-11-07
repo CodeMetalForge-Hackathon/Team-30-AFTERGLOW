@@ -8,7 +8,7 @@ The plan doc has the scanner, wifi_listener and sos_page sketches. This page cov
   - In Arduino-ESP32 3.x, with *USB CDC On Boot: Enabled*, `Serial` is the USB port and `Serial0` is the UART on D6/D7.
   - Use `Serial0.begin(921600)` and `Serial0.printf(...)`. Mirroring to `Serial` while debugging on a laptop is fine.
   - This is the most likely reason `check_hw.py` reports a board as "silent".
-- **Line format:** 921600 baud, 8N1. One JSON object per line, `\n` terminated. Exact formats are in `CONTRACTS.md`, "Serial lines from the ESP32 boards".
+- **Line format:** 921600 baud, 8N1. One JSON object per line, `\n` terminated. Exact formats are in `docs/CONTRACTS.md`, "Serial lines from the ESP32 boards".
 - **Power:** 5 V and GND come from the Pi's header (pins 2 and 9 for OMNI; 2 and 14 for WIFI). Don't plug USB into a board while it's wired to the Pi unless you're sure your USB cable doesn't back-feed 5 V. When in doubt, unplug the Pi's 5 V lead first.
 - **Antenna:** each board needs the stick-on antenna from its own box, on the U.FL socket. Without it, range drops to a few metres.
 

@@ -3,7 +3,7 @@
     python -m afterglow.bridge                 # on the Pi: ttyAMA0 (OMNI) + ttyAMA3 (WIFI)
     python -m afterglow.bridge --dry-run < lines.txt   # no hardware, no broker: prints topics
 
-Raw addresses never leave this file. See CONTRACTS.md, "Serial lines".
+Raw addresses never leave this file. See docs/CONTRACTS.md, "Serial lines".
 """
 import argparse
 import hashlib

@@ -2,9 +2,9 @@
 
 Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is at hour 22 (Sun 08:00) and submission is due by hour 26 (Sun 12:00).
 
-- Owners follow `MODULES.md`: **SW** is Software, **UT** is Utility, and **ME1** and **ME2** are the mechanical leads.
+- Owners follow `docs/MODULES.md`: **SW** is Software, **UT** is Utility, and **ME1** and **ME2** are the mechanical leads.
 - Tick items as they land. If a milestone slips by more than an hour, cut from the bottom of the tiers. Never push the freeze.
-- Checkpoints I1–I9 are defined in `MODULES.md`.
+- Checkpoints I1–I9 are defined in `docs/MODULES.md`.
 
 ---
 
@@ -13,9 +13,9 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
 - [x] Move the handoff folder up to the repo root; add `.gitignore`, `CLAUDE.md` and this TODO.
 - [x] Fix `requirements-laptop.txt`, which was missing `pynmea2`, so the tests couldn't even import on a laptop.
 - [x] Set up the laptop venv. All 13 tests pass.
-- [ ] Push to the team GitHub repo. Teammates clone it, and the Pi clones it to `/home/pi/afterglow`.
+- [x] Push to the team GitHub repo, https://github.com/CodeMetalForge-Hackathon/Team-30-AFTERGLOW (private). Teammates clone it, and the Pi clones it to `/home/pi/afterglow`.
 - [x] Install Mosquitto on the laptop (`brew install mosquitto`). Run `fake_bus.py --speed 5` and watch it with `mosquitto_sub -v -t 'ag/#'`. It runs as a `brew services` service, localhost only.
-- [x] Settle these contract gaps at kickoff. Edit `contracts.py` and `CONTRACTS.md` together. **Tell the team.**
+- [x] Settle these contract gaps at kickoff. Edit `contracts.py` and `docs/CONTRACTS.md` together. **Tell the team.**
   - [x] **`ag/target` gets `state` and `last_s`**, which geofence copies from the track. Only the ranger's Confirm sets `confirmed`.
   - [x] **SOS goes through geofence**, onto the investigating pin, or an SOS-only `T0` pin. **Battery** is `ag/sys` `batt_pct`, `null` for now, and goes out as 255.
   - [x] **New retained `ag/coverage` topic** from locate. Its settings are in the new `[locate]` config table.

@@ -10,10 +10,10 @@ The project is built at a 26-hour hackathon. Hour 0 is Sat 7 Nov 2026 at 10:00 E
 
 ## Read first
 
-- `CONTRACTS.md`: topics, JSON shapes, ESP32 serial lines, the 16-byte LoRa alert and the ATAK mapping. It is the source of truth for anything that crosses a module boundary.
-- `HARDWARE.md`: devices, ports, pins and known gotchas.
-- `MODULES.md`: owners (Software, Utility), tiers and integration checkpoints I1–I9.
-- `docs/drone_build_plan.md`: an offline copy of the build doc, with locked decisions, schedule, demo script and risks. If sources conflict, the wiring page wins for pins and the build doc wins for decisions.
+- `docs/CONTRACTS.md`: topics, JSON shapes, ESP32 serial lines, the 16-byte LoRa alert and the ATAK mapping. It is the source of truth for anything that crosses a module boundary.
+- `docs/HARDWARE.md`: devices, ports, pins and known gotchas.
+- `docs/MODULES.md`: owners (Software, Utility), tiers and integration checkpoints I1–I9.
+- `docs/drone_build_plan.md`: an offline copy of the build doc, with locked decisions, schedule, demo script and risks. If sources conflict, the wiring page (`docs/wiring/wiring_and_build.html`) wins for pins and the build doc wins for decisions.
 
 ## Layout
 
@@ -28,12 +28,17 @@ code/
     bridge.py           ESP32 serial -> ag/obs/ble, ag/obs/wifi, ag/sos (hashes addresses)
     position.py         GPS NMEA or taped waypoints -> ag/pose
   afterglow.toml        shared config; must be identical on the pod and the laptop
+  data/                 trails.geojson, zones.geojson (lon/lat; generated for the indoor park)
   tools/fake_bus.py     fake drone lanes + hidden phones on ag/pose and ag/obs/ble
   tools/check_hw.py     PASS/FAIL for each pod part (run on the Pi)
+  tools/make_indoor_map.py  writes data/*.geojson from the origin and waypoints
+  tools/draw_map.py     draws the map files to docs/maps/indoor_map.png
   tests/                pytest
+docs/                   CONTRACTS.md, HARDWARE.md, MODULES.md, drone_build_plan.md
+  maps/                 map pictures
+  wiring/               diagrams, pins.csv, wiring_and_build.html
 pi/                     setup_pi.sh, config.txt lines, udev rules, Mosquitto conf, systemd unit
 firmware/               what the ESP32 boards must send (the sketches aren't in the repo yet)
-wiring/                 diagrams, pins.csv, wiring_and_build.html
 ```
 
 On the Pi, clone the repo to `/home/pi/afterglow`, because `pi/systemd/afterglow@.service` assumes that path.
@@ -70,7 +75,7 @@ Anything past `--print` or `--dry-run` needs Mosquitto on the laptop (`brew inst
   - a `main()` with argparse, `--config` and a `--dry-run` that uses `PrintBus`.
   Tests drive the class with a stub bus that collects `(topic, msg)` pairs.
 - **Hardware imports.** Import hardware-only libraries (`serial`, `picamera2`, Hailo, `meshtastic`, Adafruit) inside the function that uses them, so the module still imports on a laptop.
-- **Contracts.** Change `contracts.py` and `CONTRACTS.md` together, in one commit, and tell the team. Several people build against them in parallel, so don't rename topics or fields casually.
+- **Contracts.** Change `contracts.py` and `docs/CONTRACTS.md` together, in one commit, and tell the team. Several people build against them in parallel, so don't rename topics or fields casually.
 - **Validation.** Every published message must pass `contracts.validate(topic, msg)`. Assert this in tests.
 - **LoRa alert.** Use `alert.encode` and `alert.decode`. Never re-type the struct.
 - **Config.** Load with `afterglow.config.load()`. Never hard-code ports, thresholds or the origin. The range-dependent numbers (localized and pinned radii, lane spacing, `offtrail_m`) are placeholders until ME 2's range test, so they belong in config.

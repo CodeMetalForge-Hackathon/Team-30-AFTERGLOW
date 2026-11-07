@@ -1,6 +1,6 @@
-"""Topic names and message shapes, as code. CONTRACTS.md is the readable version.
+"""Topic names and message shapes, as code. docs/CONTRACTS.md is the readable version.
 
-Change this file and CONTRACTS.md together, in one commit, and tell the team.
+Change this file and docs/CONTRACTS.md together, in one commit, and tell the team.
 """
 import time
 

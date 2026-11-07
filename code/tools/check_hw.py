@@ -100,7 +100,7 @@ def c_power(a):
     _, temp = run(["vcgencmd", "measure_temp"])
     if val == "0x0":
         return "PASS", f"throttled=0x0, {temp}"
-    return "FAIL", f"throttled={val} (under-voltage or heat; see HARDWARE.md, Power), {temp}"
+    return "FAIL", f"throttled={val} (under-voltage or heat; see docs/HARDWARE.md, Power), {temp}"
 
 
 @check("serial_ports")
