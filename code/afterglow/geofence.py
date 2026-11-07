@@ -359,7 +359,9 @@ def main():
     pins_file = cfgmod.resolve(cfg, cfg["rules"]["pins_file"]) if cfg["rules"]["pins_file"] else None
     bus = Bus(a.broker or cfg["mqtt"]["host"], cfg["mqtt"]["port"], "geofence")
     g = Geofence(cfg, bus, pins_file=pins_file)
-    if not a.fresh:
+    if a.fresh:
+        g.save()  # overwrite the old pins now, or a lora_out restarted after this reloads them
+    else:
         g.restore()
     inbox = queue.Queue()  # handlers only queue, so paho's thread stays fast; this loop does the work
     for topic in (TRACK, POSE, MODE, CTRL, SOS):

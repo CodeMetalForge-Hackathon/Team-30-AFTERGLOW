@@ -123,7 +123,7 @@ How tracker.py fills `ag/track`. Its numbers live in the config's `[track]` tabl
 - The one exception: `state` becomes `confirmed` only when the ranger presses Confirm (pin `status` `confirmed`). The tracker never sets it. That keeps the rule that the drone never decides.
 - **`new_search`:** geofence unlinks every track, because the tracker starts new ones. It keeps the old pins for the ranger, and pin numbers keep counting. The next SOS answer opens a new SOS-only pin.
 - **Restarts:**
-  - geofence saves its pins to `[rules] pins_file` (under `runs/`, never committed). At start-up it reloads them, if they're newer than `pins_max_age_min`, and republishes them, so it never hands out `P1` twice. `--fresh` starts over.
+  - geofence saves its pins to `[rules] pins_file` (under `runs/`, never committed). At start-up it reloads them, if they're newer than `pins_max_age_min`, and republishes them, so it never hands out `P1` twice. `--fresh` starts over and empties the file at once, so a lora_out restarted after it doesn't reload the old pins.
   - If a linked track comes back with none of its earlier `ids` (the tracker restarted, or wrapped past `T255`), the pin stops following it.
 
 ### SOS answers
@@ -226,15 +226,19 @@ laptop → XIAO #3  ?        (asks for the cfg line)
 ## LoRa alert: 16 bytes
 
 Sent by `lora_out.py` from the pod's RFM95W as plain LoRa (open the radio with `afterglow/radio.py`). Each packet is a 4-byte RadioHead header (to `laptop_node`, from `pod_node`, id, flags), then the 16 bytes:
-- every 5 seconds per active pin;
-- at once when a pin changes state or an SOS arrives;
-- P1 first. There are no acks: the 5-second repeats cover a lost packet.
+- every `[lora] repeat_s` (5) seconds per live pin (every status except `cleared`);
+- at once when a pin is new, or its alert type, `state`, `prio`, flags or SOS answer change, but at most once a second per pin. A move or a status click waits for the repeat;
+- priority 1 first, then changed pins, then by pin number. On a channel too busy for every pin (a dozen pins at SF10), whatever has been due longest goes before the rest, so every pin and the heartbeat slow down and none goes silent. There are no acks: the repeats cover a lost packet.
 
-lora_out.py stays a plain encoder of `ag/target`. Three details:
-- **`last_s`:** it sends `last_s + (now − t)/1000`, so the 5-second repeats keep counting even when geofence hasn't republished the pin.
+lora_out.py stays a plain encoder of `ag/target`. These details:
+- **`last_s`:** it sends `last_s + (now − t)/1000`, so the repeats keep counting even when geofence hasn't republished the pin.
 - **Battery (byte 14):** it reads `batt_pct` from the latest `ag/sys` and passes it to `alert.encode` as `battery`. `null` goes out as 255, "unknown".
-- **Type:** a pin with `rule` `"sos"` goes out as type 2 (SOS). An SOS attached to a normal pin rides in byte 11 and the SOS flag.
-- **Heartbeat** (type 4, **new**): pin 0, `x` and `y` set to the pod's latest `ag/pose` (0, 0 before the first one), `battery` as above, and everything else zero. cot_out.py places the pod's ATAK marker from it.
+- **Type:** a confirmed pin goes out as type 3, even an SOS-only one. Otherwise a pin with `rule` `"sos"` goes out as type 2 (SOS), and anything else as type 1. An SOS attached to a normal pin rides in byte 11 and the SOS flag.
+- **Version:** `[lora] alert_version`: 1 (decimetres) in the indoor profile, 2 (metres) in `park.toml`. lora_rx.py reads it from byte 0, so the laptop needs no setting.
+- **Heartbeat** (type 4, **new**): every `repeat_s`, pin 0, `x` and `y` set to the pod's latest `ag/pose` (0, 0 before the first one), `battery` as above. cot_out.py places the pod's ATAK marker from it.
+- **`lora_off`** stops every packet, heartbeat included, until `lora_on`. lora_out remembers it in `[lora] off_file` (under `runs/`), so a restarted lora_out stays silent. `lora_on` resends every live pin at once. `ag/ctrl` isn't retained, so a `lora_off` sent while lora_out isn't running is lost: to start silent, create the off_file by hand.
+- **Restarts:** `ag/target` isn't retained, so at start-up lora_out reloads geofence's `[rules] pins_file` (if newer than `pins_max_age_min`). Pins that geofence no longer republishes, such as those from before a `new_search`, would otherwise never go out again.
+- **One owner:** while lora_out runs, it alone drives the radio. Stop it before `check_hw.py --only lora`, and the health module must not open the radio to fill `ag/sys` `lora`.
 
 `lora_rx.py` on the laptop decodes it onto `ag/alert`, and `cot_out.py` turns that into an ATAK marker. `code/afterglow/alert.py` implements and tests this. Use it, don't re-type it.
 

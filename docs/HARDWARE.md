@@ -108,7 +108,8 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
   - Both RFM95Ws need the 915 MHz spring antenna soldered to ANT **before they power up**. Never transmit without it.
   - The laptop radio only listens; only the pod transmits.
   - It's plain LoRa with no encryption, so anyone on 915 MHz can read an alert. Alerts carry a pin, never a device address or ID. `lora_rx.py` drops other teams' packets by node address.
-  - If nothing arrives, check that the `cfg` line `lora_rx.py` logs matches `[lora]`.
+  - If nothing arrives, check that the `cfg` line `lora_rx.py` logs matches `[lora]`. Then check that lora_out isn't silenced: a remembered `lora_off` leaves `runs/lora_off.json`, and lora_out logs "LoRa is OFF" at start-up.
+  - Only one process may drive the radio. Stop `afterglow@lora_out` before `check_hw.py --only lora`.
 - **USB serial:** the radar is the only USB device now. Still use `/dev/radar` or `/dev/serial/by-id/…`, never `ttyACM0`.
 - **Power:**
   - A 5 V 3 A power bank can't announce 5 A, so the Pi may warn and will limit its USB ports to 600 mA. That's fine, because the radar is the only USB device.

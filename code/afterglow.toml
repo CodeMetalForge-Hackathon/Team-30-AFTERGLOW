@@ -57,6 +57,10 @@ cs_gpio = 18               # pod radio CS, Pi pin 12, driven by the library (con
 reset_gpio = 25            # pod radio RST, Pi pin 22
 rx_port = ""               # laptop: XIAO #3's port; "" = the only /dev/cu.usbmodem* or /dev/ttyACM*
 rx_baud = 115200
+# lora_out.py (pod). No acks: every live pin and the heartbeat repeat this often, so a lost packet is covered.
+repeat_s = 5
+alert_version = 1          # 1 = decimetres (indoor: x, y to +-3.2 km, r95 to 25.5 m); 2 = metres (park scale)
+off_file = "runs/lora_off.json"  # lora_off is remembered here (relative to this file), so a restart stays silent; "" = not remembered
 
 [pose]
 # Height used when the GPS can't give one (props-off carried demo): metres above ground.

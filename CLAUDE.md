@@ -39,6 +39,7 @@ code/
     locate.py           ag/pose + ag/track -> retained ag/coverage (coverage and probability grids over [locate] area_m)
     geofence.py         ag/track + map + ag/mode -> ag/target (rules, prio, the pin status guard, SOS); saves pins to runs/
     radio.py            opens the pod's RFM95W on SPI1 from the config's [lora] table (lora_out, check_hw)
+    lora_out.py         pod: ag/target (+ ag/pose, ag/sys) -> 16-byte alerts on the RFM95W every [lora] repeat_s, plus a heartbeat; obeys lora_off
     lora_rx.py          laptop: XIAO #3's USB lines -> ag/alert (drops other teams' packets)
     cot_out.py          laptop: ag/alert (or ag/target + ag/pose with --wifi) -> CoT XML: UDP multicast for ATAK, TCP server for iTAK ([atak] table)
     dashboard.py        web server on [http] port: SSE state stream, /api/ctrl and /api/mode, live/ and snaps/
@@ -85,6 +86,9 @@ mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log                      # recor
 .venv/bin/python -m afterglow.lora_rx --print                            # laptop: real XIAO #3, print, no broker
 .venv/bin/python -m afterglow.cot_out [--wifi <pi-ip>] [--to udp://<phone-ip>:4242]   # laptop: ATAK markers (--print to see the CoT)
 .venv/bin/python -m afterglow.lora_rx --dry-run < rx_lines.txt | .venv/bin/python -m afterglow.cot_out --dry-run   # CoT, no radio, no broker
+.venv/bin/python tools/fake_bus.py --print --duration 120 | .venv/bin/python -m afterglow.lora_out --dry-run | .venv/bin/python -m afterglow.lora_rx --dry-run | .venv/bin/python -m afterglow.cot_out --dry-run   # the whole LoRa path, no radio, no broker
+.venv/bin/python -m afterglow.lora_out [--print]                         # pod: alerts on the RFM95W (--print: show what XIAO #3 would hear)
+mosquitto_pub -t ag/ctrl -m '{"t":0,"cmd":"lora_off"}'                   # silence LoRa (remembered across restarts); "lora_on" to resume
 .venv/bin/python tools/check_hw.py [--only lora omni]                    # on the Pi only
 ```
 

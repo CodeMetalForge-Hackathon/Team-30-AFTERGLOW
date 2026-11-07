@@ -124,12 +124,16 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - [x] serves `live/` and `snaps/` on port 8080;
   - [x] takes a `--broker` flag (it overrides `[mqtt] host`), so it also runs on the laptop. Each instance has its own MQTT client id, so the Pi's and the laptop's can share a broker;
   - [ ] draw `ag/plan` legs, with Accept and Reject (`accept_leg`, `reject_leg`), once `planner.py` exists.
-- [ ] **`lora_out.py` (UT)** sends `ag/target` through `alert.encode` from the RFM95W (`radio.open_pod_radio(cfg["lora"])`, then `rfm.send(pkt)`):
-  - every 5 s per active pin, and at once when a pin's state changes or an SOS arrives;
-  - P1 first; no acks, because the repeats cover lost packets;
-  - a heartbeat carrying the pod's latest `x`, `y` (cot_out places the pod's ATAK marker from it);
-  - obeys `lora_off` and `lora_on`;
-  - ages `last_s` between repeats, takes the battery from `ag/sys`, and sends `rule: "sos"` pins as type 2.
+- [x] **`lora_out.py` (UT; written by SW)** sends `ag/target` through `alert.encode` from the RFM95W (CONTRACTS.md, "LoRa alert"):
+  - every `[lora] repeat_s` (5 s) per live pin, and at once (at most once a second) when a pin is new or its type, state, prio, flags or SOS change. Priority 1 first; on a channel too busy for every pin, the longest-waiting go next, so none goes silent (tested: 40 pins at SF10); no acks;
+  - a heartbeat every `repeat_s` with the pod's latest `x`, `y`; `last_s` ages between repeats; the battery from `ag/sys`;
+  - type 3 for a confirmed pin, type 2 for an SOS-only pin, else type 1;
+  - `lora_off` stops everything and is remembered in `[lora] off_file`, so a restart stays silent; `lora_on` resends at once. The dashboard has no LoRa button yet: use `mosquitto_pub` (CLAUDE.md). A `lora_off` sent while lora_out is down is lost (`ag/ctrl` isn't retained): to start silent, create the off_file by hand;
+  - reloads geofence's pins file at start-up, since `ag/target` isn't retained; after `geofence --fresh`, restart lora_out too (`--fresh` now empties the pins file at once, so the restart can't reload the old pins);
+  - sends one packet per loop, so a `lora_off` gets in between even at SF10; a missing radio is retried every 10 s, and each open first frees the SPI1 bus and pins the last one claimed;
+  - tested with a stub radio, and the whole path with no hardware: `fake_bus --print | lora_out --dry-run | lora_rx --dry-run | cot_out --dry-run` (120 s: 104 packets, all decoded, 3 pins and the pod on ATAK).
+  - **Contract change, tell the team (Utility):** new `[lora]` keys `repeat_s`, `alert_version` (1 indoors, 2 in `park.toml`) and `off_file`. lora_out owns the radio while it runs: stop it before `check_hw.py --only lora`, and health must not open the radio for `ag/sys` `lora`.
+  - [ ] **UT, on the Pi:** `python -m afterglow.lora_out` with XIAO #3 on the laptop: pins and the heartbeat reach `lora_rx.py --print`; `lora_off` silences it; then `sudo systemctl enable --now afterglow@lora_out`.
 - [x] **`lora_rx.py` (SW, laptop):** XIAO #3's lines → `ag/alert` on the laptop's broker. It drops other teams' packets and checks the radio settings at start-up. Tested on fake lines; I4 proves it on the radios.
 - [x] **`cot_out.py` (SW, laptop)** reads `ag/alert` and sends CoT XML over UDP to `[atak] send_to` (default `239.2.3.1:6969`). It needs no pytak, which is now dropped from `requirements-laptop.txt`:
   - spot markers named by pin number as on the dashboard (`P3`), coloured by priority, with a remarks line and the 95% circle;

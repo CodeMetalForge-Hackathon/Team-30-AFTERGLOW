@@ -45,6 +45,9 @@ cs_gpio = 18
 reset_gpio = 25
 rx_port = ""
 rx_baud = 115200
+repeat_s = 5
+alert_version = 2          # metres: park-scale pins can be farther than 25.5 m
+off_file = "runs/lora_off.json"
 
 [pose]
 carry_height_m = 3.0
