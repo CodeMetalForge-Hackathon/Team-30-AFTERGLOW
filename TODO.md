@@ -25,14 +25,14 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
   - **Front end:** `code/afterglow/web/` holds `index.html` and `app.js`. Panels use Preact + htm, and the map uses Leaflet in local metres (`CRS.Simple`). There is no build step and no CDN: the libraries are saved in `web/vendor/`.
   - **No new pip packages** on the Pi or the laptop.
   - **Room to grow:** MJPEG live streams from the same server, a `--broker` flag so the dashboard can run on the laptop, and an optional `drone` field once there's a second drone.
-- [ ] Download Preact + htm (htm's `preact/standalone` bundle) and Leaflet 1.9.4 into `code/afterglow/web/vendor/` **while there's internet**. Pin exact versions.
+- [x] Download Preact + htm (htm's `preact/standalone` bundle) and Leaflet 1.9.4 into `code/afterglow/web/vendor/` **while there's internet**. Pin exact versions. Saved as `vendor/htm-3.1.1/` and `vendor/leaflet-1.9.4/`; usage and hashes are in `vendor/README.md`.
 - [x] Create `code/data/trails.geojson` and `code/data/zones.geojson` for the taped indoor park. Units: lon/lat (the GeoJSON standard, converted with `geo.to_xy` on load). `tools/make_indoor_map.py` generates them from the origin and waypoints; rerun it after changing either.
 - [x] Set `origin_lat` and `origin_lon` in `afterglow.toml`; indoors, that's the point taped waypoint 0 maps to. Keep the file identical on the pod and the laptop. It's set to Acadia for now; switch it to the venue if the ATAK markers should appear there.
 - [ ] Set the private Meshtastic channel name and key on every board by hour 1. **Keep the key out of the repo.**
   - [x] Team key made: `code/lora_channel.key` on Dillon's laptop (git-ignored). Teammates get it by direct message.
   - [ ] Pod board: plug into the laptop, `.venv/bin/python tools/setup_lora.py --port /dev/cu.usbmodem…`, all PASS.
   - [ ] Board #2 (laptop): same command, all PASS.
-- [ ] Record the FPV details: model, props, battery, flight-controller firmware and control link (ELRS 2.4 GHz or 900 MHz). The control link decides which radio coexistence test matters.
+- [x] ~~Record the FPV details.~~ **Decided:** the available drones are too small to carry the pod. We build and demo the payload on its own and pitch it as ready to fly once we have a larger drone. Steps that mention the drone (I7, the demo script, the on-drone GPS test) need rewording for a payload-only demo.
 
 ## Phase 1: Bring-up and first data (hours 0–3, until 13:00, checkpoints I1–I5)
 

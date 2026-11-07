@@ -2,6 +2,8 @@
 
 A search-assist sensing pod strapped under an FPV drone. It passively hears the Bluetooth beacons that lost, dead or switched-off phones and AirTags keep sending (Apple Find My, Google Find Hub, Samsung lost mode). It pins them on a park map, then sends each pin over LoRa (Meshtastic) to the ranger's laptop and ATAK phone, with no Wi-Fi or cell. A camera with person detection on the AI HAT+, plus thermal and radar, helps a human confirm. Everything on the pod runs on a Raspberry Pi 5.
 
+**Payload only (decided at kickoff):** the drones we have are too small to carry the pod, so we build and demo the payload on its own and pitch it as ready to fly on a larger drone. Don't plan work that needs the pod in the air.
+
 The project is built at a 26-hour hackathon. Hour 0 is Sat 7 Nov 2026 at 10:00 ET, the freeze is at hour 22 (Sun 08:00) and submission is due by hour 26 (Sun 12:00). `TODO.md` holds the phased plan; tick items there as they land.
 
 **How to answer:** keep answers and explanations simple and short. Go into detail only when asked.
