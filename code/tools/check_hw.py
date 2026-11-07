@@ -2,11 +2,13 @@
 """Check every piece of pod hardware from the Pi, one line each: PASS, FAIL or SKIP.
 
     python3 tools/check_hw.py              # everything (about 30 s)
-    python3 tools/check_hw.py --only gps omni
+    python3 tools/check_hw.py --only lora omni
     python3 tools/check_hw.py --seconds 10 # listen longer on the serial ports
 
 Run it after every hardware change. The bench bring-up stage passes when every
-part you've connected shows PASS. Needs pyserial; nothing else beyond the OS tools.
+part you've connected shows PASS. Ports and addresses come from afterglow.toml.
+Needs pyserial; the lora check also needs Blinka and adafruit-circuitpython-rfm9x
+(requirements-pi.txt), and sends one heartbeat alert to the laptop radio.
 """
 import argparse
 import glob
@@ -16,7 +18,12 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from afterglow import config as cfgmod  # noqa: E402
 
 CHECKS = []
 
@@ -66,7 +73,7 @@ def listen(port, baud, seconds, want):
         return "PASS", f"{good} good lines of {total} in {seconds} s, e.g. {sample}"
     if total:
         return "FAIL", f"{total} lines but none valid: wrong baud, or TX/RX swapped?"
-    return "FAIL", "silent: check TX→RX crossing, ground, power and the board's firmware (prints to Serial0?)"
+    return "FAIL", "silent: check TX→RX crossing, ground, power and the firmware (Serial1 on D9/D10?)"
 
 
 def is_json_type(kind):
@@ -85,9 +92,13 @@ def c_config(a):
         return "SKIP", "not on a Pi"
     text = open(path).read()
     need = ["dtparam=i2c_arm=on", "dtparam=uart0=on", "dtoverlay=uart3-pi5", "dtoverlay=uart2-pi5",
-            "usb_max_current_enable=1", "camera_auto_detect=1", "dtparam=pciex1_gen=3"]
+            "dtoverlay=spi1-1cs,cs0_pin=16", "camera_auto_detect=1", "dtparam=pciex1_gen=3"]
     missing = [n for n in need if n not in text]
-    return ("FAIL", "missing: " + ", ".join(missing)) if missing else ("PASS", "all lines present")
+    if missing:
+        return "FAIL", "missing: " + ", ".join(missing)
+    if "dtparam=spi=on" in (l.strip() for l in text.splitlines()):
+        return "FAIL", "remove dtparam=spi=on: SPI0 takes GPIO8/9 from WIFI's UART3"
+    return "PASS", "all lines present"
 
 
 @check("power")
@@ -111,16 +122,35 @@ def c_ports(a):
 
 @check("omni")
 def c_omni(a):
-    return listen("/dev/ttyAMA0", 921600, a.seconds, is_json_type("ble"))
+    s = a.cfg["serial"]
+    return listen(s["omni"], s["esp_baud"], a.seconds, is_json_type("ble"))
 
 
 @check("wifi")
 def c_wifi(a):
-    return listen("/dev/ttyAMA3", 921600, a.seconds, is_json_type("wifi"))
+    s = a.cfg["serial"]
+    return listen(s["wifi"], s["esp_baud"], a.seconds, is_json_type("wifi"))
+
+
+@check("lora")
+def c_lora(a):
+    try:
+        from afterglow import alert, radio
+        rfm = radio.open_pod_radio(a.cfg["lora"])
+    except ImportError as e:
+        return "SKIP", f"{e.name} not installed (pip install -r requirements-pi.txt)"
+    except Exception as e:
+        return "FAIL", f"{e} (SPI1 wiring? dtoverlay=spi1-1cs,cs0_pin=16 and a reboot?)"
+    if rfm.send(alert.encode({"x": 0, "y": 0}, kind=alert.TYPE_HEARTBEAT)):
+        return "PASS", "RFM95W found; sent a heartbeat (lora_rx.py on the laptop should show it)"
+    return "FAIL", "RFM95W found but the send timed out (power? antenna on ANT?)"
 
 
 @check("gps")
 def c_gps(a):
+    port = a.cfg["serial"]["gps"]
+    if not port:
+        return "SKIP", 'no GPS receiver yet ([serial] gps = ""): position uses the taped waypoints'
     fix_seen = []
 
     def nmea(line):
@@ -133,7 +163,7 @@ def c_gps(a):
         return False
     last = ("FAIL", "no NMEA at 38400, 9600 or 115200")
     for baud in (38400, 9600, 115200):
-        st, msg = listen("/dev/ttyAMA2", baud, max(3, a.seconds // 2), nmea)
+        st, msg = listen(port, baud, max(3, a.seconds // 2), nmea)
         if st == "PASS":
             fix = "has a fix" if fix_seen else "no fix yet (take it outside or to a window)"
             return "PASS", f"NMEA at {baud} baud, {fix}. Set gps_baud = {baud} in afterglow.toml"
@@ -149,11 +179,11 @@ def c_i2c(a):
     if rc is None:
         return "SKIP", out + " (sudo apt install i2c-tools)"
     found = set(re.findall(r"\b([0-9a-f]{2})\b", "\n".join(l.split(":", 1)[1] for l in out.splitlines() if ":" in l)))
-    want = {"4a": "IMU (BNO085)", "33": "thermal (MLX90640)"}
-    missing = [f"{v} at 0x{k}" for k, v in want.items() if k not in found]
-    if missing:
-        return "FAIL", "not found: " + "; ".join(missing) + f" (found {sorted(found) or 'nothing'})"
-    return "PASS", "0x4a IMU and 0x33 thermal answer"
+    imu, thermal = (f"{a.cfg['i2c'][k]:02x}" for k in ("imu_addr", "thermal_addr"))
+    if imu not in found:
+        return "FAIL", f"IMU (BNO086) not at 0x{imu} (found {sorted(found) or 'nothing'}): 3.3 V, SDA/SCL, ADR jumper?"
+    note = f"thermal at 0x{thermal}" if thermal in found else f"no thermal at 0x{thermal} yet (it arrives later)"
+    return "PASS", f"IMU at 0x{imu}; {note}"
 
 
 @check("camera")
@@ -180,12 +210,12 @@ def c_hailo(a):
 @check("usb_serial")
 def c_usb(a):
     byid = sorted(glob.glob("/dev/serial/by-id/*"))
-    links = [p for p in ("/dev/lora", "/dev/radar") if os.path.exists(p)]
+    radar = a.cfg["serial"]["radar"]
     if not byid:
-        return "FAIL", "no USB serial devices: LoRa board and radar plugged in?"
+        return "FAIL", "no USB serial devices: radar plugged in (the only USB device)?"
     names = ", ".join(os.path.basename(p) for p in byid)
-    note = f"; udev links: {', '.join(links)}" if links else "; add udev links (pi/99-afterglow.rules)"
-    return ("PASS" if len(byid) >= 2 else "FAIL"), f"{len(byid)} found: {names}{note}"
+    note = f"; {radar} present" if os.path.exists(radar) else f"; no {radar}: add the udev rule (pi/99-afterglow.rules)"
+    return "PASS", f"{len(byid)} found: {names}{note}"
 
 
 @check("mqtt")
@@ -201,7 +231,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--only", nargs="*", help="names: " + " ".join(n for n, _ in CHECKS))
     ap.add_argument("--seconds", type=int, default=5, help="how long to listen on each serial port")
+    ap.add_argument("--config")
     a = ap.parse_args()
+    a.cfg = cfgmod.load(a.config)
     width = max(len(n) for n, _ in CHECKS)
     results = []
     for name, fn in CHECKS:

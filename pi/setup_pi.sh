@@ -11,7 +11,7 @@ echo "== packages"
 sudo apt update
 sudo apt full-upgrade -y
 sudo apt install -y mosquitto mosquitto-clients i2c-tools python3-venv python3-pip \
-                    python3-picamera2 hailo-all git
+                    python3-picamera2 python3-lgpio hailo-all git
 
 echo "== config.txt"
 if ! grep -q "AFTERGLOW pod" "$CFG"; then
@@ -26,7 +26,7 @@ fi
 echo "== serial console off the GPIO UART, UART hardware on"
 sudo raspi-config nonint do_serial_cons 1 || true
 sudo raspi-config nonint do_serial_hw 0 || true
-sudo usermod -aG dialout,i2c,video "$USER"
+sudo usermod -aG dialout,i2c,spi,gpio,video "$USER"
 
 echo "== Mosquitto"
 sudo systemctl enable --now mosquitto
@@ -37,10 +37,9 @@ python3 -m venv --system-site-packages "$CODE/.venv"
 
 cat <<'MSG'
 
-Done. Two manual steps, then reboot:
-  1. Tell the Pi its supply is 5 A, so it stops warning:
-       sudo rpi-eeprom-config --edit      -> add the line  PSU_MAX_CURRENT=5000
-  2. sudo reboot
+Done. Now:  sudo reboot
+(The power bank gives 3 A, so the Pi may warn about its supply. That's expected:
+don't set PSU_MAX_CURRENT. Check vcgencmd get_throttled reads 0x0 instead.)
 After the reboot:
   cd code && .venv/bin/python tools/check_hw.py
 MSG

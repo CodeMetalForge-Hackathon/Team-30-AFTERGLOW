@@ -20,11 +20,30 @@ port = 1883
 # Not used in this profile (no pod hardware); kept so both profiles have the same keys.
 omni = "/dev/ttyAMA0"
 wifi = "/dev/ttyAMA3"
-gps = "/dev/ttyAMA2"
+gps = ""
 esp_baud = 921600
 gps_baud = 38400
-lora = "/dev/lora"
 radar = "/dev/radar"
+
+[i2c]
+# Not used in this profile; kept so both profiles have the same keys.
+imu_addr = 0x4B
+thermal_addr = 0x33
+
+[lora]
+# Same radio settings as afterglow.toml, so lora_rx.py works with either profile.
+freq_mhz = 915.0
+sf = 7
+bw_hz = 125000
+cr = 5
+preamble = 8
+tx_power_dbm = 13
+pod_node = 0xA1
+laptop_node = 0xA2
+cs_gpio = 18
+reset_gpio = 25
+rx_port = ""
+rx_baud = 115200
 
 [pose]
 carry_height_m = 3.0

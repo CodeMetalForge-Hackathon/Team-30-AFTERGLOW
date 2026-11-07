@@ -7,11 +7,11 @@ Everything runs on the Raspberry Pi 5 in the pod. Programs talk over MQTT topics
 ## Read in this order
 
 1. [`TODO.md`](TODO.md): the phased plan for the hackathon. Tick items as they land.
-2. [`docs/HARDWARE.md`](docs/HARDWARE.md): every device, its port or address, how software reaches it, Pi setup and known gotchas.
+2. [`docs/HARDWARE.md`](docs/HARDWARE.md): every device, its port or address, how software reaches it, Pi setup and known gotchas. It comes from Rohan's hardware reference ([`docs/AFTERGLOW Hardware.pdf`](<docs/AFTERGLOW Hardware.pdf>)), which lists the parts we actually have.
 3. [`docs/CONTRACTS.md`](docs/CONTRACTS.md): MQTT topics and JSON shapes, ESP32 serial lines, the 16-byte LoRa alert and the ATAK mapping. The source of truth for anything that crosses a module boundary.
 4. [`docs/MODULES.md`](docs/MODULES.md): who builds which module, tiers, integration checkpoints, and how to start without hardware.
 5. [`docs/drone_build_plan.md`](docs/drone_build_plan.md): offline copy of the build doc (decisions, parts, schedule, demo script, risks).
-6. [`docs/wiring/`](docs/wiring/): wiring diagram, pod layout, our Pi labelled pin by pin, `pins.csv`, and the interactive `wiring_and_build.html` (open it in a browser).
+6. [`docs/wiring/`](docs/wiring/): `pins.csv` is current. The wiring diagram, pod layout and `wiring_and_build.html` are **out of date** (they still show Meshtastic, the BNO085 and a GPS module); use the pin map in HARDWARE.md.
 
 ## Layout
 
@@ -26,12 +26,12 @@ code/
   afterglow.toml     DEMO profile: the taped indoor park, real pod (identical on pod and laptop)
   park.toml          PARK profile: realistic view on real Acadia trails, laptop only, simulated
   afterglow/         contracts.py, alert.py, geo.py, bus.py, config.py, parkmap.py,
-                     bridge.py and position.py (tier 1, working)
+                     bridge.py, position.py, radio.py and lora_rx.py (tier 1, working)
   data/              trails.geojson, zones.geojson (indoor); park_trails.geojson, park_zones.geojson (OSM)
   tools/             check_hw.py, fake_bus.py, make_indoor_map.py, make_park_map.py, draw_map.py
   tests/             pytest
 pi/                  setup_pi.sh, config.txt.append, udev rules, Mosquitto config, systemd service
-firmware/README.md   what the ESP32 boards must send (and the Serial0 gotcha)
+firmware/            README.md: what the ESP32 boards must send (Serial1 on D9/D10); lora_rx/: the laptop radio's sketch
 ```
 
 ## Quick start
@@ -53,7 +53,7 @@ Every module takes `--config`, or set `AFTERGLOW_CONFIG=park.toml`. Both files m
 
 **Pi** (clone to `/home/pi/afterglow`):
 ```
-bash pi/setup_pi.sh                     # packages, config.txt, venv; then add PSU_MAX_CURRENT=5000 and reboot
+bash pi/setup_pi.sh                     # packages, config.txt, venv; then reboot
 cd code && .venv/bin/python tools/check_hw.py
 .venv/bin/python -m afterglow.bridge    # ESP32 lines → ag/obs/*
 .venv/bin/python -m afterglow.position  # GPS → ag/pose

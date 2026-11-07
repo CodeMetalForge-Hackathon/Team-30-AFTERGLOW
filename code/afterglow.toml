@@ -24,15 +24,38 @@ host = "localhost"
 port = 1883
 
 [serial]
-omni = "/dev/ttyAMA0"      # UART0, Pi pins 8 (TX) and 10 (RX)
-wifi = "/dev/ttyAMA3"      # UART3, Pi pins 24 (TX) and 21 (RX)
-gps = "/dev/ttyAMA2"       # UART2, Pi pins 7 (TX) and 29 (RX)
+omni = "/dev/ttyAMA0"      # UART0, Pi pins 8 (TX) and 10 (RX) <-> OMNI D9 (RX) and D10 (TX)
+wifi = "/dev/ttyAMA3"      # UART3, Pi pins 24 (TX) and 21 (RX) <-> WIFI D9 (RX) and D10 (TX)
+# GPS: we have only an antenna (u-blox ANN-MB5), no receiver, so "" = taped waypoints only.
+# Once a receiver is wired to UART2 (Pi pins 7 TX, 29 RX), set "/dev/ttyAMA2".
+gps = ""
 esp_baud = 921600
 gps_baud = 38400           # most u-blox M10 modules; check_hw.py finds the real one
-# USB devices: use the stable names under /dev/serial/by-id/ (or the udev
-# symlinks in pi/99-afterglow.rules), because ttyACM0/1 swap between boots.
-lora = "/dev/lora"
+# The radar is the only USB device. Use the udev symlink (pi/99-afterglow.rules)
+# or /dev/serial/by-id/..., never ttyACM0.
 radar = "/dev/radar"
+
+[i2c]
+imu_addr = 0x4B            # SparkFun BNO086, ADR jumper open (0x4A only if ADR is bridged)
+thermal_addr = 0x33        # MLX90640, arriving later
+
+[lora]
+# Two bare RFM95W radios (SX1276): plain LoRa, a RadioHead-style 4-byte header, then the
+# 16-byte alert. Pod: Pi SPI1 (afterglow/radio.py). Laptop: XIAO #3 (firmware/lora_rx/).
+# Both radios must match: lora_rx.ino copies these numbers (tests/test_lora_rx.py checks),
+# and lora_rx.py asks the board for its settings at start-up.
+freq_mhz = 915.0
+sf = 7                     # 7 to start; 9-10 for more range at lower speed (ME 2's range test)
+bw_hz = 125000
+cr = 5                     # coding rate 4/5
+preamble = 8
+tx_power_dbm = 13          # pod only, 5-20; start at 13. The laptop radio never transmits
+pod_node = 0xA1            # header "from" of every pod packet
+laptop_node = 0xA2         # header "to"; lora_rx.py drops anything else (no private channel)
+cs_gpio = 18               # pod radio CS, Pi pin 12, driven by the library (config.txt moves the kernel's CS to GPIO16)
+reset_gpio = 25            # pod radio RST, Pi pin 22
+rx_port = ""               # laptop: XIAO #3's port; "" = the only /dev/cu.usbmodem* or /dev/ttyACM*
+rx_baud = 115200
 
 [pose]
 # Height used when the GPS can't give one (props-off carried demo): metres above ground.

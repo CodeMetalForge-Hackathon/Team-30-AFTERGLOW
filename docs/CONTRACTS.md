@@ -42,17 +42,18 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 | `ag/plan` (**new**) | planner.py | `{"t":…,"id":"L7","kind":"homing","legs":[{"to_x":20,"to_y":5,"heading_deg":72,"dist_m":35,"alt_m":8}],"status":"proposed"}` | Legs for the pilot. `kind` is `patrol`, `grid` or `homing`. The ranger accepts on the dashboard; the observer reads heading and distance to the pilot |
 | `ag/mode` (**changed**) | dashboard.py | `{"t":…,"mode":"investigate"}` | `patrol`, `night`, `investigate` or `search` (the four modes in the build doc) |
 | `ag/ctrl` | dashboard.py | `{"t":…,"cmd":"ack","pin":"P3"}` | Operator commands, listed below |
-| `ag/sys` (**new**) | health (Utility) | `{"t":…,"cpu_c":61.2,"throttled":"0x0","gps_fix":true,"lora":true,"disk_free_gb":41.0,"batt_pct":null}` | Pod health for the dashboard. Optional `batt_pct` (0–100, or `null`): `null` for now, because nothing on the pod can read the LiPo yet (the Pi only sees the converter's 5 V). A real reading needs a voltage divider into a XIAO analog pin (tier 3) |
+| `ag/sys` (**new**) | health (Utility) | `{"t":…,"cpu_c":61.2,"throttled":"0x0","gps_fix":true,"lora":true,"disk_free_gb":41.0,"batt_pct":null}` | Pod health for the dashboard. Optional `batt_pct` (0–100, or `null`): `null` for now, because the pod runs on a USB power bank the Pi can't read. On a drone, a voltage divider from the LiPo into a XIAO analog pin would fill it (tier 3) |
+| `ag/alert` (**new**) | lora_rx.py (**laptop only**) | `{"t":…,"rssi":-71,"snr":9.5,"version":2,"kind":1,"track":"T1","x":18.0,"y":9.0,"r95":12.0,"state":"localized","flags":{…},"c":0.82,"prio":2,"cls":"findmy","br":null,"sos":{…},"last_s":4,"battery":null,"off_trail_m":46}` | One LoRa alert heard by the laptop radio: `alert.decode`'s fields plus `t`, `rssi` and `snr`. `kind` is the alert type (1 track, 2 SOS, 3 confirmed person, 4 heartbeat). Lives on the laptop's own broker; cot_out.py and the LoRa fallback view read it |
 
 ### `cls` values (beacon type)
 
 | `cls` | What it is | Reported |
 |---|---|---|
-| `findmy` | Apple offline-finding beacon: manufacturer data starting `4C 00 12 19`. A dead, off or cut-off iPhone, or an AirTag | Always |
+| `findmy` | Apple offline-finding beacon **separated from its owner**: manufacturer data starting `4C 00 12 19` (the full 25-byte payload). A dead, off or cut-off iPhone, or a lost AirTag | Always |
 | `findhub` | Google Find Hub accessory frame (service data `0xFEAA`) | Always |
 | `samsung_off` | Samsung lost-mode advert (service `0xFD69`) | Always |
 | `ref` | Our reference beacon: manufacturer data `FF FF 'A' 'G'` | Always |
-| `apple_other` | Other Apple frames from live devices | Only with `REPORT_ALL` |
+| `apple_other` | Other Apple frames from live devices, including `4C 00 12 02` (offline finding while **near its owner**: every passing hiker's iPhone) | Only with `REPORT_ALL` |
 | `other` | Anything else | Only with `REPORT_ALL` |
 
 ### `ag/ctrl` commands
@@ -144,7 +145,7 @@ dashboard.py serves everything on one port (`[http] port`, 8080), so there are n
 
 ## Serial lines from the ESP32 boards
 
-One JSON object per line, `\n` terminated, 921600 baud, 8N1, on the XIAO's hardware UART (D6 = TX, D7 = RX). Raw addresses appear **only** on these wires.
+One JSON object per line, `\n` terminated, 921600 baud, 8N1, on the XIAO's `Serial1` at D9 (RX, GPIO8) and D10 (TX, GPIO9): `Serial1.begin(921600, SERIAL_8N1, D9, D10)`. `Serial` stays the USB port for debug output. Raw addresses appear **only** on these wires.
 
 ```
 OMNI  → Pi  {"type":"ble","addr":"aa:bb:cc:dd:ee:ff","cls":"findmy","rssi":-71}
@@ -153,21 +154,36 @@ WIFI  → Pi  {"type":"sos","hurt":true,"walk":false,"count":2,"rssi":-55}
 Pi → WIFI  {"cmd":"sos_on"}   {"cmd":"sos_off"}
 ```
 
-The bridge drops lines that aren't valid JSON and counts them in its log.
+- A `ble` line carries only the class and the RSSI, never payload bytes. The hardware reference's proposed `key` field (the payload hex) would break the privacy rules, so it isn't used. Its `mac` is our `addr`, and its `t` isn't needed, because the Pi stamps time.
+- The bridge drops lines that aren't valid JSON and counts them in its log.
+
+### Laptop LoRa radio (XIAO #3 → laptop USB)
+
+XIAO #3 (`firmware/lora_rx/`) only listens. It prints every packet it hears, one JSON line each, and doesn't filter. The port is `/dev/cu.usbmodem*` on macOS; read it at 115200 with pyserial. `lora_rx.py` handles all of it.
+
+```
+XIAO #3 → laptop  {"type":"rx","rssi":-71,"snr":9.5,"hex":"a2a10700<32 hex chars: the alert>"}
+XIAO #3 → laptop  {"type":"cfg","freq":915.000,"sf":7,"bw":125000,"cr":5,"pre":8}
+XIAO #3 → laptop  {"type":"err","msg":"no RFM95W: …"}
+laptop → XIAO #3  ?        (asks for the cfg line)
+```
+
+- `hex` is the whole packet: the 4-byte RadioHead header (to, from, id, flags), then the payload.
+- `lora_rx.py` sends `?` when it opens the port, and stops if the `cfg` reply differs from the config's `[lora]` table.
 
 ## LoRa alert: 16 bytes
 
-Sent by `lora_out.py` over Meshtastic as a `PRIVATE_APP` payload:
+Sent by `lora_out.py` from the pod's RFM95W as plain LoRa (open the radio with `afterglow/radio.py`). Each packet is a 4-byte RadioHead header (to `laptop_node`, from `pod_node`, id, flags), then the 16 bytes:
 - every 5 seconds per active pin;
 - at once when a pin changes state or an SOS arrives;
-- P1 first, with `wantAck` for P1 and P2.
+- P1 first. There are no acks: the 5-second repeats cover a lost packet.
 
 lora_out.py stays a plain encoder of `ag/target`. Three details:
 - **`last_s`:** it sends `last_s + (now − t)/1000`, so the 5-second repeats keep counting even when geofence hasn't republished the pin.
 - **Battery (byte 14):** it reads `batt_pct` from the latest `ag/sys` and passes it to `alert.encode` as `battery`. `null` goes out as 255, "unknown".
 - **Type:** a pin with `rule` `"sos"` goes out as type 2 (SOS). An SOS attached to a normal pin rides in byte 11 and the SOS flag.
 
-`lora_rx.py` on the laptop decodes it and `cot_out.py` turns it into an ATAK marker. `code/afterglow/alert.py` implements and tests this. Use it, don't re-type it.
+`lora_rx.py` on the laptop decodes it onto `ag/alert`, and `cot_out.py` turns that into an ATAK marker. `code/afterglow/alert.py` implements and tests this. Use it, don't re-type it.
 
 `struct.pack('<BBhhBBBBBBHBB', …)`
 
@@ -189,15 +205,22 @@ lora_out.py stays a plain encoder of `ag/target`. Three details:
 
 Changes from the plan doc's layout: version 2 adds a metres scale, because a park-scale pin can be farther than 25.5 m from where it was heard. Bit 7 and byte 15 were the gas-hazard fields; the drone build has no gas sensor, so they now carry the camera flag and the off-trail distance.
 
-**Meshtastic settings, every board:**
-- Region `US`.
-- Preset `MediumFast`.
-- A private primary channel name and key, set at hour 1. Other teams run Meshtastic too. Every other channel disabled.
-- Rebroadcast `LOCAL_ONLY`, so our boards don't spend airtime relaying other teams' packets.
-- `code/tools/setup_lora.py` writes all of this and checks it. The name and key live in `code/lora_channel.key`, which is git-ignored; share it by direct message only.
+**Radio settings:** the config's `[lora]` table: 915.0 MHz, SF7, 125 kHz, coding rate 4/5, preamble 8, CRC on, sync word left at the default. Both radios must match exactly.
+- `firmware/lora_rx/lora_rx.ino` copies the numbers, and `tests/test_lora_rx.py` fails if they drift apart.
+- SF 9–10 trades speed for range. Change it in both places after ME 2's range test.
+
+**Filtering:** there's no private channel, so `lora_rx.py` keeps a packet only if all of these hold:
+- it's addressed to `laptop_node` and comes from `pod_node`;
+- it's 16 bytes;
+- it carries a known alert version.
+
+Everything else is counted as another team's traffic and dropped.
+
+**Not encrypted:** anyone on 915 MHz can read an alert. It carries a pin's position and class, never a device address or ID.
 
 ## ATAK (Cursor-on-Target)
 
+- **Input:** `cot_out.py` reads `ag/alert` on the laptop. **Fallback:** if the radio link fails (there's no spare XIAO), it reads `ag/target` from the Pi's broker over Wi-Fi instead. It has the same fields, already in metres.
 - `cot_out.py` converts the alert's x and y back to latitude and longitude around the shared origin:
   - `lat = lat0 + y / 111320`
   - `lon = lon0 + x / (111320 · cos lat0)`

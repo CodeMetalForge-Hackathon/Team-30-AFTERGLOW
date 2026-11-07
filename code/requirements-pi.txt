@@ -1,12 +1,12 @@
 # On the Pi, inside a venv made with --system-site-packages
-# (picamera2 and the Hailo packages come from apt, not pip).
+# (picamera2, the Hailo packages and lgpio come from apt, not pip).
 paho-mqtt>=2.0
 pyserial>=3.5
 pynmea2>=1.19
-meshtastic>=2.3
 smbus2
 numpy
 adafruit-blinka
+adafruit-circuitpython-rfm9x
 adafruit-circuitpython-mlx90640
 adafruit-circuitpython-bno08x
 pytest

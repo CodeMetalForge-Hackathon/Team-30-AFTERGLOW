@@ -13,6 +13,6 @@ snaps/
 live/
 *.log
 
-# Secrets: the Meshtastic channel key never goes in the repo
+# Secrets never go in the repo
 *.key
 .env

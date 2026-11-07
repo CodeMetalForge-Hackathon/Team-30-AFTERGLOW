@@ -1,96 +1,145 @@
 # Hardware integration: what's plugged in where, and how software reaches it
 
-Everything here matches the wiring page (`wiring/wiring_and_build.html`) and the build doc's "Drone build plan" tab. If they disagree, the wiring page wins for pins and the build doc wins for decisions.
+**Source:** Rohan's "AFTERGLOW Pod Hardware Reference for Code" (`docs/AFTERGLOW Hardware.pdf`, Nov 7), which lists the parts we actually have. It replaces the build doc's parts list.
+
+**`docs/wiring/` is out of date** apart from `pins.csv`. The wiring page and diagrams still show Meshtastic, the BNO085, a GPS module and D6/D7 on the XIAOs. Use the pin map below until they're redrawn.
 
 ## The pod in one picture
 
 ```
-FPV flight LiPo (4S–6S) ──► 5 V 5 A converter ──USB-C──► Raspberry Pi 5 16 GB + Active Cooler + AI HAT+ (Hailo-8)
-                                                         │
-   OMNI  XIAO ESP32S3 ── UART0  /dev/ttyAMA0  921600 ───┤  BLE beacons (passive)
-   WIFI  XIAO ESP32S3 ── UART3  /dev/ttyAMA3  921600 ───┤  Wi-Fi probes, SOS page
-   GPS   u-blox M10   ── UART2  /dev/ttyAMA2  38400 ────┤  NMEA position (on the drone's top plate)
-   IMU   BNO085       ── I²C-1  0x4A ──┐                │
-   Thermal MLX90640   ── I²C-1  0x33 ◄─┘ (STEMMA QT chain)
-   Camera Module 3    ── CSI ribbon (through the HAT cutout)
-   AI HAT+            ── PCIe ribbon  /dev/hailo0
-   LoRa  XIAO+Wio-SX1262 (Meshtastic) ── USB  /dev/lora ──► 915 MHz ──► LoRa board #2 ── USB ── laptop ──► ATAK phone
-   Radar MR60BHA2 kit ── USB  /dev/radar  (tier 3)
+USB-C power bank 5 V 3 A ──USB-C──► Raspberry Pi 5 16 GB + Active Cooler + AI HAT+ (Hailo-8)
+                                    │
+   OMNI  XIAO ESP32S3 #1 ── UART0  /dev/ttyAMA0  921600 ──┤  BLE beacons (passive)
+   WIFI  XIAO ESP32S3 #2 ── UART3  /dev/ttyAMA3  921600 ──┤  Wi-Fi probes, SOS page
+   LoRa  RFM95W (SX1276) ── SPI1   /dev/spidev1.0 ────────┤──► 915 MHz ──► RFM95W + XIAO #3 ── USB ── laptop ──► ATAK phone
+   IMU   BNO086          ── I²C-1  0x4B, INT + RST ───────┤
+   Thermal MLX90640      ── I²C-1  0x33 (arriving later, Qwiic from the IMU)
+   Camera Module 3       ── CSI ribbon
+   AI HAT+               ── PCIe ribbon  /dev/hailo0
+   Radar MR60BHA2 kit    ── USB  /dev/radar  (tier 3)
+   GPS   none yet: only a u-blox ANN-MB5 antenna. UART2 (/dev/ttyAMA2) is reserved for a receiver
 ```
+
+We have three XIAO ESP32S3 boards: OMNI, WIFI and the laptop radio. **There's no spare.**
 
 ## Device table
 
 | Part | Connects to | Linux sees it as | Settings | Python library | Quick test |
 |---|---|---|---|---|---|
-| OMNI board (BLE scanner) | Pins 8 TX, 10 RX, 2 5V, 9 GND | `/dev/ttyAMA0` | 921600 8N1 | pyserial | `tools/check_hw.py --only omni` |
-| WIFI board (probes + SOS page) | Pins 24 TX, 21 RX, 2 5V, 14 GND | `/dev/ttyAMA3` | 921600 8N1 | pyserial | `--only wifi` |
-| GPS module | Pins 7 TX, 29 RX, 4 5V, 30 GND | `/dev/ttyAMA2` | usually 38400 (some 9600 or 115200) | pynmea2 | `--only gps` (finds the baud) |
-| IMU BNO085 | STEMMA QT from pins 1, 3, 5, 6 | I²C bus 1, `0x4A` | 400 kHz | adafruit-circuitpython-bno08x | `i2cdetect -y 1` |
-| Thermal MLX90640 | STEMMA QT, chained after the IMU | I²C bus 1, `0x33` | 32×24, aim for 4 Hz | adafruit-circuitpython-mlx90640 | `i2cdetect -y 1` |
+| OMNI board (XIAO #1, BLE scanner) | Pins 8 TX, 10 RX, 2 5V, 9 GND | `/dev/ttyAMA0` | 921600 8N1 | pyserial | `tools/check_hw.py --only omni` |
+| WIFI board (XIAO #2, probes + SOS page) | Pins 24 TX, 21 RX, 2 5V, 14 GND | `/dev/ttyAMA3` | 921600 8N1 | pyserial | `--only wifi` |
+| Pod LoRa radio (Adafruit RFM95W) | SPI1: pins 12, 35, 38, 40; RST 22; G0 18; 3.3 V 17; GND 39 | `/dev/spidev1.0` | `[lora]` in the config | adafruit-circuitpython-rfm9x via Blinka; `afterglow/radio.py` | `--only lora` (sends one heartbeat) |
+| Laptop LoRa radio (RFM95W + XIAO #3) | USB to the laptop | `/dev/cu.usbmodem*` (macOS) | `firmware/lora_rx/`, 115200 | pyserial; `afterglow/lora_rx.py` | `lora_rx.py --print` logs "radio settings match" |
+| IMU: SparkFun BNO086 (SEN-22857) | Pins 1, 3, 5, 6; INT pin 15 (GPIO22); RST pin 16 (GPIO23) | I²C bus 1, `0x4B` | 400 kHz | adafruit-circuitpython-bno08x | `--only i2c` |
+| Thermal MLX90640 (later) | Qwiic from the IMU | I²C bus 1, `0x33` | 32×24, a few fps at 400 kHz | adafruit-circuitpython-mlx90640 | `--only i2c` |
 | Camera Module 3 (imx708) | CSI ribbon, 22-to-15-pin | libcamera camera 0 | 4608×2592 full frame | picamera2 (apt) | `rpicam-hello --list-cameras` |
 | AI HAT+ 26 TOPS (Hailo-8) | PCIe ribbon + header | `/dev/hailo0` | PCIe Gen 3 | hailo-all (apt) | `hailortcli fw-control identify` |
-| LoRa board (Meshtastic) | USB-A port, up-angled adapter | `/dev/ttyACM*` → `/dev/lora` | Region US, MediumFast, private channel | meshtastic | `tools/setup_lora.py --port /dev/lora --check` |
-| Radar MR60BHA2 kit (tier 3) | USB-A port | `/dev/ttyACM*` → `/dev/radar` | kit firmware | pyserial | `--only usb_serial` |
-| Power | USB-C from the 5 V 5 A converter | — | `usb_max_current_enable=1`, `PSU_MAX_CURRENT=5000` | — | `vcgencmd get_throttled` must be `0x0` |
+| Radar MR60BHA2 kit (tier 3) | USB-C to a USB 2 port | `/dev/ttyACM*` → `/dev/radar` | 115200 JSON lines, from our sketch | pyserial | `--only usb_serial` |
+| GPS (none yet) | Reserved: pins 4, 7, 29, 30 | `/dev/ttyAMA2` | the receiver's default, usually 38400 | pynmea2 | `--only gps` (SKIP while `gps = ""`) |
+| Power | USB-C power bank, 5 V 3 A | — | no `PSU_MAX_CURRENT`, no `usb_max_current_enable` | — | `vcgencmd get_throttled` must be `0x0` |
 
 ## Pin map
 
-Hold the Pi with the USB and Ethernet ports toward you and the header on the right. Pin 1 is the top-left socket, farthest from the ports. Odd pins run down the inner column, even pins down the board edge, two per row: row *n* is pins 2*n*−1 and 2*n*. `wiring/pi_header_labelled.jpg` is our actual board, labelled. `wiring/pins.csv` is the same table as data.
+Hold the Pi with the USB and Ethernet ports toward you and the header on the right. Pin 1 is the top-left socket, farthest from the ports. Odd pins run down the inner column and even pins down the board edge, two per row: row *n* is pins 2*n*−1 and 2*n*. `wiring/pi_header_labelled.jpg` shows our actual board, labelled. `wiring/pins.csv` is the same table as data.
 
 | Pin | Signal | Goes to | | Pin | Signal | Goes to |
 |---|---|---|---|---|---|---|
-| 1 | 3.3 V | IMU V+ | | 2 | 5 V | OMNI + WIFI 5 V |
-| 3 | SDA | IMU SDA | | 4 | 5 V | GPS VCC |
-| 5 | SCL | IMU SCL | | 6 | GND | IMU GND |
-| 7 | UART2 TX | GPS RX | | 8 | UART0 TX | OMNI RX (D7) |
-| 9 | GND | OMNI GND | | 10 | UART0 RX | OMNI TX (D6) |
-| 21 | UART3 RX | WIFI TX (D6) | | 14 | GND | WIFI GND |
-| 29 | UART2 RX | GPS TX | | 24 | UART3 TX | WIFI RX (D7) |
+| 1 | 3.3 V | IMU 3V3 | | 2 | 5 V | OMNI + WIFI 5 V (Y-lead) |
+| 3 | GPIO2 SDA | IMU SDA | | 4 | 5 V | GPS VCC (reserved) |
+| 5 | GPIO3 SCL | IMU SCL | | 6 | GND | IMU GND |
+| 7 | GPIO4 UART2 TX | GPS RX (reserved) | | 8 | GPIO14 UART0 TX | OMNI D9 (RX) |
+| 9 | GND | OMNI GND | | 10 | GPIO15 UART0 RX | OMNI D10 (TX) |
+| | | | | 12 | GPIO18 SPI1 CE0 | LoRa CS (driven by code) |
+| | | | | 14 | GND | WIFI GND |
+| 15 | GPIO22 | IMU INT (active low) | | 16 | GPIO23 | IMU RST (active low) |
+| 17 | 3.3 V | LoRa VIN | | 18 | GPIO24 | LoRa G0 (DIO0) |
+| 21 | GPIO9 UART3 RX | WIFI D10 (TX) | | 22 | GPIO25 | LoRa RST (active low) |
+| | | | | 24 | GPIO8 UART3 TX | WIFI D9 (RX) |
 | 27 | ID_SD | **AI HAT+ only, don't wire** | | 28 | ID_SC | **AI HAT+ only, don't wire** |
-| | | | | 30 | GND | GPS GND |
+| 29 | GPIO5 UART2 RX | GPS TX (reserved) | | 30 | GND | GPS GND (reserved) |
+| 35 | GPIO19 SPI1 MISO | LoRa MISO | | 36 | GPIO16 | **Leave free:** the kernel's SPI1 CS after `cs0_pin=16` |
+| | | | | 38 | GPIO20 SPI1 MOSI | LoRa MOSI |
+| 39 | GND | LoRa GND | | 40 | GPIO21 SPI1 SCLK | LoRa SCK |
 
-TX always crosses to RX. The sockets on top of the AI HAT+ are **female**, so every lead needs a male pin at the Pi end.
+- TX always crosses to RX. The sockets on top of the AI HAT+ are **female**, so every lead needs a male pin at the Pi end.
+- **Free for later:** GPIO6, 7, 10, 11, 12, 13, 17, 26 and 27 (pins 31, 26, 19, 23, 32, 33, 11, 37 and 13).
+
+### XIAO pins
+
+| Board | XIAO pad | Goes to |
+|---|---|---|
+| OMNI and WIFI | D9 (GPIO8), `Serial1` RX | Pi UART TX (pin 8 OMNI, 24 WIFI) |
+| | D10 (GPIO9), `Serial1` TX | Pi UART RX (pin 10 OMNI, 21 WIFI) |
+| | 5V, GND | Pi pin 2; GND pin 9 (OMNI) or 14 (WIFI) |
+| | D6, D7 | unused |
+| XIAO #3 (laptop radio) | D8 SCK, D9 MISO, D10 MOSI | RFM95W SCK, MISO, MOSI |
+| | D0, D1, D3 | RFM95W CS, RST, G0 |
+| | 5V, GND | RFM95W VIN, GND |
 
 ## Pi setup (once)
 
 1. Flash Raspberry Pi OS Bookworm 64-bit. Enable SSH, Wi-Fi to the travel router and a hostname such as `afterglow`.
 2. Clone the repo to `/home/pi/afterglow` and run `bash pi/setup_pi.sh`. It:
-   - installs Mosquitto, i2c-tools, picamera2 and `hailo-all`;
+   - installs Mosquitto, i2c-tools, picamera2, lgpio and `hailo-all`;
    - appends `pi/config.txt.append` to `/boot/firmware/config.txt`;
    - turns the serial console off the GPIO UART;
-   - adds you to the `dialout`, `i2c` and `video` groups;
+   - adds you to the `dialout`, `i2c`, `spi`, `gpio` and `video` groups;
    - makes a venv with `--system-site-packages`.
-3. `sudo rpi-eeprom-config --edit` and add `PSU_MAX_CURRENT=5000`. Then reboot.
-4. Optional: `pi/99-afterglow.rules` (stable `/dev/lora` and `/dev/radar`), `pi/mosquitto-afterglow.conf` (teammates can watch the bus) and `pi/systemd/afterglow@.service` (start modules at boot).
-5. `cd code && .venv/bin/python tools/check_hw.py`. Bring-up is done when every connected part passes.
+3. Reboot.
+4. Optional:
+   - `pi/99-afterglow.rules` gives the radar a stable `/dev/radar`;
+   - `pi/mosquitto-afterglow.conf` lets teammates watch the bus;
+   - `pi/systemd/afterglow@.service` starts modules at boot.
+5. Run `cd code && .venv/bin/python tools/check_hw.py`. Bring-up is done when every connected part passes. GPS shows SKIP until we have a receiver.
 
 ## Gotchas we already know about
 
 - **Board silent on its UART:**
-  - The XIAO must print to `Serial0` (D6/D7), not `Serial` (USB). See `firmware/README.md`.
+  - The XIAO must print on `Serial1` at D9/D10: `Serial1.begin(921600, SERIAL_8N1, D9, D10)`. `Serial` is the USB port. See `firmware/README.md`.
   - TX must cross to RX.
   - The two boards share pin 2 for 5 V but have separate grounds (pins 9 and 14). Both must be connected.
+  - Unplug a board's 5 V lead from the Pi before plugging USB-C into it to flash it.
 - **Pi 5 serial names:** on the Pi 5, `/dev/ttyAMA10` is the little 3-pin debug connector, not the GPIO header. Our ports are `ttyAMA0`, `ttyAMA2` and `ttyAMA3`, and they only exist after the `config.txt` lines and a reboot.
-- **USB serial order:** the LoRa board and the radar both appear as `ttyACM*`, and the order can swap between boots. Use `/dev/serial/by-id/…` or the udev links. Never hard-code `ttyACM0`.
+- **SPI:**
+  - Keep SPI0 off. `dtparam=spi=on` must not be set, because SPI0 would take GPIO8/9 from WIFI's UART3. `check_hw.py --only config` catches it.
+  - The pod radio is on SPI1. adafruit_rfm9x drives CS on GPIO18 itself, so `config.txt` moves the kernel's CS to the free GPIO16 (`dtoverlay=spi1-1cs,cs0_pin=16`). Without that you get "GPIO busy".
+- **GPIO from Python:** use gpiozero, lgpio or Blinka. `RPi.GPIO` doesn't work on a Pi 5.
+- **LoRa:**
+  - Both RFM95Ws need the 915 MHz spring antenna soldered to ANT **before they power up**. Never transmit without it.
+  - The laptop radio only listens; only the pod transmits.
+  - It's plain LoRa with no encryption, so anyone on 915 MHz can read an alert. Alerts carry a pin, never a device address or ID. `lora_rx.py` drops other teams' packets by node address.
+  - If nothing arrives, check that the `cfg` line `lora_rx.py` logs matches `[lora]`.
+- **USB serial:** the radar is the only USB device now. Still use `/dev/radar` or `/dev/serial/by-id/…`, never `ttyACM0`.
 - **Power:**
-  - The converter can't announce 5 A over USB-PD, so the Pi assumes 3 A and limits its USB ports to 600 mA. `usb_max_current_enable=1` raises that to 1.6 A; `PSU_MAX_CURRENT=5000` silences the boot warning.
-  - The real risk is voltage sag. If `get_throttled` isn't `0x0` with everything running (detector included), shorten and thicken the 5 V lead or check the converter's output with a meter.
-- **Heat:** the AI HAT+ adds heat. With the lid closed for 20 minutes, `vcgencmd measure_temp` must stay under 80 °C. If not, run the detector only during Investigate.
-- **I²C:** the MLX90640 needs the 400 kHz bus for useful frame rates. If the BNO085 drops off the bus, power-cycle it; it's the fussier of the two. Both should show in `i2cdetect -y 1` as `4a` and `33`.
+  - A 5 V 3 A power bank can't announce 5 A, so the Pi may warn and will limit its USB ports to 600 mA. That's fine, because the radar is the only USB device.
+  - Don't set `PSU_MAX_CURRENT=5000` or `usb_max_current_enable=1`. Both tell the Pi it can draw more than the bank gives.
+  - The real risk is voltage sag. If `get_throttled` isn't `0x0` with everything running (detector included), use a shorter, thicker USB-C cable, or run the detector only during Investigate.
+- **Heat:** the AI HAT+ adds heat. With the lid closed for 20 minutes, `vcgencmd measure_temp` must stay under 80 °C. If it doesn't, run the detector only during Investigate.
+- **I²C:**
+  - The BNO086 sits at `0x4B` (ADR jumper open). SparkFun says it only runs reliably with RST and INT connected, which is why they're wired.
+  - Start from `BNO08X_I2C(board.I2C(), address=0x4B, reset=DigitalInOut(board.D23))`.
+  - If reads fail now and then, drop the bus to 100 kHz (`dtparam=i2c_arm_baudrate=100000`) until the thermal camera arrives. The MLX90640 needs 400 kHz for useful frame rates.
 - **Camera and Hailo from a venv:** both come from apt, so the venv must be created with `--system-site-packages`, or the imports fail.
-- **Hailo detection:** start from a model that's already compiled. `rpicam-apps` ships Hailo post-processing stages (see `/usr/share/rpi-camera-assets/hailo_*.json`), and Hailo's `hailo-rpi5-examples` repository has Python detection pipelines. Keep only the `person` class, and tile full frames into 640×640 pieces (build doc, "Person detection plan").
-- **Radio coexistence:**
-  - Our LoRa is 915 MHz. If the FPV's control link is ELRS 900 MHz, they share a band.
-  - The SOS page is 2.4 GHz Wi-Fi, which shares a band with ELRS 2.4 GHz.
-  - `lora_out.py` and the WIFI board must obey `ag/ctrl` `lora_off` and `sos_off`, so we can switch them off in flight if the pilot's link quality drops.
+- **Hailo detection:**
+  - Start from a model that's already compiled. `rpicam-apps` ships Hailo post-processing stages (see `/usr/share/rpi-camera-assets/hailo_*.json`), and Hailo's `hailo-rpi5-examples` repository has Python detection pipelines.
+  - Keep only the `person` class, and tile full frames into 640×640 pieces (build doc, "Person detection plan").
+- **Radar:**
+  - The kit ships with ESPHome. Reflash its XIAO ESP32C6 with an Arduino sketch (`Seeed_Arduino_mmWave`, class `SEEED_MR60BHA2`) that prints JSON lines at 115200. `radar.py` maps them onto `ag/radar`.
+  - Updating the radar module's own firmware wipes the sketch, so reflash it afterwards.
 - **GPS:**
-  - It needs sky. Indoors it reports no fix, which is expected; use the taped waypoints (`ag/ctrl` `waypoint`).
-  - First fix outdoors can take a minute or more.
-  - If the FPV already has a GPS, Betaflight usually switches it to u-blox's binary format, so don't share it. Use our module.
+  - We have no receiver, only an ANN-MB5 antenna, so `[serial] gps = ""` and position.py runs on the taped waypoints (`ag/ctrl` `waypoint`).
+  - If we find a u-blox receiver with a UART, wire it to the reserved pins and set `gps = "/dev/ttyAMA2"`. One with Qwiic could sit on I²C at `0x42` instead, but that needs new code.
+  - Indoors there's no fix anyway.
+- **Radio coexistence (on a larger drone):**
+  - Our LoRa is 915 MHz, which shares a band with an ELRS 900 MHz control link.
+  - The SOS page is 2.4 GHz Wi-Fi, which shares a band with ELRS 2.4 GHz.
+  - `lora_out.py` and the WIFI board must obey `ag/ctrl` `lora_off` and `sos_off`.
 
 ## Drone facts that matter to software
 
-- **Flight time:** a 5" FPV carrying the 0.4 kg pod flies only about 2–3 minutes; a 7" does better. Patrol legs must be short. The demo is props-off, carried at height.
+These matter for the pitch: we demo the payload on its own, and it's ready to fly on a larger drone.
+
+- **Flight time:** a 5" FPV carrying the 0.4 kg pod flies only about 2–3 minutes; a 7" does better. Patrol legs must be short.
 - **No autopilot:** Betaflight has no waypoint missions. `planner.py` proposes legs; the ranger accepts them on the dashboard; the visual observer reads heading and distance to the pilot.
 - **Radar** reads breathing only when landed within about 1.5 m. Drone vibration swamps it in flight.
 - **Thermal** is 32×24 pixels. At 30 m a person is smaller than one pixel, so flag heat only from a low hover, under about 8 m.

@@ -1,8 +1,7 @@
-# Laptop: LoRa receiver, ATAK output, simulator, dashboard development
+# Laptop: LoRa receiver (XIAO #3 over USB), ATAK output, simulator, dashboard development
 paho-mqtt>=2.0
 pyserial>=3.5
 pynmea2>=1.19
-meshtastic>=2.3
 pytak
 numpy
 matplotlib

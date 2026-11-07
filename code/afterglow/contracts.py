@@ -19,6 +19,7 @@ PLAN = "ag/plan"
 MODE = "ag/mode"
 CTRL = "ag/ctrl"
 SYS = "ag/sys"
+ALERT = "ag/alert"  # laptop only: a LoRa alert heard by XIAO #3, decoded by lora_rx.py
 ALL = "ag/#"
 
 # Beacon classes, and their 4-bit codes in the LoRa alert
@@ -55,7 +56,9 @@ REQUIRED = {
     MODE: {"t", "mode"},
     CTRL: {"cmd"},
     SYS: {"t"},
+    ALERT: {"t", "kind", "track", "x", "y", "prio", "rssi"},
 }
+ALERT_KINDS = {1, 2, 3, 4}  # track, SOS, confirmed person, heartbeat (alert.TYPE_*)
 
 
 def now_ms() -> int:
@@ -92,4 +95,6 @@ def validate(topic: str, msg: dict) -> list[str]:
         problems.append(f"bad cmd {msg.get('cmd')!r}")
     if topic == TARGET and msg.get("status") not in PIN_STATUS:
         problems.append(f"bad status {msg.get('status')!r}")
+    if topic == ALERT and msg.get("kind") not in ALERT_KINDS:
+        problems.append(f"bad alert kind {msg.get('kind')!r}")
     return problems

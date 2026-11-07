@@ -111,6 +111,13 @@ def main():
     p = Position(cfg, bus)
     bus.subscribe(CTRL, p.on_ctrl)
     port, baud = cfg["serial"]["gps"], cfg["serial"]["gps_baud"]
+    if not port:  # no GPS receiver yet: only the taped waypoints move ag/pose
+        log.info("no GPS in the config ([serial] gps = \"\"): waypoints only")
+        try:
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            bus.close()
+        return
     while True:
         try:
             with serial.Serial(port, baud, timeout=2) as s:

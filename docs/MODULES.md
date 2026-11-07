@@ -21,8 +21,10 @@ Hour 0 is Saturday 10:00. Hard cutoff is Sunday 12:00.
 | locate (`bearing.py` + map) | Pi | `ag/obs/ble`, `ag/pose` | `ag/pass`, `ag/coverage` (retained) | 1 | Software | |
 | `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl`, `ag/sos`, `ag/pose` | `ag/target` | 1 | Software | ✅ geometry in `afterglow/parkmap.py` |
 | `dashboard.py` | Pi, viewed on the laptop | everything; serves the images on port 8080 | `ag/ctrl`, `ag/mode` | 1 | Software | |
-| `lora_out.py` | Pi | `ag/target`, `ag/sys`, `ag/ctrl` | 16-byte alerts over Meshtastic | 1 | Utility | ✅ `afterglow/alert.py` |
-| `lora_rx.py`, `cot_out.py` | Laptop | Meshtastic | CoT to ATAK | 1 | Software | ✅ `alert.py`, `geo.py` |
+| `lora_out.py` | Pi | `ag/target`, `ag/sys`, `ag/ctrl` | 16-byte alerts on the RFM95W (SPI1) | 1 | Utility | ✅ `afterglow/alert.py`, `afterglow/radio.py` |
+| lora_rx (firmware) | XIAO #3 + RFM95W, on the laptop's USB | LoRa radio | USB `rx` lines | 1 | Utility | ✅ `firmware/lora_rx/` |
+| `lora_rx.py` | Laptop | XIAO #3 over USB | `ag/alert` (laptop broker) | 1 | Software | ✅ done |
+| `cot_out.py` | Laptop | `ag/alert` (fallback: `ag/target` over Wi-Fi) | CoT to ATAK | 1 | Software | ✅ `geo.py` |
 | `thermal.py` | Pi | MLX90640 | `ag/thermal` + `live/thermal.png` | 1 view, 2 flag | Utility | |
 | health | Pi | vcgencmd, ports | `ag/sys` | 1 | Utility | `tools/check_hw.py` has the checks |
 | `planner.py` | Pi | `ag/target`, `ag/pose`, `ag/ctrl` | `ag/plan` | 2 | Software | |
@@ -43,8 +45,8 @@ Each checkpoint is a moment two people's work has to meet. Test it together; don
 | I1 | Hour 2 | Pi imaged, `setup_pi.sh` run, `check_hw.py` passes for every connected part | Screenshot of the check output |
 | I2 | Hour 3, first light | A real `findmy` beacon reaches the bus | `mosquitto_sub -v -t 'ag/obs/ble'` shows it |
 | I3 | Hour 3 | The dashboard runs on the fake bus or simulator | Pins and the coverage overlay move |
-| I4 | Hour 3 | A Meshtastic message crosses to board #2 | `meshtastic --port /dev/lora --sendtext hi` shows on the other board |
-| I5 | Hour 3 | NMEA from the GPS (by a window) | `check_hw.py --only gps` passes |
+| I4 | Hour 3 | A packet from the pod radio reaches the laptop | `check_hw.py --only lora` on the Pi; `python -m afterglow.lora_rx --print` on the laptop shows the heartbeat |
+| I5 | Hour 3 | ~~NMEA from the GPS~~ **Blocked: no GPS receiver.** Waypoint taps move the pod instead | `mosquitto_pub -t ag/ctrl -m '{"cmd":"waypoint","n":3}'` moves `ag/pose` |
 | I6 | Hour 7, first pass | Carried along the taped trail, a pin lands within 5 m and shows its off-trail distance | Dashboard screenshot plus the measured error |
 | I7 | Hour 12, core demo | Closed pod on the drone, props off: two passes → pin → Investigate → thermal and camera panel → ATAK marker over LoRa | Backup video recorded |
 | I8 | Hour 16, evidence | Range numbers, 10 blind passes, night-mode false-alarm count, planner homing legs | Evidence slide |
