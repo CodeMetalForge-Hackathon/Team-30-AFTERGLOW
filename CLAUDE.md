@@ -31,6 +31,7 @@ code/
   data/                 trails.geojson, zones.geojson (lon/lat; generated for the indoor park)
   tools/fake_bus.py     fake drone lanes + hidden phones on ag/pose and ag/obs/ble
   tools/check_hw.py     PASS/FAIL for each pod part (run on the Pi)
+  tools/setup_lora.py   private Meshtastic channel onto a LoRa board; key in lora_channel.key (git-ignored)
   tools/make_indoor_map.py  writes data/*.geojson from the origin and waypoints
   tools/draw_map.py     draws the map files to docs/maps/indoor_map.png
   tests/                pytest
@@ -56,6 +57,7 @@ mosquitto_sub -v -t 'ag/#'                                               # watch
 .venv/bin/python -m afterglow.bridge --dry-run < lines.txt               # no hardware, no broker
 .venv/bin/python -m afterglow.position --dry-run < nmea.txt
 .venv/bin/python tools/check_hw.py [--only gps omni]                     # on the Pi only
+.venv/bin/python tools/setup_lora.py --port <port> [--check]              # private channel on a LoRa board
 ```
 
 Anything past `--print` or `--dry-run` needs Mosquitto on the laptop (`brew install mosquitto`).

@@ -177,7 +177,9 @@ Changes from the plan doc's layout: version 2 adds a metres scale, because a par
 **Meshtastic settings, every board:**
 - Region `US`.
 - Preset `MediumFast`.
-- A private channel name and key, set at hour 1. Other teams run Meshtastic too.
+- A private primary channel name and key, set at hour 1. Other teams run Meshtastic too. Every other channel disabled.
+- Rebroadcast `LOCAL_ONLY`, so our boards don't spend airtime relaying other teams' packets.
+- `code/tools/setup_lora.py` writes all of this and checks it. The name and key live in `code/lora_channel.key`, which is git-ignored; share it by direct message only.
 
 ## ATAK (Cursor-on-Target)
 

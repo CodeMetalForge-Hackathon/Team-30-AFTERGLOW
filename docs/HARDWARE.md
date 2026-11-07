@@ -29,7 +29,7 @@ FPV flight LiPo (4S–6S) ──► 5 V 5 A converter ──USB-C──► Raspb
 | Thermal MLX90640 | STEMMA QT, chained after the IMU | I²C bus 1, `0x33` | 32×24, aim for 4 Hz | adafruit-circuitpython-mlx90640 | `i2cdetect -y 1` |
 | Camera Module 3 (imx708) | CSI ribbon, 22-to-15-pin | libcamera camera 0 | 4608×2592 full frame | picamera2 (apt) | `rpicam-hello --list-cameras` |
 | AI HAT+ 26 TOPS (Hailo-8) | PCIe ribbon + header | `/dev/hailo0` | PCIe Gen 3 | hailo-all (apt) | `hailortcli fw-control identify` |
-| LoRa board (Meshtastic) | USB-A port, up-angled adapter | `/dev/ttyACM*` → `/dev/lora` | Region US, MediumFast, private channel | meshtastic | `meshtastic --port /dev/lora --info` |
+| LoRa board (Meshtastic) | USB-A port, up-angled adapter | `/dev/ttyACM*` → `/dev/lora` | Region US, MediumFast, private channel | meshtastic | `tools/setup_lora.py --port /dev/lora --check` |
 | Radar MR60BHA2 kit (tier 3) | USB-A port | `/dev/ttyACM*` → `/dev/radar` | kit firmware | pyserial | `--only usb_serial` |
 | Power | USB-C from the 5 V 5 A converter | — | `usb_max_current_enable=1`, `PSU_MAX_CURRENT=5000` | — | `vcgencmd get_throttled` must be `0x0` |
 

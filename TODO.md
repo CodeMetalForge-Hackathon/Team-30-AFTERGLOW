@@ -20,10 +20,18 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
   - [x] **SOS goes through geofence**, onto the investigating pin, or an SOS-only `T0` pin. **Battery** is `ag/sys` `batt_pct`, `null` for now, and goes out as 255.
   - [x] **New retained `ag/coverage` topic** from locate. Its settings are in the new `[locate]` config table.
   - [x] **Images:** dashboard.py serves `live/` and `snaps/` on port 8080, and thermal.py and person.py just write files.
-- [ ] Decide the dashboard stack; nothing for it is in the requirements yet. Suggestion: a small Python web server on the Pi that bridges MQTT to a websocket, with the map drawn in local metres (SVG or canvas) from the GeoJSON. That avoids online map tiles, since the travel router may have no internet.
+- [x] Decide the dashboard stack. **Locked:**
+  - **Server:** `dashboard.py` on Python's built-in `ThreadingHTTPServer`, port 8080. It subscribes to `ag/#`, keeps the latest message for each topic and each pin, and streams them to the browser with Server-Sent Events (`/api/events`). On every reconnect it resends the full state first. Buttons POST to `/api/ctrl` and `/api/mode`; the server stamps `t`, runs `validate()` and publishes. It also serves `live/`, `snaps/` and the map, converted to local metres once with `geo.py`.
+  - **Front end:** `code/afterglow/web/` holds `index.html` and `app.js`. Panels use Preact + htm, and the map uses Leaflet in local metres (`CRS.Simple`). There is no build step and no CDN: the libraries are saved in `web/vendor/`.
+  - **No new pip packages** on the Pi or the laptop.
+  - **Room to grow:** MJPEG live streams from the same server, a `--broker` flag so the dashboard can run on the laptop, and an optional `drone` field once there's a second drone.
+- [ ] Download Preact + htm (htm's `preact/standalone` bundle) and Leaflet 1.9.4 into `code/afterglow/web/vendor/` **while there's internet**. Pin exact versions.
 - [x] Create `code/data/trails.geojson` and `code/data/zones.geojson` for the taped indoor park. Units: lon/lat (the GeoJSON standard, converted with `geo.to_xy` on load). `tools/make_indoor_map.py` generates them from the origin and waypoints; rerun it after changing either.
 - [x] Set `origin_lat` and `origin_lon` in `afterglow.toml`; indoors, that's the point taped waypoint 0 maps to. Keep the file identical on the pod and the laptop. It's set to Acadia for now; switch it to the venue if the ATAK markers should appear there.
 - [ ] Set the private Meshtastic channel name and key on every board by hour 1. **Keep the key out of the repo.**
+  - [x] Team key made: `code/lora_channel.key` on Dillon's laptop (git-ignored). Teammates get it by direct message.
+  - [ ] Pod board: plug into the laptop, `.venv/bin/python tools/setup_lora.py --port /dev/cu.usbmodem…`, all PASS.
+  - [ ] Board #2 (laptop): same command, all PASS.
 - [ ] Record the FPV details: model, props, battery, flight-controller firmware and control link (ELRS 2.4 GHz or 900 MHz). The control link decides which radio coexistence test matters.
 
 ## Phase 1: Bring-up and first data (hours 0–3, until 13:00, checkpoints I1–I5)
@@ -33,12 +41,12 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
 - [ ] Copy the ESP32 sketches (scanner, wifi_listener, sos_page) from the plan doc into `firmware/`. They aren't in the repo. Each must print to `Serial0`, not `Serial`.
 - [ ] OMNI streams `ble` lines, and a real `findmy` beacon reaches `ag/obs/ble` through `bridge.py`. **(I2)**
 - [ ] Put the real serial numbers in `pi/99-afterglow.rules` so `/dev/lora` and `/dev/radar` exist.
-- [ ] A Meshtastic message crosses to board #2. **(I4)**
+- [ ] A Meshtastic message crosses to board #2. **(I4)** **First** run `tools/setup_lora.py` on both boards (the hour-1 item above) so I4 tests the private channel, not the default one.
 - [ ] The GPS gives NMEA by a window and `check_hw.py --only gps` passes. Set `gps_baud` to what it reports. **(I5)**
 - [ ] If the Pi user isn't `pi` or the clone isn't at `/home/pi/afterglow`, fix `User=` and the paths in `pi/systemd/afterglow@.service`.
 
 **Software (SW), on the fake bus**
-- [ ] Dashboard skeleton: trails, zones, live pose and raw observations, running on the fake bus. **(I3)**
+- [ ] Dashboard skeleton (`dashboard.py` + `afterglow/web/`): the event stream with its full-state resend, a Leaflet map with trails and zones, live pose and raw observations, all running on the fake bus. **(I3)**
 - [ ] `geofence.py` geometry: distance to the nearest trail and point-in-zone, with tests.
 - [ ] `tools/replay.py`: replay a `mosquitto_sub -v` log into the same topics with the original timing. It's the 3 a.m. debugging tool and the demo backup.
 - [ ] Sim stub: extend `fake_bus.py`, or start `sim.py`, enough to drive the dashboard.
@@ -68,8 +76,9 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - pins with Acknowledge, Investigate, Clear and Confirm buttons;
   - a mode switch for patrol, night, investigate and search;
   - Baseline and New search buttons, plus waypoint taps for the indoor park;
-  - the coverage overlay, pod health from `ag/sys`, and the thermal and camera panel;
-  - serves `live/` and `snaps/` on port 8080.
+  - the coverage overlay, pod health from `ag/sys`, and the thermal and camera panel (it reloads the `live/` images about once a second);
+  - serves `live/` and `snaps/` on port 8080;
+  - takes a `--broker` flag (it overrides `[mqtt] host`), so it also runs on the laptop.
 - [ ] **`lora_out.py` (UT)** sends `ag/target` through `alert.encode` as Meshtastic `PRIVATE_APP`:
   - every 5 s per active pin, and at once when a pin's state changes or an SOS arrives;
   - P1 first, with `wantAck` for P1 and P2;
@@ -100,6 +109,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - tiles each 4608×2592 frame into overlapping 640×640 pieces (about 28 tiles, about 1 fps) and merges the boxes;
   - runs the CPU colour-anomaly check;
   - is tuned for recall, and runs only during Investigate if heat or power fails.
+- [ ] **Dashboard live feeds (SW):** MJPEG streams of the camera and thermal views from `dashboard.py`, in place of the once-a-second image reload. `person.py` also writes a smaller preview more often, because it runs at only about 1 fps while it tiles frames.
 - [ ] **`thermal.py` flag (UT):** flag hot spots only from a low hover, under 8 m, using the pose's `z`.
 - [ ] **`sim.py` (SW):**
   - a park-scale simulator over Acadia, using a trails GeoJSON (an OSM export; grab it while there's internet);
@@ -132,6 +142,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 
 - [ ] **`radar.py` (tier 3, UT):** MR60BHA2 breathing and heart rate on `ag/radar`, landed within 1.5 m. Feeds the alert's `br` byte and the `radar` flag.
 - [ ] **CalTopo export (tier 3, SW):** pins and coverage as GeoJSON, plus a live marker through CalTopo's position API.
+- [ ] **LoRa fallback view (tier 3, SW):** once the laptop loses Wi-Fi to the Pi, the dashboard on the laptop shows pins from `lora_rx.py`, without feeds.
 - [ ] **Live outdoor position test (tier 3, UT):** a GPS fix with the pod on the drone, logged against a phone's GPS.
 - [ ] **Fine-tuned person detector:**
   - train YOLO on HERIDAL on a GPU or Colab and export it to ONNX;
@@ -145,5 +156,6 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 These are the next steps from the build plan's "Not building" list.
 
 - An autopilot (INAV or ArduPilot) that flies the planner's legs.
+- Several drones on one dashboard: an optional `drone` field in the contracts, and the dashboard on the laptop listening to every pod.
 - Trailhead Bluetooth tags for families, for the no-phone child case.
 - Docking and charging stations for routine patrols.
