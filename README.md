@@ -47,7 +47,13 @@ cd code && python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop
 mosquitto_sub -v -t 'ag/#'                       # watch the bus
 ```
 
-Run the dashboard and the fake bus with the same profile. To record a run and play it back, the demo backup:
+Run the dashboard and the fake bus with the same profile.
+
+**Live map feed.** `web/livemap.js` draws the live bus on a 3D terrain map with labels and a key (pod at height, its hearing radius, where beacons were heard, tracks, pins, coverage). It only draws; the dashboard keeps the buttons. Open `http://localhost:8080/livemap.html`, embed that page, or use the `LiveMap` class (same methods as `map.js`'s `MapView`). See [`docs/LIVEMAP.md`](docs/LIVEMAP.md). **No Mosquitto** (e.g. Windows): `tools/local_stack.py` runs a source, the real tracker and geofence, and the dashboard in one process:
+```
+.venv/bin/python tools/local_stack.py --config park.toml --speed 10            # fake pod
+.venv/bin/python tools/local_stack.py --config park.toml --replay runs/1432.log --loop   # a recorded real run
+``` To record a run and play it back, the demo backup:
 ```
 mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log
 .venv/bin/python tools/replay.py runs/1432.log --loop
