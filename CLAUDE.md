@@ -36,6 +36,7 @@ code/
     bridge.py           ESP32 serial -> ag/obs/ble, ag/obs/wifi, ag/sos (hashes addresses)
     position.py         GPS NMEA or taped waypoints -> ag/pose (no GPS receiver yet: waypoints only)
     tracker.py          ag/obs/* + ag/pose -> ag/track (grid fit of the [track] RSSI model) and ag/pass
+    geofence.py         ag/track + map + ag/mode -> ag/target (rules, prio, the pin status guard, SOS); saves pins to runs/
     radio.py            opens the pod's RFM95W on SPI1 from the config's [lora] table (lora_out, check_hw)
     lora_rx.py          laptop: XIAO #3's USB lines -> ag/alert (drops other teams' packets)
     dashboard.py        web server on [http] port: SSE state stream, /api/ctrl and /api/mode, live/ and snaps/
@@ -70,6 +71,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop.txt   # la
 .venv/bin/python tools/fake_bus.py --speed 5                             # fake data to local Mosquitto (demo profile)
 .venv/bin/python tools/fake_bus.py --config park.toml --speed 10         # park profile (realistic view)
 mosquitto_sub -v -t 'ag/#'                                               # watch the whole bus
+.venv/bin/python -m afterglow.tracker & .venv/bin/python -m afterglow.geofence [--fresh]   # real pins, with fake_bus --only pose,ble
 .venv/bin/python -m afterglow.dashboard [--config park.toml]             # dashboard on http://localhost:8080
 .venv/bin/python -m afterglow.dashboard --broker <pi-ip>                 # laptop dashboard against the pod's broker
 mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log                      # record a run

@@ -5,7 +5,7 @@ dashboard can be built and shown before the hardware and Phase 2 land.
     python3 tools/fake_bus.py                                    # demo profile: indoor waypoint loop
     python3 tools/fake_bus.py --config park.toml --speed 10      # park profile: lanes at Blackwoods
     python3 tools/fake_bus.py --print --duration 20 | head       # no broker: print to the screen
-    python3 tools/fake_bus.py --only pose,ble                    # once tracker, locate and geofence are real
+    python3 tools/fake_bus.py --only pose,ble                    # with the real tracker and geofence (locate: add coverage)
 
 What it publishes (pick with --only):
     pose      ag/pose at [pose] publish_hz, src "sim" (the dashboard badges it SIMULATED)
@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from afterglow import config, geo  # noqa: E402
 from afterglow.contracts import (ALWAYS_REPORTED, COVERAGE, OBS_BLE, POSE, TARGET,  # noqa: E402
                                  TRACK, now_ms)
+from afterglow.geofence import prio  # noqa: E402
 from afterglow.parkmap import ParkMap  # noqa: E402
 
 TOPICS = {"pose": POSE, "ble": OBS_BLE, "track": TRACK, "coverage": COVERAGE, "target": TARGET}
@@ -226,18 +227,14 @@ class FakePod:
 
     def target(self, t, ph, x, y, r95, st, c, k, last_s):
         rules = self.cfg["rules"]
-        off = self.pm.dist_to_trail(x, y)
-        off = 9999 if math.isinf(off) else round(off)
-        z = self.pm.zone_at(x, y)
-        if z is not None and z.kind != "park":
-            zone = z.id
-        else:
-            zone = "trail_corridor" if off <= rules["offtrail_m"] else "off_trail"
-        rule = "day_offtrail" if off > rules["offtrail_m"] and k >= rules["min_passes"] else "search"
-        prio = 2 if st == "pinned" and c >= 0.8 else 3 if st == "localized" or c >= 0.5 else 4
+        dist = self.pm.dist_to_trail(x, y)
+        off = None if math.isinf(dist) else round(dist)
+        zone = self.pm.zone_label(x, y, dist, rules["offtrail_m"])
+        rule = "day_offtrail" if dist > rules["offtrail_m"] and k >= rules["min_passes"] else "search"
         lat, lon = geo.to_latlon(x, y, self.cfg["mission"]["origin_lat"], self.cfg["mission"]["origin_lon"])
         return {"t": t, "pin": ph.pin, "track": ph.track, "x": round(x, 1), "y": round(y, 1),
-                "lat": round(lat, 7), "lon": round(lon, 7), "r95": round(r95, 1), "c": c, "prio": prio,
+                "lat": round(lat, 7), "lon": round(lon, 7), "r95": round(r95, 1), "c": c,
+                "prio": prio({"state": st, "c": c}),
                 "cls": ph.cls, "state": st, "last_s": last_s, "off_trail_m": off, "zone": zone,
                 "rule": rule, "status": "new",
                 "flags": {"sos": False, "thermal": False, "radar": False, "camera": False}, "br": None}

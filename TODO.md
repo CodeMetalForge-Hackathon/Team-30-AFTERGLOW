@@ -97,13 +97,19 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - keeps the probability grid (from `ag/track`: `x`, `y`, `r95`, `c`; skip `with_drone` and `baseline`);
   - the coverage overlay from `ag/pose`;
   - publishes `ag/coverage` about once a second, **retained**.
-- [ ] **`geofence.py` (SW)** writes `ag/target`:
-  - applies the `day_offtrail`, `night_outside_camp` and `search` rules according to `ag/mode` (retained, so it's there at start-up; patrol until the first click);
+- [x] **`geofence.py` (SW)** writes `ag/target` (CONTRACTS.md, "How geofence fills a pin"):
+  - applies the `day_offtrail`, `night_outside_camp` and `search` rules according to `ag/mode` (retained, so it's there at start-up; patrol until the first click). Investigate keeps the last other mode's rule;
   - sets priority 1–4 and assigns pin IDs (`P1`, `P2`, …);
-  - updates the pin status on `ack`, `investigate`, `clear` and `confirm`, using only the allowed changes in CONTRACTS.md. **Confirm only while the pin is investigating:** the dashboard greys the button, but its server doesn't check, so geofence is the guard. Test it;
+  - updates the pin status on `ack`, `investigate`, `clear` and `confirm`, using only the allowed changes in CONTRACTS.md. **Confirm only while the pin is investigating:** the dashboard greys the button, but its server doesn't check, so geofence is the guard. Tested for every command from every status;
   - never pins a `with_drone` or `baseline` track;
   - copies `state`, `last_s` and `c` from the track, and sets `state` to `confirmed` only on Confirm;
-  - attaches `ag/sos` answers to the investigating pin, or opens an SOS-only `T0` pin at the pod.
+  - attaches `ag/sos` answers to the investigating pin, or opens an SOS-only `T0` pin at the pod;
+  - pins stay once made (only the ranger clears), so a rule must hold for `pin_hold_s` (15 s), and day and night wait until the track is localized with its 95% circle clear of campgrounds;
+  - saves pins to `runs/pins_*.json`, so a restart doesn't reuse `P1`; unlinks a track that comes back with none of its ids (tracker restart);
+  - on the fake pod through the real tracker (20 seeds, 20 min indoors): patrol pins only the dead iPhone in 19 of 20, night ignores the campground tag in 20 of 20, search pins all three in 19 of 20. The misses are early tracker estimates: one about 9 m out while claiming ±3.6 m, and one team phone marked `with_drone` only after 46 s.
+  - **Contract change, tell the team:** `day_offtrail` now skips campgrounds (otherwise the campground tag gets pinned in patrol and demo step 8 can't show night ignoring it). New `[rules]` keys `pin_hold_s`, `pins_file`, `pins_max_age_min` in both profiles. `fake_bus.py` now sends `off_trail_m` `null`, not 9999, when there's no trail.
+  - Park sim only: the tracker's key-rotation splits give some phones 2–3 pins, and `airtag_pack` (39 m off trail) is estimated at 20–29 m, under the 30 m threshold, so patrol often misses it. Both are tracker limits (see above).
+  - Tier 2: set `flags.thermal`, `flags.camera` from `ag/thermal` and `ag/vision` (it carries `track`) on the investigating pin.
 - [ ] **`dashboard.py` (SW)**. Most of this landed with the Phase 1 skeleton:
   - [x] pins with Acknowledge, Investigate, Clear and Confirm buttons. Confirm needs two clicks and only works while the pin is being investigated. Each button shows "waiting for geofence" until the status changes, and warns if it never does;
   - [x] a mode switch for patrol, night, investigate and search;

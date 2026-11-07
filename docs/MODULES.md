@@ -19,7 +19,7 @@ Hour 0 is Saturday 10:00. Hard cutoff is Sunday 12:00.
 | `position.py` | Pi | ttyAMA2 NMEA, `ag/ctrl` waypoint | `ag/pose` | 1 | Utility | ✅ (IMU roll/pitch still to add) |
 | `tracker.py` | Pi | `ag/obs/*`, `ag/pose`, `ag/ctrl` | `ag/track`, `ag/pass` | 1 | Software | ✅ done; see CONTRACTS.md, "Tracks" |
 | locate (map) | Pi | `ag/track`, `ag/pass`, `ag/pose` | `ag/coverage` (retained) | 1 | Software | the tracker now posts `ag/pass` |
-| `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl`, `ag/sos`, `ag/pose` | `ag/target` | 1 | Software | ✅ geometry in `afterglow/parkmap.py`. Confirm only from `investigating` (CONTRACTS.md, "Pin states") |
+| `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl`, `ag/sos`, `ag/pose` | `ag/target` | 1 | Software | ✅ done; see CONTRACTS.md, "How geofence fills a pin" |
 | `dashboard.py` | Pi, viewed on the laptop | everything; serves the images on port 8080 | `ag/ctrl`, `ag/mode` (retained) | 1 | Software | ✅ skeleton (I3); see TODO for what's left |
 | `lora_out.py` | Pi | `ag/target`, `ag/sys`, `ag/ctrl` | 16-byte alerts on the RFM95W (SPI1) | 1 | Utility | ✅ `afterglow/alert.py`, `afterglow/radio.py` |
 | lora_rx (firmware) | XIAO #3 + RFM95W, on the laptop's USB | LoRa radio | USB `rx` lines | 1 | Utility | ✅ `firmware/lora_rx/` |
@@ -62,10 +62,11 @@ cd code
 python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements-laptop.txt
 python3 tools/fake_bus.py --speed 5                      # demo profile: indoor waypoint loop
 python3 tools/fake_bus.py --config park.toml --speed 10  # park profile: lanes at Blackwoods, Acadia
-python3 tools/fake_bus.py --only pose,ble                # once tracker, locate and geofence are real
+python3 tools/fake_bus.py --only pose,ble                # with the real tracker and geofence (add coverage until locate lands)
+python3 -m afterglow.tracker & python3 -m afterglow.geofence   # geofence --fresh starts again at P1
 python3 -m afterglow.dashboard                           # http://localhost:8080 (same --config as the fake bus)
 mosquitto_sub -v -t 'ag/#'                               # watch everything
-python3 -m pytest -q                                     # contracts, alert packing, NMEA, hashing, map, fake bus, dashboard, replay, tracker
+python3 -m pytest -q                                     # contracts, alert packing, NMEA, hashing, map, fake bus, dashboard, replay, tracker, geofence
 ```
 
 `fake_bus.py` reads the profile's `[sim]` table, which sets the path, the hidden phones and the RSSI model. It publishes:

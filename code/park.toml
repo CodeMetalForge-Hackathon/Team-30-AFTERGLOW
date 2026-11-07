@@ -67,9 +67,12 @@ rssi_sigma = 4.0
 [rules]
 offtrail_m = 30
 min_passes = 2
+pin_hold_s = 15
 sos_r95_m = 30.0
 night_start = "21:00"
 night_end = "06:00"
+pins_file = "runs/pins_park.json"   # its own file, so the two profiles never mix pins
+pins_max_age_min = 60
 trails_geojson = "data/park_trails.geojson"   # tools/make_park_map.py writes both
 zones_geojson = "data/park_zones.geojson"
 

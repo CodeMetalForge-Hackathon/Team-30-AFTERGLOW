@@ -86,14 +86,14 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
   - `confirm`: **only from `investigating`**.
   - The dashboard greys out the same buttons, but its server doesn't check a pin's status, so geofence is the real guard.
 - **`rule`** (why it's a pin):
-  - `day_offtrail`: farther off-trail than `offtrail_m`, seen on 2 or more passes.
+  - `day_offtrail`: farther off-trail than `offtrail_m`, seen on 2 or more passes, and not in a campground.
   - `night_outside_camp`: any beacon outside campgrounds after closing.
   - `search`: any `findmy`, `findhub` or `samsung_off` beacon during an active search.
   - `sos`: an SOS answer with no pin under investigation (see "SOS answers").
 - **`prio`**, which sets the ATAK colour:
   - 1, red: confirmed, or an SOS that says hurt.
   - 2, orange: pinned and c ≥ 0.8.
-  - 3, yellow: localized, or 0.5 ≤ c < 0.8.
+  - 3, yellow: localized, pinned short of orange, or 0.5 ≤ c < 0.8.
   - 4, grey: heard only.
 
 ### Tracks
@@ -111,21 +111,33 @@ How tracker.py fills `ag/track`. Its numbers live in the config's `[track]` tabl
 
 ### How geofence fills a pin
 
-- Never pin a track with `with_drone` or `baseline` set.
+- **When a track becomes a pin:** the rule for the current mode must hold for `pin_hold_s` (the config's `[rules]` table). Early estimates jump about, and our own phones take a few seconds to be marked `with_drone`.
+  - In `investigate` mode, the rule of the last other mode applies. With no mode yet, patrol.
+  - Day and night also need the track `localized` or `pinned`, with its 95% circle clear of every campground. A beacon that may be in a campground waits until the estimate tightens. `search` needs no position.
+  - Classes: `findmy`, `findhub`, `samsung_off` and `ref` (`search`: not `ref`). Never Wi-Fi.
+  - Never a track with `with_drone` or `baseline` set.
+- **A pin stays.** It keeps following its track when the mode changes or the estimate moves back onto the trail. Only the ranger clears it. A cleared pin is published once, then frozen, and its track never gets another pin.
+  - While its track is `with_drone` (picked up, or the pod right over it), the pin keeps its last place instead of riding along with the pod. It follows again once the mark clears.
 - `state`, `last_s` and `c` are copied from the latest `ag/track` for that track.
+- A click or an SOS answer restamps `t` and adds the same time to `last_s`, so when it was last heard (`t − last_s`) doesn't move.
 - The one exception: `state` becomes `confirmed` only when the ranger presses Confirm (pin `status` `confirmed`). The tracker never sets it. That keeps the rule that the drone never decides.
+- **`new_search`:** geofence unlinks every track, because the tracker starts new ones. It keeps the old pins for the ranger, and pin numbers keep counting. The next SOS answer opens a new SOS-only pin.
+- **Restarts:**
+  - geofence saves its pins to `[rules] pins_file` (under `runs/`, never committed). At start-up it reloads them, if they're newer than `pins_max_age_min`, and republishes them, so it never hands out `P1` twice. `--fresh` starts over.
+  - If a linked track comes back with none of its earlier `ids` (the tracker restarted, or wrapped past `T255`), the pin stops following it.
 
 ### SOS answers
 
 geofence.py listens to `ag/sos`, not lora_out.py, because priority 1 and `flags.sos` live on `ag/target`, and the dashboard and ATAK need them too.
 
-- The SOS page only runs during Investigate, so the answer goes on the pin whose `status` is `investigating`.
+- The SOS page only runs during Investigate, so the answer goes on the pin whose `status` is `investigating` (the one set to investigating last, if there are several).
 - geofence adds `"sos":{"hurt":…,"walk":…,"count":…}`, sets `flags.sos`, and sets `prio` 1 if the person says they're hurt.
 - If no pin is being investigated, geofence opens an SOS-only pin at the pod's position (from `ag/pose`), with `track` `"T0"`, `rule` `"sos"` and `status` `new`. Its other fields:
   - `cls` `"wifi"`, because the answer came over the SOS Wi-Fi page;
   - `c` 0, `state` `heard` and `last_s` 0;
   - `r95` is `sos_r95_m` from the config's `[rules]` table: the SOS page's Wi-Fi range, a placeholder until it's measured;
   - `prio` 1 if the person says they're hurt, otherwise 2.
+- Later answers with no pin under investigation update that same SOS-only pin (the latest answer, at the pod's latest position) until it's cleared or confirmed, or a `new_search` starts.
 
 ### Coverage grid
 

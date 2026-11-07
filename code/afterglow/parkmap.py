@@ -109,6 +109,26 @@ class ParkMap:
     def in_kind(self, x: float, y: float, kind: str) -> bool:
         return any(z.kind == kind for z in self.zones_at(x, y))
 
+    def dist_to_kind(self, x: float, y: float, kind: str) -> float:
+        """Metres to the nearest zone of this kind: 0 inside one, inf if there are none."""
+        best = math.inf
+        for z in self.zones:
+            if z.kind != kind:
+                continue
+            if point_in_ring(x, y, z.ring):
+                return 0.0
+            for a, b in zip(z.ring, z.ring[1:]):
+                best = min(best, seg_dist(x, y, a, b))
+        return best
+
+    def zone_label(self, x: float, y: float, off: float, offtrail_m: float) -> str:
+        """ag/target "zone": a campground's (or other zone's) id, else "trail_corridor" within
+        offtrail_m of a trail or "off_trail". `off` is dist_to_trail(x, y), already worked out."""
+        z = self.zone_at(x, y)
+        if z is not None and z.kind != "park":
+            return z.id
+        return "trail_corridor" if off <= offtrail_m else "off_trail"
+
     def bounds(self) -> tuple[float, float, float, float]:
         """(x0, y0, x1, y1) of the "park" zone, or of everything if there is none."""
         pts = [p for z in self.zones if z.kind == "park" for p in z.ring]
