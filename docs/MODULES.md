@@ -18,7 +18,7 @@ Hour 0 is Saturday 10:00. Hard cutoff is Sunday 12:00.
 | `bridge.py` | Pi | ttyAMA0, ttyAMA3, `ag/ctrl` | `ag/obs/ble`, `ag/obs/wifi`, `ag/sos` | 1 | Utility | ✅ |
 | `position.py` | Pi | ttyAMA2 NMEA, `ag/ctrl` waypoint | `ag/pose` | 1 | Utility | ✅ (IMU roll/pitch still to add) |
 | `tracker.py` | Pi | `ag/obs/*`, `ag/pose`, `ag/ctrl` | `ag/track`, `ag/pass` | 1 | Software | ✅ done; see CONTRACTS.md, "Tracks" |
-| locate (map) | Pi | `ag/track`, `ag/pass`, `ag/pose` | `ag/coverage` (retained) | 1 | Software | the tracker now posts `ag/pass` |
+| `locate.py` | Pi | `ag/track`, `ag/pose`, `ag/ctrl` | `ag/coverage` (retained) | 1 | Software | ✅ done; see CONTRACTS.md, "Coverage grid" |
 | `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl`, `ag/sos`, `ag/pose` | `ag/target` | 1 | Software | ✅ done; see CONTRACTS.md, "How geofence fills a pin" |
 | `dashboard.py` | Pi, viewed on the laptop | everything; serves the images on port 8080 | `ag/ctrl`, `ag/mode` (retained) | 1 | Software | ✅ skeleton (I3); see TODO for what's left |
 | `lora_out.py` | Pi | `ag/target`, `ag/sys`, `ag/ctrl` | 16-byte alerts on the RFM95W (SPI1) | 1 | Utility | ✅ `afterglow/alert.py`, `afterglow/radio.py` |
@@ -62,16 +62,16 @@ cd code
 python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements-laptop.txt
 python3 tools/fake_bus.py --speed 5                      # demo profile: indoor waypoint loop
 python3 tools/fake_bus.py --config park.toml --speed 10  # park profile: lanes at Blackwoods, Acadia
-python3 tools/fake_bus.py --only pose,ble                # with the real tracker and geofence (add coverage until locate lands)
-python3 -m afterglow.tracker & python3 -m afterglow.geofence   # geofence --fresh starts again at P1
+python3 tools/fake_bus.py --only pose,ble                # with the real tracker, locate and geofence
+python3 -m afterglow.tracker & python3 -m afterglow.locate & python3 -m afterglow.geofence   # geofence --fresh starts again at P1
 python3 -m afterglow.dashboard                           # http://localhost:8080 (same --config as the fake bus)
 mosquitto_sub -v -t 'ag/#'                               # watch everything
-python3 -m pytest -q                                     # contracts, alert packing, NMEA, hashing, map, fake bus, dashboard, replay, tracker, geofence
+python3 -m pytest -q                                     # contracts, alert packing, NMEA, hashing, map, fake bus, dashboard, replay, tracker, locate, geofence
 ```
 
 `fake_bus.py` reads the profile's `[sim]` table, which sets the path, the hidden phones and the RSSI model. It publishes:
 - `ag/pose` with `src` `"sim"` and `ag/obs/ble`, standing in for the pod;
-- `ag/track`, `ag/target` and a retained `ag/coverage`, standing in for tracker, geofence and locate until they land. Drop them with `--only pose,ble` once the real modules run.
+- `ag/track` and `ag/target`, standing in for tracker and geofence, and a retained `ag/coverage` from the real locate fed with its fake tracks. Drop them with `--only pose,ble` once the real modules run.
 
 Its tracker **cheats**: it knows where each phone really is. Use it to build the dashboard, never for accuracy numbers. Its path is a dumb stand-in (a waypoint loop or fixed lanes); real routes come from `planner.py`.
 

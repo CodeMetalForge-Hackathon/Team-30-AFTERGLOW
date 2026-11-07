@@ -79,6 +79,10 @@ zones_geojson = "data/park_zones.geojson"
 [locate]
 cell_m = 10.0
 detect_m = 40.0
+# The search box between the Quarry and Otter Cove trails and Ocean Path (80 x 80 cells). The
+# whole park map would be 221 x 211, too big to send every second.
+area_m = [500.0, 300.0, 1300.0, 1100.0]
+stale_s = 30
 
 [http]
 port = 8080
@@ -86,13 +90,13 @@ live_dir = "live"
 snaps_dir = "snaps"
 
 [sim]
-# Lanes over a search box between the Quarry and Otter Cove trails and Ocean Path.
+# Lanes over the search box ([locate] area_m).
 # A dumb stand-in path; real routes come from planner.py.
 path = "lanes"
 speed_mps = 8.0
 height_m = 15.0
 lane_m = 40.0
-area_m = [500.0, 300.0, 1300.0, 1100.0]
+area_m = []
 rssi_p0 = -48.0
 rssi_n = 2.4
 rssi_sigma = 4.0

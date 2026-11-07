@@ -97,6 +97,8 @@ zones_geojson = "data/zones.geojson"
 # Placeholders until ME 2's range test. Indoors use about 1 m cells; outdoors about 5 m.
 cell_m = 1.0               # coverage and probability grid cell size (ag/coverage)
 detect_m = 4.0             # indoor scale (park.toml: 40). A cell counts as covered once the pod passes within this distance
+area_m = []                # [x0, y0, x1, y1] the grids cover; empty = the map's "park" zone. Keep it under 20,000 cells, or the cells grow
+stale_s = 30               # a track not updated this long (the tracker dropped it) leaves the probability grid
 
 [http]
 # dashboard.py serves the dashboard and these folders on one port. Paths are relative to code/.
@@ -111,7 +113,7 @@ path = "waypoints"         # "waypoints": loop the [waypoints] in order; "lanes"
 speed_mps = 1.0            # walking pace, carrying the pod
 height_m = 3.0             # same as [pose] carry_height_m
 lane_m = 2.0               # lanes only
-area_m = []                # [x0, y0, x1, y1] for lanes and the coverage grid; empty = the "park" zone
+area_m = []                # [x0, y0, x1, y1] for lanes; empty = the grids' area ([locate] area_m, else the "park" zone)
 # RSSI model, rssi = p0 - 10 n log10(d) + noise; a stand-in until ME 2's range test.
 rssi_p0 = -48.0
 rssi_n = 2.4

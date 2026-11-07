@@ -34,9 +34,9 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 | `ag/obs/ble` | bridge.py | `{"t":1731000000123,"src":"omni","id":"7f3a9c21","cls":"findmy","rssi":-71}` | One Bluetooth advert heard. `cls` is in the table below |
 | `ag/obs/wifi` | bridge.py | `{"t":…,"id":"c01d22aa","rand":true,"rssi":-80,"ch":6}` | One Wi-Fi probe request heard |
 | `ag/sos` | bridge.py | `{"t":…,"hurt":true,"walk":false,"count":2,"rssi":-55}` | An answer from the SOS page (tier 2). geofence.py attaches it to a pin; see "SOS answers" below |
-| `ag/pose` (**changed**) | position.py | `{"t":…,"x":412.3,"y":-88.0,"z":12.0,"lat":44.3386,"lon":-68.2733,"alt_m":61.2,"course":87.5,"speed_mps":4.1,"fix":1,"sats":14,"src":"gps"}` | Where the pod is. `z` is height above take-off in metres. `src` is `gps` or `waypoint` (the real pod), `replay` (`tools/replay.py`) or `sim` (`tools/fake_bus.py`, `sim.py`); the dashboard shows a REPLAY or SIMULATED badge for the last two. Optional `roll` and `pitch` (degrees) from the IMU |
+| `ag/pose` (**changed**) | position.py | `{"t":…,"x":412.3,"y":-88.0,"z":12.0,"lat":44.3386,"lon":-68.2733,"alt_m":61.2,"course":87.5,"speed_mps":4.1,"fix":1,"sats":14,"src":"gps"}` | Where the pod is. `z` is height above take-off in metres. `src` is `gps` or `waypoint` (the real pod), `replay` (`tools/replay.py`) or `sim` (`tools/fake_bus.py`, `sim.py`); the dashboard shows a REPLAY or SIMULATED badge for the last two. Optional `roll` and `pitch` (degrees) from the IMU. Optional `drone` (**new**): which drone sent it, once there is more than one; locate.py never joins two drones' poses into one line. Missing means the one pod |
 | `ag/pass` (**changed**) | tracker.py | `{"t":…,"track":"T1","peak_x":4.2,"peak_y":7.9,"sharp":6.0,"n":14}` | One finished pass: where the pod heard a track loudest; `sharp` is dB above the pass median, optional `n` the sightings in it. Posted by tracker.py, not locate, because the tracker already splits sightings into passes. None for `with_drone` tracks |
-| `ag/coverage` (**new**) | locate | `{"t":…,"x0":-50,"y0":-50,"cell_m":5,"nx":60,"ny":40,"covered":[0,1,1,…],"p":[0,12,255,…],"pct":0.62}` | Coverage and probability grids for the dashboard, about 1 Hz, **retained** so a reloaded dashboard gets it at once. See "Coverage grid" below. Stays on the pod, never goes over LoRa |
+| `ag/coverage` (**new**) | locate.py | `{"t":…,"x0":-50,"y0":-50,"cell_m":5,"nx":60,"ny":40,"covered":[0,1,1,…],"p":[0,12,255,…],"pct":0.62}` | Coverage and probability grids for the dashboard, about 1 Hz, **retained** so a reloaded dashboard gets it at once. See "Coverage grid" below. Stays on the pod, never goes over LoRa |
 | `ag/track` (**changed**) | tracker.py | `{"t":…,"track":"T1","ids":["7f3a9c21","e9910b4c"],"cls":"findmy","x":18.5,"y":9.0,"r95":12.0,"state":"localized","passes":2,"last_s":4,"with_drone":false,"baseline":false,"c":0.62}` | Best estimate for one beacon, about once a second. `ids` lists the rotating keys followed through key changes (the last 4). `with_drone` marks beacons that move with the drone, such as our own phones. Optional `baseline` (**new**): heard during the baseline, so grey and never pinned. Optional `c` (**new**): confidence 0–1, which geofence copies onto the pin. See "Tracks" below |
 | `ag/target` (**changed**) | geofence.py | `{"t":…,"pin":"P3","track":"T1","x":18.5,"y":9.0,"lat":44.3387,"lon":-68.2731,"r95":12.0,"c":0.82,"prio":2,"cls":"findmy","state":"localized","last_s":4,"off_trail_m":46,"zone":"trail_corridor","rule":"day_offtrail","status":"new","flags":{"sos":false,"thermal":true,"radar":false,"camera":true},"br":null}` | **The one record** the dashboard, LoRa alerts and ATAK use. One per pin. `state` and `last_s` come from the track (see "How geofence fills a pin"). Optional `sos` (`{"hurt":true,"walk":false,"count":2}`) once an SOS answer is attached |
 | `ag/thermal` | thermal.py | `{"t":…,"max_c":33.8,"hot":true,"col":17,"row":9,"conf":0.7}` | Warmest spot in the 32×24 frame. Frames for the panel are image files over HTTP, not MQTT (see "Images over HTTP") |
@@ -63,7 +63,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 
 | `cmd` | Extra fields | Who acts on it |
 |---|---|---|
-| `new_search` | none | bridge.py (new salt), tracker.py (clears every track; track numbers keep counting) |
+| `new_search` | none | bridge.py (new salt), tracker.py (clears every track; track numbers keep counting), locate.py (clears both grids) |
 | `baseline_start`, `baseline_stop` | none | tracker.py: beacons heard between them get `baseline: true` on `ag/track` and show grey. Send `new_search` first: it changes every id |
 | `ack`, `investigate`, `clear`, `confirm` | `pin` | geofence.py updates the pin `status`, but only by the allowed changes under "Pin states and priority"; planner.py starts homing on `investigate` |
 | `accept_leg`, `reject_leg` | `id` | planner.py |
@@ -143,10 +143,11 @@ geofence.py listens to `ag/sos`, not lora_out.py, because priority 1 and `flags.
 
 - `ag/coverage` carries two grids of `nx × ny` cells, each a flat list read row by row. Row 0 is the south edge, and each row runs west to east.
 - Cell `i` is row `i // nx`, column `i % nx`. Its south-west corner is at `x0 + col·cell_m`, `y0 + row·cell_m`.
-- `covered` is 0 or 1: whether the pod has passed within `detect_m` of that cell.
-- `p` is 0–255: the combined beacon probability, for the heatmap.
+- `covered` is 0 or 1: whether a drone has passed within `detect_m` of that cell's centre. Two poses of one drone in a row count the straight line between them, unless the jump is too fast to fly (a GPS glitch).
+- `p` is 0–255: the beacon probability heatmap. Each `ag/track` adds a Gaussian blob at its `x`, `y` with 95% inside `r95` (but at least a cell wide), peaking at 255 × `c`. Where blobs overlap, the higher one wins. Tracks with `with_drone` or `baseline` are left out, and so is a track not updated for `stale_s`.
 - `pct` is the share of cells covered.
-- `cell_m` and `detect_m` are in the config's `[locate]` table. They're placeholders until ME 2's range test.
+- `new_search` clears both grids.
+- The `[locate]` table holds `cell_m`, `detect_m`, `stale_s` and `area_m`, the box the grids cover (empty means the map's `park` zone). The grid is capped at 20,000 cells: past that, `cell_m` grows. `cell_m` and `detect_m` are placeholders until ME 2's range test.
 - The 95% circle needs no topic of its own, because `x`, `y` and `r95` are already on `ag/track` and `ag/target`.
 
 ## Map files

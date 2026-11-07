@@ -93,10 +93,14 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - Known limit, park sim only: a key that rotates while the pod is away starts a new track, so a phone can split. Fix later by merging tracks whose estimates agree (needs a contract change for the merged-away track).
   - Set the `[track]` RSSI model (`rssi_p0`, `rssi_n`, `rssi_sigma`) from ME 2's range test.
   - [ ] Set `with_drone_rssi` (both profiles) from the range test: measure our phone strapped to the pod and a phone at carry height (3 m), and pick a value between them. At -55, a phone much louder than the model, right under the path, gets marked `with_drone` (grey, never pinned) while the pod is near it. Then let `fake_bus.py`'s team phone read as loud as 0.5 m (it stops at 1 m now), or its with_drone test breaks. Until then, the baseline covers it (Phase 4).
-- [ ] **locate: map (SW)**, now just the grids, since the tracker posts `ag/pass` and `r95`:
-  - keeps the probability grid (from `ag/track`: `x`, `y`, `r95`, `c`; skip `with_drone` and `baseline`);
-  - the coverage overlay from `ag/pose`;
-  - publishes `ag/coverage` about once a second, **retained**.
+- [x] **`locate.py` (SW)**, now just the grids, since the tracker posts `ag/pass` and `r95` (CONTRACTS.md, "Coverage grid"):
+  - keeps the probability grid (from `ag/track`: `x`, `y`, `r95`, `c`; skip `with_drone` and `baseline`). Each track is a blob that peaks at 255 × `c`; where blobs overlap, the higher one wins. A track not updated for `stale_s` (30) drops out;
+  - the coverage overlay from `ag/pose`, joining each drone's poses in a straight line, so tapped waypoints leave no gaps;
+  - publishes `ag/coverage` about once a second, **retained**. `new_search` clears both grids;
+  - `fake_bus.py`'s stand-in coverage is now the real `Locate` fed the fake tracks, so the two grids can't drift apart;
+  - tested on the fake pod through the real tracker, in both profiles and live through Mosquitto.
+  - **Contract change, tell the team:** locate acts on `new_search`. There are new `[locate]` keys `area_m` (the box the grids cover; empty means the park zone) and `stale_s`. `ag/pose` has a new optional `drone` (which drone sent it; missing means the one pod). In `park.toml`, `area_m` is the search box (80 × 80 cells); the whole park would be 221 × 211, too big to send every second. `[sim] area_m` is now empty there, meaning the same box.
+  - Later, maybe: lower `p` in cells already covered with nothing heard (a proper search map); keep coverage through a locate restart.
 - [x] **`geofence.py` (SW)** writes `ag/target` (CONTRACTS.md, "How geofence fills a pin"):
   - applies the `day_offtrail`, `night_outside_camp` and `search` rules according to `ag/mode` (retained, so it's there at start-up; patrol until the first click). Investigate keeps the last other mode's rule;
   - sets priority 1–4 and assigns pin IDs (`P1`, `P2`, …);

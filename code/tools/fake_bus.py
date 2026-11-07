@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Fake pod: stands in for the pod, and for now also for tracker, locate and geofence, so the
+"""Fake pod: stands in for the pod, and for now also for tracker and geofence, so the
 dashboard can be built and shown before the hardware and Phase 2 land.
 
     python3 tools/fake_bus.py                                    # demo profile: indoor waypoint loop
     python3 tools/fake_bus.py --config park.toml --speed 10      # park profile: lanes at Blackwoods
     python3 tools/fake_bus.py --print --duration 20 | head       # no broker: print to the screen
-    python3 tools/fake_bus.py --only pose,ble                    # with the real tracker and geofence (locate: add coverage)
+    python3 tools/fake_bus.py --only pose,ble                    # with the real tracker, locate and geofence
 
 What it publishes (pick with --only):
     pose      ag/pose at [pose] publish_hz, src "sim" (the dashboard badges it SIMULATED)
     ble       ag/obs/ble, about one advert a second for each phone in range
     track     ag/track once a second per heard phone       (stand-in for tracker.py)
-    coverage  ag/coverage once a second, retained          (stand-in for locate; wiped on exit)
+    coverage  ag/coverage once a second, retained          (the real locate, fed the fake tracks; wiped on exit)
     target    ag/target once a second per pin               (stand-in for geofence.py)
 
 The profile's [sim] table sets the path, the hidden phones and the RSSI model. The path is a
@@ -40,6 +40,7 @@ from afterglow import config, geo  # noqa: E402
 from afterglow.contracts import (ALWAYS_REPORTED, COVERAGE, OBS_BLE, POSE, TARGET,  # noqa: E402
                                  TRACK, now_ms)
 from afterglow.geofence import prio  # noqa: E402
+from afterglow.locate import Locate, grid_area  # noqa: E402
 from afterglow.parkmap import ParkMap  # noqa: E402
 
 TOPICS = {"pose": POSE, "ble": OBS_BLE, "track": TRACK, "coverage": COVERAGE, "target": TARGET}
@@ -122,17 +123,12 @@ class FakePod:
         self.dt = 1.0 / cfg["pose"]["publish_hz"]
         self.L = cfg["track"]["localized_r95_m"]
         self.P = cfg["track"]["pinned_r95_m"]
-        area = sim["area_m"] if sim.get("area_m") else pm.bounds()
+        area = sim["area_m"] if sim.get("area_m") else grid_area(cfg, pm)
         self.area = tuple(round(v, 2) for v in area)  # the map's lon/lat round trip leaves float dust
         self.phones = [Phone(p["name"], p["cls"], p.get("x"), p.get("y")) for p in sim["phones"]]
         # A pass counts for a phone once it's heard at least as loud as the model gives at detect_m
         self.strong = self.model_rssi(math.hypot(cfg["locate"]["detect_m"], sim["height_m"]))
-        # Coverage grid over the area
-        self.cell = cfg["locate"]["cell_m"]
-        x0, y0, x1, y1 = self.area
-        self.nx = max(1, math.ceil((x1 - x0) / self.cell - 1e-6))
-        self.ny = max(1, math.ceil((y1 - y0) / self.cell - 1e-6))
-        self.covered = bytearray(self.nx * self.ny)
+        self.loc = Locate(cfg, None, pm) if "coverage" in self.only else None  # publishes nothing itself
         self.n_tracks = self.n_pins = 0
 
     def model_rssi(self, dist):
@@ -148,7 +144,8 @@ class FakePod:
             t = t0 + int(step * self.dt * 1000)
             if "pose" in self.only:
                 yield POSE, {"t": t, "x": round(x, 2), "y": round(y, 2), "z": h, "src": "sim"}, False
-            self.mark_covered(x, y)
+            if self.loc:
+                self.loc.handle_pose({"t": t, "x": x, "y": y})
             for ph in self.phones:
                 if self.rng.random() > self.dt * ADVERT_HZ:
                     continue
@@ -174,14 +171,6 @@ class FakePod:
             self.n_tracks += 1
             ph.track = f"T{self.n_tracks}"
 
-    def mark_covered(self, px, py):
-        x0, y0 = self.area[0], self.area[1]
-        r, c = self.cfg["locate"]["detect_m"], self.cell
-        for row in range(max(0, int((py - r - y0) / c)), min(self.ny, int((py + r - y0) / c) + 1)):
-            for col in range(max(0, int((px - r - x0) / c)), min(self.nx, int((px + r - x0) / c) + 1)):
-                if math.hypot(x0 + (col + 0.5) * c - px, y0 + (row + 0.5) * c - py) <= r:
-                    self.covered[row * self.nx + col] = 1
-
     def estimate(self, ph, px, py):
         """(x, y, r95, passes): the cheating stand-in for tracker + locate (see the docstring)."""
         if ph.with_drone:
@@ -201,7 +190,6 @@ class FakePod:
         return "pinned" if r95 <= self.P else "localized" if r95 <= self.L else "heard"
 
     def tick(self, t, px, py):
-        tracks = []
         for ph in self.phones:
             if ph.track is None:
                 continue
@@ -209,12 +197,14 @@ class FakePod:
             st = self.state(r95)
             last_s = (t - ph.last_t) // 1000
             c = round(min(0.95, 0.3 + 0.12 * k), 2)
-            tracks.append((ph, ex, ey, r95, st, c, k))
+            msg = {"t": t, "track": ph.track, "ids": ph.ids[-4:], "cls": ph.cls,
+                   "x": round(ex, 1), "y": round(ey, 1), "r95": round(r95, 1), "state": st,
+                   "passes": len(ph.best), "last_s": last_s, "with_drone": ph.with_drone,
+                   "baseline": False, "c": 0.0 if ph.with_drone else c}
+            if self.loc:
+                self.loc.handle_track(msg)
             if "track" in self.only:
-                yield TRACK, {"t": t, "track": ph.track, "ids": ph.ids[-4:], "cls": ph.cls,
-                              "x": round(ex, 1), "y": round(ey, 1), "r95": round(r95, 1), "state": st,
-                              "passes": len(ph.best), "last_s": last_s, "with_drone": ph.with_drone,
-                              "baseline": False, "c": 0.0 if ph.with_drone else c}, False
+                yield TRACK, msg, False
             if ph.with_drone or ph.cls not in ALWAYS_REPORTED or k == 0:
                 continue
             if ph.pin is None:
@@ -222,8 +212,8 @@ class FakePod:
                 ph.pin = f"P{self.n_pins}"
             if "target" in self.only:
                 yield TARGET, self.target(t, ph, ex, ey, r95, st, c, k, last_s), False
-        if "coverage" in self.only:
-            yield COVERAGE, self.coverage(t, tracks), True
+        if self.loc:
+            yield COVERAGE, self.loc.message(t), True
 
     def target(self, t, ph, x, y, r95, st, c, k, last_s):
         rules = self.cfg["rules"]
@@ -238,28 +228,6 @@ class FakePod:
                 "cls": ph.cls, "state": st, "last_s": last_s, "off_trail_m": off, "zone": zone,
                 "rule": rule, "status": "new",
                 "flags": {"sos": False, "thermal": False, "radar": False, "camera": False}, "br": None}
-
-    def coverage(self, t, tracks):
-        """The probability grid is a Gaussian blob per pinned track, scaled by its confidence."""
-        x0, y0 = self.area[0], self.area[1]
-        p = [0] * (self.nx * self.ny)
-        for ph, ex, ey, r95, _, c, _ in tracks:
-            if ph.with_drone:
-                continue
-            s = max(r95 / 2.45, self.cell / 2)
-            reach = 3 * s
-            for row in range(max(0, int((ey - reach - y0) / self.cell)),
-                             min(self.ny, int((ey + reach - y0) / self.cell) + 1)):
-                cy = y0 + (row + 0.5) * self.cell
-                for col in range(max(0, int((ex - reach - x0) / self.cell)),
-                                 min(self.nx, int((ex + reach - x0) / self.cell) + 1)):
-                    cx = x0 + (col + 0.5) * self.cell
-                    v = int(255 * c * math.exp(-((cx - ex) ** 2 + (cy - ey) ** 2) / (2 * s * s)))
-                    i = row * self.nx + col
-                    p[i] = max(p[i], v)
-        n = self.nx * self.ny
-        return {"t": t, "x0": round(x0, 2), "y0": round(y0, 2), "cell_m": self.cell, "nx": self.nx,
-                "ny": self.ny, "covered": list(self.covered), "p": p, "pct": round(sum(self.covered) / n, 3)}
 
 
 def main():
