@@ -20,14 +20,15 @@ README.md            start here
 TODO.md              phased plan, ticked as we go
 CLAUDE.md            instructions for Claude Code
 docs/                CONTRACTS.md, HARDWARE.md, MODULES.md, drone_build_plan.md
-  maps/              indoor_map.png (the taped park)
+  maps/              indoor_map.png (the taped park), park_map.png (the realistic park view)
   wiring/            diagrams, pins.csv, wiring_and_build.html
 code/
-  afterglow.toml     shared settings: origin, ports, rules (identical on pod and laptop)
-  afterglow/         contracts.py, alert.py, geo.py, bus.py, config.py,
+  afterglow.toml     DEMO profile: the taped indoor park, real pod (identical on pod and laptop)
+  park.toml          PARK profile: realistic view on real Acadia trails, laptop only, simulated
+  afterglow/         contracts.py, alert.py, geo.py, bus.py, config.py, parkmap.py,
                      bridge.py and position.py (tier 1, working)
-  data/              trails.geojson, zones.geojson
-  tools/             check_hw.py, fake_bus.py, make_indoor_map.py, draw_map.py
+  data/              trails.geojson, zones.geojson (indoor); park_trails.geojson, park_zones.geojson (OSM)
+  tools/             check_hw.py, fake_bus.py, make_indoor_map.py, make_park_map.py, draw_map.py
   tests/             pytest
 pi/                  setup_pi.sh, config.txt.append, udev rules, Mosquitto config, systemd service
 firmware/README.md   what the ESP32 boards must send (and the Serial0 gotcha)
@@ -39,9 +40,16 @@ firmware/README.md   what the ESP32 boards must send (and the Serial0 gotcha)
 ```
 cd code && python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop.txt
 .venv/bin/python -m pytest -q
-.venv/bin/python tools/fake_bus.py --speed 5     # fake drone + hidden phones; or --print without a broker
+.venv/bin/python tools/fake_bus.py --speed 5     # fake pod + hidden phones, indoor; or --print without a broker
+.venv/bin/python tools/fake_bus.py --config park.toml --speed 10   # the same at park scale
 mosquitto_sub -v -t 'ag/#'                       # watch the bus
 ```
+
+**Two profiles.** We don't fly, so there are two views of the same system:
+- **Demo**, `afterglow.toml`: the taped indoor park with real pod data. This is what runs live at the demo.
+- **Park**, `park.toml`: a realistic view at Blackwoods Campground in Acadia, using real OpenStreetMap trails. It's simulated, laptop only, and badged SIMULATED on the dashboard.
+
+Every module takes `--config`, or set `AFTERGLOW_CONFIG=park.toml`. Both files must have the same keys, which a test checks.
 
 **Pi** (clone to `/home/pi/afterglow`):
 ```
@@ -53,9 +61,9 @@ cd code && .venv/bin/python tools/check_hw.py
 
 ## Still open
 
-- **FPV details:** model, prop size, battery, flight-controller firmware, control link (ELRS 2.4 GHz or 900 MHz).
-- **Range numbers** from ME 2's test. They replace the placeholders for `localized` and `pinned`, the lane spacing, `[locate]` and `fake_bus.py`'s signal model.
-- **Off-trail distance** (`offtrail_m`, 30 m placeholder). The taped park is only 9 m wide, so the indoor demo needs about 2–3 m.
+- **Payload only (decided):** our drones are too small to carry the pod, so we demo the payload on its own and pitch it as ready for a larger drone.
+- **Range numbers** from ME 2's test. They replace the placeholders in both profiles: `[track]` (localized and pinned radii), `[locate]`, and the `[sim]` lane spacing and signal model.
+- **Off-trail distance:** `offtrail_m` is 3 m in `afterglow.toml` (the taped park is only 9 m wide) and 30 m in `park.toml`. Both are placeholders.
 - **Alert version:** v1 (decimetres) for the taped indoor park, v2 (metres) outdoors. Both sides decode either.
 
 ## Links (private until the owner shares them with you)

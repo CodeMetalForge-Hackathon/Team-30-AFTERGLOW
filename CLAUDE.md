@@ -26,12 +26,15 @@ code/
     alert.py            16-byte LoRa alert encode/decode (v1 decimetres, v2 metres)
     geo.py              lat/lon <-> local metres around the origin
     bus.py              Bus (paho-mqtt 2.x) and PrintBus (for --dry-run)
-    config.py           loads afterglow.toml (env AFTERGLOW_CONFIG overrides the path)
+    config.py           loads afterglow.toml (env AFTERGLOW_CONFIG overrides the path); resolve() for paths in it
+    parkmap.py          trails, roads and zones in metres: dist_to_trail, zone_at, bounds (geofence, dashboard, fake bus)
     bridge.py           ESP32 serial -> ag/obs/ble, ag/obs/wifi, ag/sos (hashes addresses)
     position.py         GPS NMEA or taped waypoints -> ag/pose
-  afterglow.toml        shared config; must be identical on the pod and the laptop
-  data/                 trails.geojson, zones.geojson (lon/lat; generated for the indoor park)
-  tools/fake_bus.py     fake drone lanes + hidden phones on ag/pose and ag/obs/ble
+  afterglow.toml        DEMO profile (taped indoor park); must be identical on the pod and the laptop
+  park.toml             PARK profile (realistic view, real Acadia trails), laptop only; same keys as afterglow.toml
+  data/                 trails/zones.geojson (indoor) and park_trails/park_zones.geojson (OSM); all lon/lat
+  tools/fake_bus.py     fake pod per the profile's [sim] table, plus stand-in track/target/coverage
+  tools/make_park_map.py  data/park_*.geojson from OpenStreetMap (needs internet)
   tools/check_hw.py     PASS/FAIL for each pod part (run on the Pi)
   tools/setup_lora.py   private Meshtastic channel onto a LoRa board; key in lora_channel.key (git-ignored)
   tools/make_indoor_map.py  writes data/*.geojson from the origin and waypoints
@@ -54,7 +57,8 @@ Run all of these from `code/`:
 python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop.txt   # laptop setup
 .venv/bin/python -m pytest -q                                            # tests
 .venv/bin/python tools/fake_bus.py --print | head                        # fake data, no broker
-.venv/bin/python tools/fake_bus.py --speed 5                             # fake data to local Mosquitto
+.venv/bin/python tools/fake_bus.py --speed 5                             # fake data to local Mosquitto (demo profile)
+.venv/bin/python tools/fake_bus.py --config park.toml --speed 10         # park profile (realistic view)
 mosquitto_sub -v -t 'ag/#'                                               # watch the whole bus
 .venv/bin/python -m afterglow.bridge --dry-run < lines.txt               # no hardware, no broker
 .venv/bin/python -m afterglow.position --dry-run < nmea.txt
@@ -82,7 +86,8 @@ Anything past `--print` or `--dry-run` needs Mosquitto on the laptop (`brew inst
 - **Contracts.** Change `contracts.py` and `docs/CONTRACTS.md` together, in one commit, and tell the team. Several people build against them in parallel, so don't rename topics or fields casually.
 - **Validation.** Every published message must pass `contracts.validate(topic, msg)`. Assert this in tests.
 - **LoRa alert.** Use `alert.encode` and `alert.decode`. Never re-type the struct.
-- **Config.** Load with `afterglow.config.load()`. Never hard-code ports, thresholds or the origin. The range-dependent numbers (localized and pinned radii, lane spacing, `offtrail_m`) are placeholders until ME 2's range test, so they belong in config.
+- **Profiles.** `afterglow.toml` is the demo (indoor, real pod) and `park.toml` the realistic park view (laptop only, simulated). Every module takes `--config`. A new config key goes in both files.
+- **Config.** Load with `afterglow.config.load()`, and open files it names with `config.resolve(cfg, rel)`. Never hard-code ports, thresholds or the origin. The range-dependent numbers (localized and pinned radii, lane spacing, `offtrail_m`) are placeholders until ME 2's range test, so they belong in config.
 - **Python version.** Target Python 3.11, which is what Pi OS Bookworm ships, so no 3.12-only syntax. The laptop runs 3.12. The Pi venv uses `--system-site-packages` because picamera2 and Hailo come from apt.
 - **Bus behaviour.** `Bus` handlers run on paho's network thread, so keep them fast. `Bus.subscribe` keeps one handler per topic pattern: subscribing to the same pattern again replaces the first handler.
 - **USB serial.** Never hard-code `ttyACM0`. Use `/dev/lora`, `/dev/radar` or `/dev/serial/by-id/…`.

@@ -1,0 +1,77 @@
+# PARK profile: park-scale, realistic view. Real Acadia trails around Blackwoods
+# Campground (OpenStreetMap), laptop only, fed by tools/fake_bus.py now and sim.py later.
+# The pod never runs this file; afterglow.toml is the demo profile.
+#
+#     AFTERGLOW_CONFIG=park.toml .venv/bin/python tools/fake_bus.py --speed 10
+#
+# Same keys as afterglow.toml (tests/test_parkmap.py checks), so add a new key to both.
+
+[mission]
+# Blackwoods Campground, Acadia NP: the launch point for the park scenario.
+origin_lat = 44.3091
+origin_lon = -68.2056
+salt = ""
+
+[mqtt]
+host = "localhost"
+port = 1883
+
+[serial]
+# Not used in this profile (no pod hardware); kept so both profiles have the same keys.
+omni = "/dev/ttyAMA0"
+wifi = "/dev/ttyAMA3"
+gps = "/dev/ttyAMA2"
+esp_baud = 921600
+gps_baud = 38400
+lora = "/dev/lora"
+radar = "/dev/radar"
+
+[pose]
+carry_height_m = 3.0
+publish_hz = 5
+
+[track]
+# Outdoor placeholders from docs/CONTRACTS.md until ME 2's range test.
+localized_r95_m = 25.0
+pinned_r95_m = 10.0
+
+[rules]
+offtrail_m = 30
+min_passes = 2
+sos_r95_m = 30.0
+night_start = "21:00"
+night_end = "06:00"
+trails_geojson = "data/park_trails.geojson"   # tools/make_park_map.py writes both
+zones_geojson = "data/park_zones.geojson"
+
+[locate]
+cell_m = 10.0
+detect_m = 40.0
+
+[http]
+port = 8080
+live_dir = "live"
+snaps_dir = "snaps"
+
+[sim]
+# Lanes over a search box between the Quarry and Otter Cove trails and Ocean Path.
+# A dumb stand-in path; real routes come from planner.py.
+path = "lanes"
+speed_mps = 8.0
+height_m = 15.0
+lane_m = 40.0
+area_m = [500.0, 300.0, 1300.0, 1100.0]
+rssi_p0 = -48.0
+rssi_n = 2.4
+rssi_sigma = 4.0
+rssi_floor = -98.0
+# Off-trail distances measured with parkmap.dist_to_trail (trails and roads).
+phones = [
+  { name = "dead_iphone", cls = "findmy", x = 950.0, y = 690.0 },    # 68 m off trail
+  { name = "airtag_pack", cls = "findmy", x = 1130.0, y = 780.0 },   # 39 m off trail
+  { name = "pixel_off",   cls = "findhub", x = 640.0, y = 960.0 },   # 9 m: near a trail, search-only
+  { name = "team_phone",  cls = "findmy" },
+]
+
+# No taped waypoints outdoors.
+[waypoints]

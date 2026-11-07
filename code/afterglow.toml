@@ -1,5 +1,10 @@
 # Shared settings for the pod and the laptop. Copy this file to both and keep
 # them identical; in particular the origin, or ATAK markers land in the wrong place.
+#
+# This is the DEMO profile: the taped indoor park, real pod data. park.toml is the
+# park-scale profile (real Acadia trails, laptop-only, fed by fake_bus.py or sim.py).
+# Pick one with --config or AFTERGLOW_CONFIG. Both files must have the same keys
+# (tests/test_parkmap.py checks), so add a new key to both.
 
 [mission]
 # Mission origin: every module works in metres east (x) and north (y) of here.
@@ -34,8 +39,13 @@ radar = "/dev/radar"
 carry_height_m = 3.0
 publish_hz = 5
 
+[track]
+# tracker.py sets a track's state from its r95. Placeholders until ME 2's range test.
+localized_r95_m = 5.0      # indoors 5 m (park.toml: 25 m)
+pinned_r95_m = 2.0         # indoors 2 m (park.toml: 10 m)
+
 [rules]
-offtrail_m = 30            # day patrol: pin a beacon farther than this from a trail...
+offtrail_m = 3             # indoor scale (park.toml: 30). Day patrol: pin a beacon farther than this from a trail...
 min_passes = 2             # ...seen on at least this many passes
 sos_r95_m = 30.0           # r95 of an SOS-only pin: the SOS page's Wi-Fi range (placeholder)
 night_start = "21:00"
@@ -46,13 +56,34 @@ zones_geojson = "data/zones.geojson"
 [locate]
 # Placeholders until ME 2's range test. Indoors use about 1 m cells; outdoors about 5 m.
 cell_m = 1.0               # coverage and probability grid cell size (ag/coverage)
-detect_m = 15.0            # a cell counts as covered once the pod passes within this distance
+detect_m = 4.0             # indoor scale (park.toml: 40). A cell counts as covered once the pod passes within this distance
 
 [http]
 # dashboard.py serves the dashboard and these folders on one port. Paths are relative to code/.
 port = 8080
 live_dir = "live"          # live/thermal.png (thermal.py), live/camera.jpg (person.py)
 snaps_dir = "snaps"        # snaps/<t>.jpg (person.py), the path in ag/vision "snap"
+
+[sim]
+# Read only by tools/fake_bus.py (and later sim.py); the pod ignores this table.
+# The fake pod's path is a dumb stand-in. Real routes come from planner.py.
+path = "waypoints"         # "waypoints": loop the [waypoints] in order; "lanes": back-and-forth lanes over area_m
+speed_mps = 1.0            # walking pace, carrying the pod
+height_m = 3.0             # same as [pose] carry_height_m
+lane_m = 2.0               # lanes only
+area_m = []                # [x0, y0, x1, y1] for lanes and the coverage grid; empty = the "park" zone
+# RSSI model, rssi = p0 - 10 n log10(d) + noise; a stand-in until ME 2's range test.
+rssi_p0 = -48.0
+rssi_n = 2.4
+rssi_sigma = 4.0
+rssi_floor = -98.0         # quieter than this is never heard
+# Hidden phones. Omit x and y for one that rides on the pod (the team phone).
+phones = [
+  { name = "dead_iphone", cls = "findmy", x = 2.0, y = 6.0 },     # 6 m off trail
+  { name = "airtag_camp", cls = "findmy", x = 7.0, y = -2.5 },    # in the campground
+  { name = "pixel_off",   cls = "findhub", x = 4.5, y = 1.5 },    # 1.5 m: near the trail, search-only
+  { name = "team_phone",  cls = "findmy" },
+]
 
 # Indoor taped park: waypoint number -> [x, y] in metres from waypoint 0.
 [waypoints]

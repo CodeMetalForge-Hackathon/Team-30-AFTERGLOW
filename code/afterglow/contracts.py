@@ -28,6 +28,7 @@ ALWAYS_REPORTED = {"findmy", "findhub", "samsung_off", "ref"}
 STATES = ["heard", "localized", "pinned", "confirmed"]  # order = the alert's state code
 TRACK_STATES = STATES[:3]  # only the ranger's Confirm sets "confirmed", on ag/target; the tracker never does
 MODES = ["patrol", "night", "investigate", "search"]
+POSE_SRC = ["gps", "waypoint", "replay", "sim"]  # gps/waypoint = the real pod; the dashboard badges the others
 PIN_STATUS = ["new", "acknowledged", "investigating", "confirmed", "cleared"]
 RULES = ["day_offtrail", "night_outside_camp", "search", "sos"]
 CTRL_CMDS = {
@@ -83,6 +84,8 @@ def validate(topic: str, msg: dict) -> list[str]:
         for key in ("covered", "p"):
             if len(msg.get(key) or []) != n:
                 problems.append(f"{key} must have nx*ny = {n} cells")
+    if topic == POSE and msg.get("src") not in POSE_SRC:
+        problems.append(f"bad pose src {msg.get('src')!r}")
     if topic == MODE and msg.get("mode") not in MODES:
         problems.append(f"bad mode {msg.get('mode')!r}")
     if topic == CTRL and msg.get("cmd") not in CTRL_CMDS:

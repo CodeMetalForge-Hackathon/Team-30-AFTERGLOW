@@ -13,6 +13,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
   - Only `position.py` (in) and `cot_out.py` (out) convert to and from latitude and longitude, both using `afterglow/geo.py`.
   - The pod and the laptop must use **the same origin**, so it lives in the shared config file.
 - **Indoors** (taped park on the venue floor), the origin is taped waypoint 0. Waypoint coordinates come from the `[waypoints]` table in the config.
+- **Profiles:** `afterglow.toml` is the demo profile (indoor, the real pod). `park.toml` is the park-scale profile: real Acadia trails, laptop only, simulated, with its own origin at Blackwoods Campground. Every module takes `--config`. The two files must have the same keys (`tests/test_parkmap.py`).
 - **Device IDs:** `id` is a salted hash of the device address, 8 hex characters. `bridge.py` makes it. The salt changes on every `new_search`.
 - **Track IDs:** `"T1"`, `"T2"` and so on, assigned by `tracker.py`. A dashboard pin is an `ag/target` record.
 
@@ -30,7 +31,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 | `ag/obs/ble` | bridge.py | `{"t":1731000000123,"src":"omni","id":"7f3a9c21","cls":"findmy","rssi":-71}` | One Bluetooth advert heard. `cls` is in the table below |
 | `ag/obs/wifi` | bridge.py | `{"t":…,"id":"c01d22aa","rand":true,"rssi":-80,"ch":6}` | One Wi-Fi probe request heard |
 | `ag/sos` | bridge.py | `{"t":…,"hurt":true,"walk":false,"count":2,"rssi":-55}` | An answer from the SOS page (tier 2). geofence.py attaches it to a pin; see "SOS answers" below |
-| `ag/pose` (**changed**) | position.py | `{"t":…,"x":412.3,"y":-88.0,"z":12.0,"lat":44.3386,"lon":-68.2733,"alt_m":61.2,"course":87.5,"speed_mps":4.1,"fix":1,"sats":14,"src":"gps"}` | Where the pod is. `z` is height above take-off in metres. `src` is `gps`, `waypoint` or `replay`. Optional `roll` and `pitch` (degrees) from the IMU |
+| `ag/pose` (**changed**) | position.py | `{"t":…,"x":412.3,"y":-88.0,"z":12.0,"lat":44.3386,"lon":-68.2733,"alt_m":61.2,"course":87.5,"speed_mps":4.1,"fix":1,"sats":14,"src":"gps"}` | Where the pod is. `z` is height above take-off in metres. `src` is `gps` or `waypoint` (the real pod), `replay` (`tools/replay.py`) or `sim` (`tools/fake_bus.py`, `sim.py`); the dashboard shows a REPLAY or SIMULATED badge for the last two. Optional `roll` and `pitch` (degrees) from the IMU |
 | `ag/pass` | locate | `{"t":…,"track":"T1","peak_x":4.2,"peak_y":7.9,"sharp":6.0}` | Where one pass heard a track loudest; `sharp` is dB above the pass median |
 | `ag/coverage` (**new**) | locate | `{"t":…,"x0":-50,"y0":-50,"cell_m":5,"nx":60,"ny":40,"covered":[0,1,1,…],"p":[0,12,255,…],"pct":0.62}` | Coverage and probability grids for the dashboard, about 1 Hz, **retained** so a reloaded dashboard gets it at once. See "Coverage grid" below. Stays on the pod, never goes over LoRa |
 | `ag/track` | tracker.py | `{"t":…,"track":"T1","ids":["7f3a9c21","e9910b4c"],"cls":"findmy","x":18.5,"y":9.0,"r95":12.0,"state":"localized","passes":2,"last_s":4,"with_drone":false}` | Best estimate for one beacon. `ids` lists the rotating keys followed through 15-minute changes. `with_drone` marks beacons that move with the drone, such as our own phones |
@@ -73,7 +74,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
   - `localized`: 95% within 25 m outdoors (5 m indoors).
   - `pinned`: within 10 m outdoors (2 m indoors).
   - `confirmed`: the ranger confirmed a person. It appears only on `ag/target`; `ag/track` never carries it.
-  - Set the outdoor numbers from ME 2's range test. These are placeholders.
+  - The radii live in the config's `[track]` table (`localized_r95_m`, `pinned_r95_m`): the indoor numbers in `afterglow.toml`, the outdoor ones in `park.toml`. Set them from ME 2's range test. These are placeholders.
 - **Pin `status`:** `new` → `acknowledged` → `investigating` → `confirmed` or `cleared`.
 - **`rule`** (why it's a pin):
   - `day_offtrail`: farther off-trail than `offtrail_m`, seen on 2 or more passes.
@@ -112,6 +113,20 @@ geofence.py listens to `ag/sos`, not lora_out.py, because priority 1 and `flags.
 - `pct` is the share of cells covered.
 - `cell_m` and `detect_m` are in the config's `[locate]` table. They're placeholders until ME 2's range test.
 - The 95% circle needs no topic of its own, because `x`, `y` and `r95` are already on `ag/track` and `ag/target`.
+
+## Map files
+
+The config's `[rules]` `trails_geojson` and `zones_geojson` name them, relative to the config file (open them with `config.resolve`). They're stored in GeoJSON lon/lat; read them in metres through `afterglow/parkmap.py` (`ParkMap.load(cfg)`), which geofence, the dashboard and the fake bus all share.
+
+| File | Geometry | Properties |
+|---|---|---|
+| trails | `LineString` | `id`, `name`, and optional `kind`: `trail` (the default) or `road` |
+| zones | `Polygon` | `id`, `name`, `kind`: `park` (the map frame) or `campground` |
+
+- `dist_to_trail` counts both trails and roads unless you pass `kinds`.
+- `zone_at` returns a campground before the park outline.
+- The park files come from OpenStreetMap through `tools/make_park_map.py` and carry an `attribution`. Show "© OpenStreetMap contributors" on any map drawn from them.
+- The indoor files come from `tools/make_indoor_map.py`.
 
 ## Images over HTTP
 

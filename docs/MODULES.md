@@ -19,7 +19,7 @@ Hour 0 is Saturday 10:00. Hard cutoff is Sunday 12:00.
 | `position.py` | Pi | ttyAMA2 NMEA, `ag/ctrl` waypoint | `ag/pose` | 1 | Utility | ✅ (IMU roll/pitch still to add) |
 | `tracker.py` | Pi | `ag/obs/*`, `ag/pose`, `ag/ctrl` | `ag/track` | 1 | Software | |
 | locate (`bearing.py` + map) | Pi | `ag/obs/ble`, `ag/pose` | `ag/pass`, `ag/coverage` (retained) | 1 | Software | |
-| `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl`, `ag/sos`, `ag/pose` | `ag/target` | 1 | Software | |
+| `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl`, `ag/sos`, `ag/pose` | `ag/target` | 1 | Software | ✅ geometry in `afterglow/parkmap.py` |
 | `dashboard.py` | Pi, viewed on the laptop | everything; serves the images on port 8080 | `ag/ctrl`, `ag/mode` | 1 | Software | |
 | `lora_out.py` | Pi | `ag/target`, `ag/sys`, `ag/ctrl` | 16-byte alerts over Meshtastic | 1 | Utility | ✅ `afterglow/alert.py` |
 | `lora_rx.py`, `cot_out.py` | Laptop | Meshtastic | CoT to ATAK | 1 | Software | ✅ `alert.py`, `geo.py` |
@@ -27,7 +27,7 @@ Hour 0 is Saturday 10:00. Hard cutoff is Sunday 12:00.
 | health | Pi | vcgencmd, ports | `ag/sys` | 1 | Utility | `tools/check_hw.py` has the checks |
 | `planner.py` | Pi | `ag/target`, `ag/pose`, `ag/ctrl` | `ag/plan` | 2 | Software | |
 | `person.py` | Pi + AI HAT+ | camera | `ag/vision`, `snaps/<t>.jpg`, `live/camera.jpg` | 2 | Software | |
-| `sim.py` | Laptop | park map (Acadia) | `ag/pose`, `ag/obs/ble` | 2 | Software | `tools/fake_bus.py` is a small start |
+| `sim.py` | Laptop | park map (Acadia) | `ag/pose`, `ag/obs/ble` | 2 | Software | `tools/fake_bus.py` + `park.toml` (real Acadia trails) |
 | sos_page (firmware) | WIFI board | Wi-Fi AP | serial `sos` lines | 2 | Utility | plan doc |
 | `radar.py` | Pi | radar kit | `ag/radar` | 3 | Utility | |
 | CalTopo export | Laptop | `ag/target`, coverage | GeoJSON | 3 | Software | |
@@ -58,15 +58,24 @@ Hardware bring-up and software start at the same time, so nobody waits.
 # laptop: install Mosquitto (brew install mosquitto / apt install mosquitto) and run it
 cd code
 python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements-laptop.txt
-python3 tools/fake_bus.py --speed 5          # drone lanes + 3 hidden phones on ag/pose and ag/obs/ble
-mosquitto_sub -v -t 'ag/#'                   # watch everything
-python3 -m pytest -q                         # contracts, alert packing, NMEA, hashing
+python3 tools/fake_bus.py --speed 5                      # demo profile: indoor waypoint loop
+python3 tools/fake_bus.py --config park.toml --speed 10  # park profile: lanes at Blackwoods, Acadia
+python3 tools/fake_bus.py --only pose,ble                # once tracker, locate and geofence are real
+mosquitto_sub -v -t 'ag/#'                               # watch everything
+python3 -m pytest -q                                     # contracts, alert packing, NMEA, hashing, map, fake bus
 ```
 
-`fake_bus.py` hides:
-- a dead iPhone at (120, 76) m;
-- an AirTag at (60, 32) m;
-- a team phone that rides on the drone, which `tracker.py`'s "moves with the drone" filter should drop.
+`fake_bus.py` reads the profile's `[sim]` table, which sets the path, the hidden phones and the RSSI model. It publishes:
+- `ag/pose` with `src` `"sim"` and `ag/obs/ble`, standing in for the pod;
+- `ag/track`, `ag/target` and a retained `ag/coverage`, standing in for tracker, geofence and locate until they land. Drop them with `--only pose,ble` once the real modules run.
+
+Its tracker **cheats**: it knows where each phone really is. Use it to build the dashboard, never for accuracy numbers. Its path is a dumb stand-in (a waypoint loop or fixed lanes); real routes come from `planner.py`.
+
+Hidden phones (positions are in each profile's `[sim] phones`):
+- a dead iPhone, off-trail: it should become a `day_offtrail` pin;
+- an AirTag: in the campground indoors, and off-trail in the park;
+- a switched-off Pixel (`findhub`) near a trail: a `search` pin only;
+- a team phone that rides on the pod, which `tracker.py`'s "moves with the drone" filter should drop.
 
 Each changes its hashed ID every 15 minutes, like Find My.
 
@@ -75,4 +84,4 @@ Each changes its hashed ID every 15 minutes, like Find My.
 - **Record everything:** `mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log`. Replay into the same topics to debug at 3 a.m. and to keep a backup that shows the real system.
 - **Validate:** call `afterglow.contracts.validate(topic, msg)` in tests for everything you publish.
 - **Privacy:** never log a raw address. Only `bridge.py` sees them.
-- **Shared config:** keep `afterglow.toml` identical on the pod and the laptop, especially the origin.
+- **Shared config:** keep `afterglow.toml` identical on the pod and the laptop, especially the origin. `park.toml` is laptop-only; any new key goes in both files.
