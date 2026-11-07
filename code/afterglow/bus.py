@@ -27,9 +27,16 @@ class Bus:
         except ValueError:
             log.warning("non-JSON on %s", msg.topic)
             return
-        for pattern, fn in self.handlers.items():
+        if not isinstance(data, dict):
+            log.warning("non-object JSON on %s", msg.topic)
+            return
+        for pattern, fn in list(self.handlers.items()):
             if mqtt.topic_matches_sub(pattern, msg.topic):
-                fn(msg.topic, data)
+                try:
+                    fn(msg.topic, data)
+                except Exception:
+                    # Uncaught, this kills paho's network thread and the module goes deaf.
+                    log.exception("handler for %s failed on %s", pattern, msg.topic)
 
     def publish(self, topic: str, obj: dict, retain=False):
         self.c.publish(topic, json.dumps(obj, separators=(",", ":")), qos=0, retain=retain)

@@ -47,8 +47,12 @@ def convert(line: str, src: str, hasher: Hasher, t: int | None = None):
     if kind == "wifi" and "addr" in d:
         return OBS_WIFI, {"t": t, "id": hasher(d["addr"]), "rand": bool(d.get("rand")), "rssi": d.get("rssi"), "ch": d.get("ch")}
     if kind == "sos":
+        try:
+            count = int(d.get("count", 0))
+        except (TypeError, ValueError):
+            return None
         return SOS, {"t": t, "hurt": bool(d.get("hurt")), "walk": bool(d.get("walk")),
-                     "count": int(d.get("count", 0)), "rssi": d.get("rssi")}
+                     "count": count, "rssi": d.get("rssi")}
     return None
 
 

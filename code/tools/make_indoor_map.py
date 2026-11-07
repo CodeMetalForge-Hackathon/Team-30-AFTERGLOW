@@ -74,13 +74,12 @@ def main():
 
     cfg = config.load(a.config)
     trails, zones = build(cfg)
-    base = Path(a.config).resolve().parent if a.config else config.DEFAULT.parent
     for rel, doc in ((cfg["rules"]["trails_geojson"], trails), (cfg["rules"]["zones_geojson"], zones)):
         text = json.dumps(doc, indent=2) + "\n"
         if a.print:
             print(f"--- {rel}\n{text}")
             continue
-        path = base / rel
+        path = config.resolve(cfg, rel)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
         print(f"wrote {path}")
