@@ -1,0 +1,15 @@
+# AFTERGLOW pod: append to /boot/firmware/config.txt, then reboot.
+dtparam=i2c_arm=on
+dtparam=i2c_arm_baudrate=400000
+# UART0 on GPIO14/15 (pins 8, 10) -> /dev/ttyAMA0: OMNI board
+dtparam=uart0=on
+# UART3 on GPIO8/9 (pins 24, 21) -> /dev/ttyAMA3: WIFI board
+dtoverlay=uart3-pi5
+# UART2 on GPIO4/5 (pins 7, 29) -> /dev/ttyAMA2: GPS module
+dtoverlay=uart2-pi5
+# Our 5 V converter can't announce 5 A over USB-PD: let the USB ports draw 1.6 A
+usb_max_current_enable=1
+# Camera Module 3 on the CSI ribbon
+camera_auto_detect=1
+# AI HAT+ (Hailo-8) on PCIe, Gen 3
+dtparam=pciex1_gen=3

@@ -1,0 +1,23 @@
+pi_pin,signal,gpio,linux,goes_to,suggested_colour
+1,3.3V,,,IMU V+ (STEMMA QT red),red
+2,5V,,,OMNI 5V and WIFI 5V (Y-split),red
+3,SDA,GPIO2,i2c-1,IMU SDA (STEMMA QT blue),blue
+4,5V,,,GPS VCC,red
+5,SCL,GPIO3,i2c-1,IMU SCL (STEMMA QT yellow),yellow
+6,GND,,,IMU GND (STEMMA QT black),black
+7,UART2 TX,GPIO4,/dev/ttyAMA2,GPS RX,green
+8,UART0 TX,GPIO14,/dev/ttyAMA0,OMNI D7 (RX),green
+9,GND,,,OMNI GND,black
+10,UART0 RX,GPIO15,/dev/ttyAMA0,OMNI D6 (TX),white
+14,GND,,,WIFI GND,black
+21,UART3 RX,GPIO9,/dev/ttyAMA3,WIFI D6 (TX),white
+24,UART3 TX,GPIO8,/dev/ttyAMA3,WIFI D7 (RX),green
+27,ID_SD,GPIO0,,AI HAT+ ID chip: do not wire,
+28,ID_SC,GPIO1,,AI HAT+ ID chip: do not wire,
+29,UART2 RX,GPIO5,/dev/ttyAMA2,GPS TX,white
+30,GND,,,GPS GND,black
+CSI,camera,,libcamera,Camera Module 3 (22-to-15-pin cable through the HAT cutout),
+PCIe,PCIe x1,,/dev/hailo0,AI HAT+ (its own ribbon),
+USB,USB 2.0,,/dev/lora (udev),LoRa board (XIAO + Wio-SX1262 Meshtastic),
+USB,USB 2.0,,/dev/radar (udev),MR60BHA2 radar kit,
+USB-C,5V in,,,5 V 5 A converter pigtail from the FPV flight battery,

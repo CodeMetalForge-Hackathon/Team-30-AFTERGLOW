@@ -1,0 +1,7 @@
+# Stable names for the two USB serial devices (they swap ttyACM0/1 between boots).
+# 1. Plug in ONE device and run:  udevadm info -q property -n /dev/ttyACM0 | grep -E 'ID_SERIAL_SHORT|ID_VENDOR_ID|ID_MODEL_ID'
+# 2. Put its ID_SERIAL_SHORT below, repeat for the other device.
+# 3. sudo cp 99-afterglow.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+# Then /dev/lora and /dev/radar always point at the right board.
+SUBSYSTEM=="tty", ENV{ID_SERIAL_SHORT}=="REPLACE_WITH_LORA_SERIAL", SYMLINK+="lora"
+SUBSYSTEM=="tty", ENV{ID_SERIAL_SHORT}=="REPLACE_WITH_RADAR_SERIAL", SYMLINK+="radar"

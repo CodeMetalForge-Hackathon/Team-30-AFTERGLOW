@@ -1,0 +1,59 @@
+"""Tiny MQTT helper (paho-mqtt 2.x). Every message on the bus is one JSON object."""
+import json
+import logging
+
+import paho.mqtt.client as mqtt
+
+log = logging.getLogger("bus")
+
+
+class Bus:
+    def __init__(self, host="localhost", port=1883, name="afterglow"):
+        self.c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=name)
+        self.handlers = {}
+        self.c.on_message = self._on_message
+        self.c.on_connect = self._on_connect
+        self.c.connect(host, port, keepalive=30)
+        self.c.loop_start()
+
+    def _on_connect(self, client, userdata, flags, reason_code, properties):
+        log.info("connected to MQTT (%s)", reason_code)
+        for topic in self.handlers:  # re-subscribe after a reconnect
+            client.subscribe(topic)
+
+    def _on_message(self, client, userdata, msg):
+        try:
+            data = json.loads(msg.payload)
+        except ValueError:
+            log.warning("non-JSON on %s", msg.topic)
+            return
+        for pattern, fn in self.handlers.items():
+            if mqtt.topic_matches_sub(pattern, msg.topic):
+                fn(msg.topic, data)
+
+    def publish(self, topic: str, obj: dict, retain=False):
+        self.c.publish(topic, json.dumps(obj, separators=(",", ":")), qos=0, retain=retain)
+
+    def subscribe(self, topic: str, fn):
+        self.handlers[topic] = fn
+        self.c.subscribe(topic)
+
+    def close(self):
+        self.c.loop_stop()
+        self.c.disconnect()
+
+
+class PrintBus:
+    """Stand-in for Bus with --dry-run: prints instead of publishing."""
+
+    def __init__(self, *a, **k):
+        self.handlers = {}
+
+    def publish(self, topic, obj, retain=False):
+        print(topic, json.dumps(obj, separators=(",", ":")), flush=True)
+
+    def subscribe(self, topic, fn):
+        self.handlers[topic] = fn
+
+    def close(self):
+        pass
