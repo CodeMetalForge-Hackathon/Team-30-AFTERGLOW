@@ -38,6 +38,7 @@ code/
     tracker.py          ag/obs/* + ag/pose -> ag/track (grid fit of the [track] RSSI model) and ag/pass
     locate.py           ag/pose + ag/track -> retained ag/coverage (coverage and probability grids over [locate] area_m)
     geofence.py         ag/track + map + ag/mode -> ag/target (rules, prio, the pin status guard, SOS); saves pins to runs/
+    thermal.py          HT-203U frames (or --fake) -> live/thermal.png + ag/thermal (warm spot, hot); camera reader not written yet
     radio.py            opens the pod's RFM95W on SPI1 from the config's [lora] table (lora_out, check_hw)
     lora_out.py         pod: ag/target (+ ag/pose, ag/sys) -> 16-byte alerts on the RFM95W every [lora] repeat_s, plus a heartbeat; obeys lora_off
     lora_rx.py          laptop: XIAO #3's USB lines -> ag/alert (drops other teams' packets)
@@ -75,6 +76,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop.txt   # la
 .venv/bin/python tools/fake_bus.py --config park.toml --speed 10         # park profile (realistic view)
 mosquitto_sub -v -t 'ag/#'                                               # watch the whole bus
 .venv/bin/python -m afterglow.tracker & .venv/bin/python -m afterglow.locate & .venv/bin/python -m afterglow.geofence [--fresh]   # real modules, with fake_bus --only pose,ble
+.venv/bin/python -m afterglow.thermal --fake [--dry-run --frames 8]      # fake thermal: live/thermal.png + ag/thermal
 .venv/bin/python -m afterglow.dashboard [--config park.toml]             # dashboard on http://localhost:8080
 .venv/bin/python -m afterglow.dashboard --broker <pi-ip>                 # laptop dashboard against the pod's broker
 mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log                      # record a run

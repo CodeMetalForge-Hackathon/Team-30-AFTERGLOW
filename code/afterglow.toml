@@ -38,7 +38,20 @@ radar = "/dev/radar"
 
 [i2c]
 imu_addr = 0x4B            # SparkFun BNO086, ADR jumper open (0x4A only if ADR is bridged)
-thermal_addr = 0x33        # MLX90640, arriving later
+
+[thermal]
+# thermal.py: the HTI HT-203U, a USB video device. Never /dev/videoN: the Camera Module 3
+# makes /dev/video* nodes too, so the numbers shift between boots.
+device = "/dev/thermal"    # udev symlink (pi/99-afterglow.rules) or /dev/v4l/by-id/...; set after the Pi format test
+fps = 4                    # live/thermal.png and ag/thermal this often
+rotate = 0                 # 0, 90, 180 or 270 degrees clockwise, so the picture is upright as mounted
+flip = false               # mirror left-right
+# hot, when the camera gives temperatures: a body-warm spot well above the rest of the frame (placeholders)
+hot_min_c = 30.0
+hot_max_c = 45.0           # warmer is an engine or a sun-baked rock, not a person
+hot_rise_c = 5.0           # degrees above the frame's median
+# hot, when it gives only a picture (no temperatures): how far the spot stands out, in spreads of the frame
+hot_z = 6.0
 
 [lora]
 # Two bare RFM95W radios (SX1276): plain LoRa, a RadioHead-style 4-byte header, then the

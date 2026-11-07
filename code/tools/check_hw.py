@@ -187,11 +187,10 @@ def c_i2c(a):
     if rc is None:
         return "SKIP", out + " (sudo apt install i2c-tools)"
     found = set(re.findall(r"\b([0-9a-f]{2})\b", "\n".join(l.split(":", 1)[1] for l in out.splitlines() if ":" in l)))
-    imu, thermal = (f"{a.cfg['i2c'][k]:02x}" for k in ("imu_addr", "thermal_addr"))
+    imu = f"{a.cfg['i2c']['imu_addr']:02x}"
     if imu not in found:
         return "FAIL", f"IMU (BNO086) not at 0x{imu} (found {sorted(found) or 'nothing'}): 3.3 V, SDA/SCL, ADR jumper?"
-    note = f"thermal at 0x{thermal}" if thermal in found else f"no thermal at 0x{thermal} yet (it arrives later)"
-    return "PASS", f"IMU at 0x{imu}; {note}"
+    return "PASS", f"IMU at 0x{imu}"  # the thermal camera is USB now (HT-203U), not I2C
 
 
 @check("camera")

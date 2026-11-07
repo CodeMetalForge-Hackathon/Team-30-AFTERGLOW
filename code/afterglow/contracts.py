@@ -32,6 +32,7 @@ STATES = ["heard", "localized", "pinned", "confirmed"]  # order = the alert's st
 TRACK_STATES = STATES[:3]  # only the ranger's Confirm sets "confirmed", on ag/target; the tracker never does
 MODES = ["patrol", "night", "investigate", "search"]
 POSE_SRC = ["gps", "waypoint", "replay", "sim"]  # gps/waypoint = the real pod; the dashboard badges the others
+THERMAL_SRC = ["ht203u", "fake"]  # optional ag/thermal src; the panel marks fake heat
 PIN_STATUS = ["new", "acknowledged", "investigating", "confirmed", "cleared"]
 RULES = ["day_offtrail", "night_outside_camp", "search", "sos"]
 CTRL_CMDS = {
@@ -92,6 +93,13 @@ def validate(topic: str, msg: dict) -> list[str]:
         for key in ("covered", "p"):
             if len(msg.get(key) or []) != n:
                 problems.append(f"{key} must have nx*ny = {n} cells")
+    if topic == THERMAL:
+        if not isinstance(msg.get("hot"), bool):
+            problems.append(f"thermal hot must be true or false, not {msg.get('hot')!r}")
+        if "max_c" in msg and msg["max_c"] is not None and not isinstance(msg["max_c"], (int, float)):
+            problems.append(f"thermal max_c must be a number or null, not {msg['max_c']!r}")
+        if "src" in msg and msg["src"] not in THERMAL_SRC:
+            problems.append(f"bad thermal src {msg['src']!r}")
     if topic == POSE and msg.get("src") not in POSE_SRC:
         problems.append(f"bad pose src {msg.get('src')!r}")
     if topic == MODE and msg.get("mode") not in MODES:

@@ -39,7 +39,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 | `ag/coverage` (**new**) | locate.py | `{"t":…,"x0":-50,"y0":-50,"cell_m":5,"nx":60,"ny":40,"covered":[0,1,1,…],"p":[0,12,255,…],"pct":0.62}` | Coverage and probability grids for the dashboard, about 1 Hz, **retained** so a reloaded dashboard gets it at once. See "Coverage grid" below. Stays on the pod, never goes over LoRa |
 | `ag/track` (**changed**) | tracker.py | `{"t":…,"track":"T1","ids":["7f3a9c21","e9910b4c"],"cls":"findmy","x":18.5,"y":9.0,"r95":12.0,"state":"localized","passes":2,"last_s":4,"with_drone":false,"baseline":false,"c":0.62}` | Best estimate for one beacon, about once a second. `ids` lists the rotating keys followed through key changes (the last 4). `with_drone` marks beacons that move with the drone, such as our own phones. Optional `baseline` (**new**): heard during the baseline, so grey and never pinned. Optional `c` (**new**): confidence 0–1, which geofence copies onto the pin. See "Tracks" below |
 | `ag/target` (**changed**) | geofence.py | `{"t":…,"pin":"P3","track":"T1","x":18.5,"y":9.0,"lat":44.3387,"lon":-68.2731,"r95":12.0,"c":0.82,"prio":2,"cls":"findmy","state":"localized","last_s":4,"off_trail_m":46,"zone":"trail_corridor","rule":"day_offtrail","status":"new","flags":{"sos":false,"thermal":true,"radar":false,"camera":true},"br":null}` | **The one record** the dashboard, LoRa alerts and ATAK use. One per pin. `state` and `last_s` come from the track (see "How geofence fills a pin"). Optional `sos` (`{"hurt":true,"walk":false,"count":2}`) once an SOS answer is attached |
-| `ag/thermal` | thermal.py | `{"t":…,"max_c":33.8,"hot":true,"col":17,"row":9,"conf":0.7}` | Warmest spot in the 32×24 frame. Frames for the panel are image files over HTTP, not MQTT (see "Images over HTTP") |
+| `ag/thermal` (**changed**) | thermal.py | `{"t":…,"max_c":33.8,"hot":true,"col":120,"row":80,"w":256,"h":192,"conf":0.8,"src":"ht203u"}` | The warm spot in the HT-203U's frame, about 4 times a second (see "Thermal spot"). Frames for the panel are image files over HTTP, not MQTT (see "Images over HTTP") |
 | `ag/vision` (**new**) | person.py | `{"t":…,"kind":"person","conf":0.82,"box":[1820,940,96,140],"snap":"snaps/1731000000123.jpg","track":"T1"}` | Camera check. `kind` is `person` or `colour` (the Monviso-style colour check). `snap` is also its URL path on port 8080 |
 | `ag/radar` | radar.py | `{"t":…,"present":true,"range_m":1.1,"br":14,"hr":72}` | Breathing and heart rate, landed only (tier 3) |
 | `ag/plan` (**new**) | planner.py | `{"t":…,"id":"L7","kind":"homing","legs":[{"to_x":20,"to_y":5,"heading_deg":72,"dist_m":35,"alt_m":8}],"status":"proposed"}` | Legs for the pilot. `kind` is `patrol`, `grid` or `homing`. The ranger accepts on the dashboard; the observer reads heading and distance to the pilot |
@@ -149,6 +149,16 @@ geofence.py listens to `ag/sos`, not lora_out.py, because priority 1 and `flags.
 - `new_search` clears both grids.
 - The `[locate]` table holds `cell_m`, `detect_m`, `stale_s` and `area_m`, the box the grids cover (empty means the map's `park` zone). The grid is capped at 20,000 cells: past that, `cell_m` grows. `cell_m` and `detect_m` are placeholders until ME 2's range test.
 - The 95% circle needs no topic of its own, because `x`, `y` and `r95` are already on `ag/track` and `ag/target`.
+
+### Thermal spot
+
+- thermal.py sends one `ag/thermal` per frame, about 4 times a second (`[thermal] fps`), and writes the same frame to `live/thermal.png` with a cyan box round a hot spot.
+- `col` and `row` are the spot's pixel in a `w` × `h` frame: 256 × 192, or 192 × 256 after a 90° `rotate`. The spot is the warmest 3 × 3 patch, so one noisy pixel can't be it.
+- **With temperatures:** `max_c` is the spot in °C. The spot is the warmest patch inside the body band (`hot_min_c`–`hot_max_c`, 30–45 °C), or the warmest overall if nothing is in the band. `hot` means it's in the band and at least `hot_rise_c` (5 °C) above the frame's median, so an engine or a sun-baked rock never counts. Nor does its rim, which cools through the band: patches within 5 pixels of anything above `hot_max_c` are skipped.
+- **Picture only** (no temperatures): `max_c` is `null`, and `hot` means the spot stands at least `hot_z` spreads (median absolute deviations) above the frame's median.
+- `conf` is 0–1: 0.5 right at the `hot` threshold, 1.0 at twice it.
+- `src` is `ht203u` (the camera) or `fake` (`thermal.py --fake`). The panel should mark fake heat.
+- Whether the HT-203U gives temperatures on Linux is still to check (TODO.md), so readers must handle both kinds. All the thresholds are placeholders in the `[thermal]` table.
 
 ## Map files
 
