@@ -41,8 +41,13 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
 ## Phase 1: Bring-up and first data (hours 0–3, until 13:00, checkpoints I1–I5)
 
 **Hardware (UT)**
-- [ ] Image the Pi, run `bash pi/setup_pi.sh` and reboot (no `PSU_MAX_CURRENT`: it's a 3 A power bank). `check_hw.py` passes for every connected part. **(I1)**
-- [ ] Copy the ESP32 sketches (scanner, wifi_listener, sos_page) from the plan doc into `firmware/`. They aren't in the repo. Each must print on `Serial1.begin(921600, SERIAL_8N1, D9, D10)`, not `Serial` (see `firmware/README.md`). The scanner sends `findmy` only for `4C 00 12 19`.
+- [x] Image the Pi, run `bash pi/setup_pi.sh` and reboot (no `PSU_MAX_CURRENT`: it's a 3 A power bank). `check_hw.py` passes for every connected part. **(I1)**
+  - Done Sat 7 Nov: Bookworm 64-bit, user `pi`, repo at `/home/pi/afterglow`. `check_hw.py --only config power serial_ports mqtt` all PASS on the bare Pi (nothing wired yet); rerun the full check as each part is connected.
+  - No travel router: the Pi and the laptop use Rohan's phone hotspot (the building Wi-Fi blocked HTTPS). SSH from the Mac is refused even after `systemctl enable --now ssh`; still to fix.
+- [x] ESP32 sketches into `firmware/` (scanner and wifi_listener; sos_page has its own tier-2 item, "sos_page firmware (UT)"). Each must print on `Serial1.begin(921600, SERIAL_8N1, D9, D10)`, not `Serial` (see `firmware/README.md`). The scanner sends `findmy` only for `4C 00 12 19`.
+  - [x] No plan-doc sketches existed, so they were written from `firmware/README.md` and CONTRACTS.md: `firmware/scanner/scanner.ino` and `firmware/wifi_listener/wifi_listener.ino`. USB debug shows per-class counts, never an address.
+  - [x] Compiled and flashed both in the Arduino IDE (Sat 7 Nov). Bench check over USB: both counts rise as expected. Not yet wired to the Pi.
+  - **For SW:** `contracts.CLS_CODES` lacks `apple_other`, although CONTRACTS.md lists it, so the bridge drops `apple_other` lines as invalid. It only matters with `REPORT_ALL` true.
 - [ ] OMNI streams `ble` lines, and a real `findmy` beacon reaches `ag/obs/ble` through `bridge.py`. **(I2)** Check the separated/near split on our AirTag and a powered-off iPhone.
 - [ ] Put the radar's serial number in `pi/99-afterglow.rules` so `/dev/radar` exists.
 - [ ] **LoRa link (I4):**
@@ -51,7 +56,7 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
   - [ ] Laptop: `.venv/bin/python -m afterglow.lora_rx --print` logs "radio settings match the config".
   - [ ] Pi: `check_hw.py --only lora` passes, and the heartbeat (`"kind":4`) shows up on the laptop.
 - [ ] ~~GPS NMEA by a window (I5).~~ **Blocked:** we have only the ANN-MB5 antenna, no receiver. Ask the hardware desk for any u-blox board with a UART; if one turns up, wire it to the reserved pins, set `gps = "/dev/ttyAMA2"` and run `check_hw.py --only gps`. Until then, position comes from waypoint taps.
-- [ ] If the Pi user isn't `pi` or the clone isn't at `/home/pi/afterglow`, fix `User=` and the paths in `pi/systemd/afterglow@.service`.
+- [x] (Not needed: the user is `pi` and the clone is at `/home/pi/afterglow`.) If the Pi user isn't `pi` or the clone isn't at `/home/pi/afterglow`, fix `User=` and the paths in `pi/systemd/afterglow@.service`.
 
 **Software (SW), on the fake bus: done** (reviewed and pushed Sat 7 Nov)
 - [x] Dashboard skeleton (`dashboard.py` + `afterglow/web/`): the event stream with its full-state resend, a Leaflet map with trails and zones, live pose and raw observations, all running on the fake bus. **(I3: pins and coverage move, checked in both profiles.)**
