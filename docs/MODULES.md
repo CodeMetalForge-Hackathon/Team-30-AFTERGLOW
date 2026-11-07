@@ -25,7 +25,7 @@ Hour 0 is Saturday 10:00. Hard cutoff is Sunday 12:00.
 | lora_rx (firmware) | XIAO #3 + RFM95W, on the laptop's USB | LoRa radio | USB `rx` lines | 1 | Utility | ✅ `firmware/lora_rx/` |
 | `lora_rx.py` | Laptop | XIAO #3 over USB | `ag/alert` (laptop broker) | 1 | Software | ✅ done |
 | `cot_out.py` | Laptop | `ag/alert` (fallback: `ag/target` over Wi-Fi) | CoT to ATAK | 1 | Software | ✅ done; check on a real ATAK phone |
-| `thermal.py` | Pi | MLX90640 | `ag/thermal` + `live/thermal.png` | 1 view, 2 flag | Utility | |
+| `thermal.py` | Pi | HTI HT-203U (USB video) | `ag/thermal` + `live/thermal.png` | 1 view, 2 flag | Utility | replaced the MLX90640; see TODO for the first test |
 | health | Pi | vcgencmd, ports | `ag/sys` | 1 | Utility | `tools/check_hw.py` has the checks |
 | `planner.py` | Pi | `ag/target`, `ag/pose`, `ag/ctrl` | `ag/plan` | 2 | Software | |
 | `person.py` | Pi + AI HAT+ | camera | `ag/vision`, `snaps/<t>.jpg`, `live/camera.jpg` | 2 | Software | |
