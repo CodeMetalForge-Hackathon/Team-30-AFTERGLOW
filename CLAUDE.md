@@ -4,6 +4,8 @@ A search-assist sensing pod strapped under an FPV drone. It passively hears the 
 
 The project is built at a 26-hour hackathon. Hour 0 is Sat 7 Nov 2026 at 10:00 ET, the freeze is at hour 22 (Sun 08:00) and submission is due by hour 26 (Sun 12:00). `TODO.md` holds the phased plan; tick items there as they land.
 
+**How to answer:** keep answers and explanations simple and short. Go into detail only when asked.
+
 **The one rule:** the drone never decides. The planner proposes, and the ranger approves every pin and every leg. No code path may auto-confirm a pin or auto-accept a leg.
 
 ## Read first
