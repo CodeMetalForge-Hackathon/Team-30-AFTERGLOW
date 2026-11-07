@@ -6,7 +6,7 @@ import pytest
 
 from afterglow import alert, geo
 from afterglow.bridge import Hasher, convert
-from afterglow.contracts import OBS_BLE, OBS_WIFI, SOS, TARGET, validate
+from afterglow.contracts import COVERAGE, OBS_BLE, OBS_WIFI, SOS, TARGET, TRACK, validate
 from afterglow.position import Position
 
 
@@ -155,3 +155,37 @@ def test_position_waypoint_tap():
 def test_target_contract_example_validates():
     m = sample_target()
     assert validate(TARGET, m) == []
+
+
+def test_target_needs_state_and_last_s():
+    m = sample_target()
+    del m["state"], m["last_s"]
+    assert any("missing" in p for p in validate(TARGET, m))
+    assert validate(TARGET, sample_target(state="found")) != []
+    assert validate(TARGET, sample_target(state="confirmed")) == []
+
+
+def test_sos_only_pin_validates():
+    m = sample_target(track="T0", rule="sos", status="new", state="heard", cls="wifi", c=0, last_s=0, r95=30.0, prio=2)
+    assert validate(TARGET, m) == []
+    assert alert.decode(alert.encode(m, kind=alert.TYPE_SOS))["kind"] == alert.TYPE_SOS
+    assert validate(TARGET, sample_target(rule="sso")) != []
+
+
+def test_track_can_never_be_confirmed():
+    track = {"t": 1, "track": "T1", "cls": "findmy", "x": 0, "y": 0, "r95": 5, "state": "pinned", "last_s": 0}
+    assert validate(TRACK, track) == []
+    assert validate(TRACK, {**track, "state": "confirmed"}) != []  # only the ranger confirms
+
+
+def test_coverage_grid_size_must_match():
+    cov = {"t": 1, "x0": -2, "y0": -5, "cell_m": 1, "nx": 3, "ny": 2,
+           "covered": [0, 1, 1, 0, 0, 1], "p": [0, 12, 255, 0, 0, 3], "pct": 0.5}
+    assert validate(COVERAGE, cov) == []
+    assert validate(COVERAGE, {**cov, "p": [0, 1]}) != []
+
+
+def test_battery_null_is_unknown_on_the_wire():
+    pkt = alert.encode(sample_target(battery=None))
+    assert pkt[14] == 255 and alert.decode(pkt)["battery"] is None
+    assert alert.decode(alert.encode(sample_target(battery=73)))["battery"] == 73

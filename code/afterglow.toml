@@ -37,10 +37,22 @@ publish_hz = 5
 [rules]
 offtrail_m = 30            # day patrol: pin a beacon farther than this from a trail...
 min_passes = 2             # ...seen on at least this many passes
+sos_r95_m = 30.0           # r95 of an SOS-only pin: the SOS page's Wi-Fi range (placeholder)
 night_start = "21:00"
 night_end = "06:00"
 trails_geojson = "data/trails.geojson"
 zones_geojson = "data/zones.geojson"
+
+[locate]
+# Placeholders until ME 2's range test. Indoors use about 1 m cells; outdoors about 5 m.
+cell_m = 1.0               # coverage and probability grid cell size (ag/coverage)
+detect_m = 15.0            # a cell counts as covered once the pod passes within this distance
+
+[http]
+# dashboard.py serves the dashboard and these folders on one port. Paths are relative to code/.
+port = 8080
+live_dir = "live"          # live/thermal.png (thermal.py), live/camera.jpg (person.py)
+snaps_dir = "snaps"        # snaps/<t>.jpg (person.py), the path in ag/vision "snap"
 
 # Indoor taped park: waypoint number -> [x, y] in metres from waypoint 0.
 [waypoints]

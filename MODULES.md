@@ -18,15 +18,15 @@ Hour 0 is Saturday 10:00. Hard cutoff is Sunday 12:00.
 | `bridge.py` | Pi | ttyAMA0, ttyAMA3, `ag/ctrl` | `ag/obs/ble`, `ag/obs/wifi`, `ag/sos` | 1 | Utility | ✅ |
 | `position.py` | Pi | ttyAMA2 NMEA, `ag/ctrl` waypoint | `ag/pose` | 1 | Utility | ✅ (IMU roll/pitch still to add) |
 | `tracker.py` | Pi | `ag/obs/*`, `ag/pose`, `ag/ctrl` | `ag/track` | 1 | Software | |
-| locate (`bearing.py` + map) | Pi | `ag/obs/ble`, `ag/pose` | `ag/pass`; probability grid, 95% circle, coverage | 1 | Software | |
-| `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl` | `ag/target` | 1 | Software | |
-| `dashboard.py` | Pi, viewed on the laptop | everything | `ag/ctrl`, `ag/mode` | 1 | Software | |
-| `lora_out.py` | Pi | `ag/target`, `ag/ctrl` | 16-byte alerts over Meshtastic | 1 | Utility | ✅ `afterglow/alert.py` |
+| locate (`bearing.py` + map) | Pi | `ag/obs/ble`, `ag/pose` | `ag/pass`, `ag/coverage` (retained) | 1 | Software | |
+| `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl`, `ag/sos`, `ag/pose` | `ag/target` | 1 | Software | |
+| `dashboard.py` | Pi, viewed on the laptop | everything; serves the images on port 8080 | `ag/ctrl`, `ag/mode` | 1 | Software | |
+| `lora_out.py` | Pi | `ag/target`, `ag/sys`, `ag/ctrl` | 16-byte alerts over Meshtastic | 1 | Utility | ✅ `afterglow/alert.py` |
 | `lora_rx.py`, `cot_out.py` | Laptop | Meshtastic | CoT to ATAK | 1 | Software | ✅ `alert.py`, `geo.py` |
-| `thermal.py` | Pi | MLX90640 | `ag/thermal` + frames over HTTP | 1 view, 2 flag | Utility | |
+| `thermal.py` | Pi | MLX90640 | `ag/thermal` + `live/thermal.png` | 1 view, 2 flag | Utility | |
 | health | Pi | vcgencmd, ports | `ag/sys` | 1 | Utility | `tools/check_hw.py` has the checks |
 | `planner.py` | Pi | `ag/target`, `ag/pose`, `ag/ctrl` | `ag/plan` | 2 | Software | |
-| `person.py` | Pi + AI HAT+ | camera | `ag/vision` + snapshots | 2 | Software | |
+| `person.py` | Pi + AI HAT+ | camera | `ag/vision`, `snaps/<t>.jpg`, `live/camera.jpg` | 2 | Software | |
 | `sim.py` | Laptop | park map (Acadia) | `ag/pose`, `ag/obs/ble` | 2 | Software | `tools/fake_bus.py` is a small start |
 | sos_page (firmware) | WIFI board | Wi-Fi AP | serial `sos` lines | 2 | Utility | plan doc |
 | `radar.py` | Pi | radar kit | `ag/radar` | 3 | Utility | |

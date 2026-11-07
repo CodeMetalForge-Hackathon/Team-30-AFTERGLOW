@@ -10,6 +10,7 @@ __pycache__/
 # Run output: logs and camera snapshots stay off GitHub (privacy; see CLAUDE.md)
 runs/
 snaps/
+live/
 *.log
 
 # Secrets: the Meshtastic channel key never goes in the repo

@@ -15,11 +15,11 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
 - [x] Set up the laptop venv. All 13 tests pass.
 - [ ] Push to the team GitHub repo. Teammates clone it, and the Pi clones it to `/home/pi/afterglow`.
 - [x] Install Mosquitto on the laptop (`brew install mosquitto`). Run `fake_bus.py --speed 5` and watch it with `mosquitto_sub -v -t 'ag/#'`. It runs as a `brew services` service, localhost only.
-- [ ] Settle these contract gaps at kickoff. Edit `contracts.py` and `CONTRACTS.md` together.
-  - [ ] **`ag/target` has no `state` or `last_s`, but `alert.encode` reads both.** As specified, every LoRa alert would decode as "heard" with last-heard 0 s. Proposal: geofence copies `state` and `last_s` from the track into the target.
-  - [ ] **Alert bytes 11 (SOS) and 14 (pod battery) have no source.** Neither field is on `ag/target`, and `ag/sys` has no battery field. Decide how `lora_out.py` joins in `ag/sos` and the battery level.
-  - [ ] **No transport for locate's probability grid, 95% circle or coverage overlay.** Proposal: a new low-rate `ag/coverage` topic with a coarse grid, or an HTTP endpoint.
-  - [ ] **No HTTP endpoints for thermal frames and camera snapshots.** Decide who serves them and on which port.
+- [x] Settle these contract gaps at kickoff. Edit `contracts.py` and `CONTRACTS.md` together. **Tell the team.**
+  - [x] **`ag/target` gets `state` and `last_s`**, which geofence copies from the track. Only the ranger's Confirm sets `confirmed`.
+  - [x] **SOS goes through geofence**, onto the investigating pin, or an SOS-only `T0` pin. **Battery** is `ag/sys` `batt_pct`, `null` for now, and goes out as 255.
+  - [x] **New retained `ag/coverage` topic** from locate. Its settings are in the new `[locate]` config table.
+  - [x] **Images:** dashboard.py serves `live/` and `snaps/` on port 8080, and thermal.py and person.py just write files.
 - [ ] Decide the dashboard stack; nothing for it is in the requirements yet. Suggestion: a small Python web server on the Pi that bridges MQTT to a websocket, with the map drawn in local metres (SVG or canvas) from the GeoJSON. That avoids online map tiles, since the travel router may have no internet.
 - [x] Create `code/data/trails.geojson` and `code/data/zones.geojson` for the taped indoor park. Units: lon/lat (the GeoJSON standard, converted with `geo.to_xy` on load). `tools/make_indoor_map.py` generates them from the origin and waypoints; rerun it after changing either.
 - [x] Set `origin_lat` and `origin_lon` in `afterglow.toml`; indoors, that's the point taped waypoint 0 maps to. Keep the file identical on the pod and the laptop. It's set to Acadia for now; switch it to the venue if the ATAK markers should appear there.
@@ -56,27 +56,32 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 - [ ] **locate: `bearing.py` + map (SW)**:
   - finds each pass's RSSI peak and publishes `ag/pass` (`sharp` = dB above the pass median);
   - keeps the probability grid;
-  - computes the 95% radius (`r95`) and the coverage overlay.
+  - computes the 95% radius (`r95`) and the coverage overlay;
+  - publishes `ag/coverage` about once a second, **retained**.
 - [ ] **`geofence.py` (SW)** writes `ag/target`:
   - applies the `day_offtrail`, `night_outside_camp` and `search` rules according to `ag/mode`;
   - sets priority 1–4 and assigns pin IDs (`P1`, `P2`, …);
-  - updates the pin status on `ack`, `investigate`, `clear` and `confirm`.
+  - updates the pin status on `ack`, `investigate`, `clear` and `confirm`;
+  - copies `state` and `last_s` from the track, and sets `state` to `confirmed` only on Confirm;
+  - attaches `ag/sos` answers to the investigating pin, or opens an SOS-only `T0` pin at the pod.
 - [ ] **`dashboard.py` (SW)**:
   - pins with Acknowledge, Investigate, Clear and Confirm buttons;
   - a mode switch for patrol, night, investigate and search;
   - Baseline and New search buttons, plus waypoint taps for the indoor park;
-  - the coverage overlay, pod health from `ag/sys`, and the thermal and camera panel.
+  - the coverage overlay, pod health from `ag/sys`, and the thermal and camera panel;
+  - serves `live/` and `snaps/` on port 8080.
 - [ ] **`lora_out.py` (UT)** sends `ag/target` through `alert.encode` as Meshtastic `PRIVATE_APP`:
   - every 5 s per active pin, and at once when a pin's state changes or an SOS arrives;
   - P1 first, with `wantAck` for P1 and P2;
   - a heartbeat;
-  - obeys `lora_off` and `lora_on`.
+  - obeys `lora_off` and `lora_on`;
+  - ages `last_s` between repeats, takes the battery from `ag/sys`, and sends `rule: "sos"` pins as type 2.
 - [ ] **`lora_rx.py` + `cot_out.py` (SW, laptop)** decode the alert and send CoT with pytak to `239.2.3.1:6969`:
   - callsign `P1 T1`, remarks text, and colour by priority;
   - the pod shown as a friendly unit;
   - the 95% circle, if ATAK draws it. Check the marker type in ATAK.
-- [ ] **`thermal.py` view (UT)**: MLX90640 at about 4 Hz, frames over HTTP, and the warmest spot on `ag/thermal`.
-- [ ] **health (UT)**: `ag/sys` from `vcgencmd`, ports, disk, GPS fix and LoRa. Reuse the checks in `check_hw.py`.
+- [ ] **`thermal.py` view (UT)**: MLX90640 at about 4 Hz, written to `live/thermal.png` (temp file, then rename), and the warmest spot on `ag/thermal`.
+- [ ] **health (UT)**: `ag/sys` from `vcgencmd`, ports, disk, GPS fix and LoRa, plus `batt_pct: null`. Reuse the checks in `check_hw.py`.
 - [ ] Put ME 2's range numbers in by hour 7: the localized and pinned radii, the lane spacing and `fake_bus.py`'s RSSI model.
 - [ ] **(I6, hour 7, 17:00):** carried along the taped trail, a pin lands within 5 m and shows its off-trail distance. Save a screenshot and the measured error.
 - [ ] **(I7, hour 12, 22:00):** with the closed pod on the drone and props off, run two passes → pin → Investigate → thermal and camera panel → ATAK marker over LoRa. **Record the backup video.**
@@ -89,7 +94,8 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - patrol routes along the trails;
   - acts on `accept_leg` and `reject_leg`.
   The dashboard draws each leg with the heading and distance the observer reads to the pilot.
-- [ ] **`person.py` (SW)** writes `ag/vision` with a snapshot and sets the pin's `camera` flag:
+- [ ] **`person.py` (SW)** writes `ag/vision` with a snapshot (`snaps/<t>.jpg`) and sets the pin's `camera` flag:
+  - writes `live/camera.jpg` about once a second for the panel, because only one process can open the camera;
   - uses a precompiled Hailo YOLO model and keeps only the person class;
   - tiles each 4608×2592 frame into overlapping 640×640 pieces (about 28 tiles, about 1 fps) and merges the boxes;
   - runs the CPU colour-anomaly check;
@@ -132,6 +138,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - compile it with Hailo's Dataflow Compiler, using at least 1,024 calibration images.
   It took one developer a full weekend, so try it only with a GPU and spare time.
 - [ ] **Radar pole mount.**
+- [ ] **Pod battery reading (UT):** a voltage divider from the LiPo into a XIAO analog pin, so `ag/sys` `batt_pct` stops being `null`.
 
 ### Beyond the hackathon
 

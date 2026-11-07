@@ -60,7 +60,7 @@ Anything past `--print` or `--dry-run` needs Mosquitto on the laptop (`brew inst
 - Modules are separate processes that talk only over MQTT: Mosquitto on the Pi at `localhost:1883`. Each message is one JSON object, and every topic starts with `ag/`. Only the 16-byte alert leaves the pod.
 - `t` is Unix time in milliseconds, stamped on the Pi by `contracts.now_ms()`. The ESP32s keep no clock.
 - Positions are in local metres: `x` is east and `y` is north of the mission origin set in `afterglow.toml`. Only `position.py` (inbound) and `cot_out.py` (outbound) convert lat/lon, both through `geo.py`.
-- Data flow: bridge → `ag/obs/*`; position → `ag/pose`; tracker → `ag/track`; locate → `ag/pass`; geofence → `ag/target`; lora_out → Meshtastic → lora_rx → cot_out → ATAK. The dashboard writes `ag/ctrl` and `ag/mode`.
+- Data flow: bridge → `ag/obs/*`; position → `ag/pose`; tracker → `ag/track`; locate → `ag/pass`, `ag/coverage`; geofence (also reads `ag/sos`) → `ag/target`; lora_out → Meshtastic → lora_rx → cot_out → ATAK. The dashboard writes `ag/ctrl` and `ag/mode`.
 - `ag/target` is the one record per pin that the dashboard, the LoRa alert and ATAK all consume. `geofence.py` owns it.
 
 ## Conventions
