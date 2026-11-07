@@ -1,6 +1,6 @@
 # ESP32 firmware: what the Pi and the laptop expect
 
-The plan doc has the scanner, wifi_listener and sos_page sketches. **Change their serial port to `Serial1` on D9/D10 (below) when you copy them in.** This page covers only what the firmware must do for the Python side to work. Owner: Utility.
+The sketches are `scanner/` (OMNI), `wifi_listener/` (WIFI) and `lora_rx/` (laptop radio). sos_page (tier 2) isn't written yet. All pod sketches print to the Pi on `Serial1` at D9/D10 (below), and their USB debug output never shows an address. This page covers only what the firmware must do for the Python side to work. Owner: Utility.
 
 Pins and parts come from `docs/HARDWARE.md`. The line formats are in `docs/CONTRACTS.md`, "Serial lines from the ESP32 boards".
 
