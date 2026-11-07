@@ -17,6 +17,10 @@ What it publishes (pick with --only):
 The profile's [sim] table sets the path, the hidden phones and the RSSI model. The path is a
 dumb stand-in, a waypoint loop or fixed lanes; real routes come from planner.py.
 
+Trail pathing (sim only): while ag/mode is "search" and a case is open on the laptop (the
+dashboard's case file, afterglow/case.py), the fake pod flies the case's trail instead: to the
+nearest point on it, then back and forth along it. Any other mode goes back to the lanes.
+
 The stand-in tracker CHEATS: it knows where each phone really is and adds an error that
 shrinks with every strong pass (r95 = 2.5 x localized_r95_m / passes^1.5). It only makes
 the dashboard look right; accuracy numbers (I6, I8) must come from the real modules.
@@ -37,7 +41,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from afterglow import config, geo  # noqa: E402
-from afterglow.contracts import (ALWAYS_REPORTED, COVERAGE, OBS_BLE, POSE, TARGET,  # noqa: E402
+from afterglow.contracts import (ALWAYS_REPORTED, COVERAGE, MODE, OBS_BLE, POSE, TARGET,  # noqa: E402
                                  TRACK, now_ms)
 from afterglow.geofence import prio  # noqa: E402
 from afterglow.locate import Locate, grid_area  # noqa: E402
@@ -115,6 +119,71 @@ def path(cfg, area, dt):
         sys.exit(f"[sim] path must be \"waypoints\" or \"lanes\", not {sim['path']!r}")
 
 
+def nearest_index(pts, x, y):
+    return min(range(len(pts)), key=lambda i: math.dist(pts[i], (x, y)))
+
+
+class Pather:
+    """The fake pod's path: the [sim] path (lanes or waypoints) until a trail route is set and
+    active, then that trail. Each switch flies a straight transit leg, so the pod never jumps."""
+
+    def __init__(self, cfg, area, dt):
+        self.step = cfg["sim"]["speed_mps"] * dt
+        self.base = path(cfg, area, dt)
+        self.route = None  # [[x, y], ...] or None
+        self.active = False  # True while ag/mode is "search"
+        self.pos = None
+        self.src = None  # the generator in use
+        self.want = "base"
+        self.n = 0
+
+    def set_route(self, pts):
+        self.route = [tuple(p) for p in pts] if pts and len(pts) >= 2 else None
+        self.src = None  # re-plan from where the pod is
+
+    def set_active(self, on):
+        if bool(on) != self.active:
+            self.active = bool(on)
+            self.src = None
+
+    def transit(self, to):
+        if self.pos is not None and math.dist(self.pos, to) > self.step:
+            for pt, _ in walk([self.pos, to], self.step):
+                yield pt[0], pt[1], self.n
+
+    def trail(self):
+        r = self.route
+        i = nearest_index(r, *(self.pos or r[0]))
+        yield from self.transit(r[i])
+        legs = [r[i::-1], r] if i > 0 else [r]  # to the nearer end first, then the whole trail
+        while True:
+            for verts in legs:
+                for pt, _ in walk(verts, self.step):
+                    yield pt[0], pt[1], self.n
+                self.n += 1
+            legs = [legs[-1][::-1]]
+
+    def base_path(self):
+        x, y, n = next(self.base)
+        yield from self.transit((x, y))
+        yield x, y, n
+        for x, y, n in self.base:
+            self.n = n
+            yield x, y, n
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        want = "trail" if self.active and self.route else "base"
+        if self.src is None or want != self.want:
+            self.want = want
+            self.src = self.trail() if want == "trail" else self.base_path()
+        x, y, n = next(self.src)
+        self.pos = (x, y)
+        return x, y, n
+
+
 class FakePod:
     def __init__(self, cfg, pm: ParkMap, rng: random.Random, only=frozenset(TOPICS)):
         self.cfg, self.pm, self.rng, self.only = cfg, pm, rng, set(only)
@@ -130,6 +199,14 @@ class FakePod:
         self.strong = self.model_rssi(math.hypot(cfg["locate"]["detect_m"], sim["height_m"]))
         self.loc = Locate(cfg, None, pm) if "coverage" in self.only else None  # publishes nothing itself
         self.n_tracks = self.n_pins = 0
+        self.pather = Pather(cfg, self.area, self.dt)
+
+    def on_mode(self, msg):
+        """ag/mode: fly the case's trail while the ranger has trail pathing ("search") on."""
+        self.pather.set_active(msg.get("mode") == "search")
+
+    def set_route(self, pts):
+        self.pather.set_route(pts)
 
     def model_rssi(self, dist):
         return self.sim["rssi_p0"] - 10 * self.sim["rssi_n"] * math.log10(max(dist, 1.0))
@@ -138,7 +215,7 @@ class FakePod:
         """Yield (topic, msg, retain) forever, or for duration_s simulated seconds."""
         per_tick = max(1, round(1.0 / self.dt))  # the once-a-second outputs
         h = self.sim["height_m"]
-        for step, (x, y, pass_no) in enumerate(path(self.cfg, self.area, self.dt)):
+        for step, (x, y, pass_no) in enumerate(self.pather):
             if duration_s is not None and step * self.dt > duration_s:
                 return
             t = t0 + int(step * self.dt * 1000)
@@ -255,7 +332,13 @@ def main():
         bus = PrintBus()
     else:
         from afterglow.bus import Bus
+        from afterglow.case import CaseStore
         bus = Bus(a.host or cfg["mqtt"]["host"], a.port or cfg["mqtt"]["port"], name="fake_bus")
+
+        def on_mode(_topic, msg):  # trail pathing: re-read the dashboard's case file on every mode change
+            pod.set_route(CaseStore(cfg, pod.pm).view()["route"])
+            pod.on_mode(msg)
+        bus.subscribe(MODE, on_mode)
 
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # `kill` cleans up like Ctrl+C
     start = time.monotonic()

@@ -124,6 +124,21 @@ repeat_s = 5               # --wifi only: resend each live pin this often, as lo
 pod_every_s = 2            # --wifi only: the pod marker at most this often (ag/pose comes at 5 Hz)
 circles = true             # also draw each pin's 95% circle
 
+[search]
+# Trail pathing on the TV dashboard (tv.html) and afterglow/trails.py. Laptop only: the case
+# (name, age, description) is saved to case_file under runs/ and never goes on the bus or LoRa.
+# SAMPLE numbers until we have the published trail-use data.
+case_file = "runs/case_demo.json"
+corridor_m = 1.0           # how far each side of a trail counts as flown
+near_m = 5.0               # a trail this far from the car scores about a third of one right next to it
+default_popularity = 0.1   # trails missing from the popularity table
+entrance_xy = [0.0, 0.0]   # the start point when no car park is known
+car_parks = [
+  { name = "Car park A", x = -1.0, y = 0.5 },
+  { name = "Car park B", x = 10.0, y = 1.0 },
+]
+popularity = { "Taped trail" = 1.0 }
+
 [sim]
 # Read only by tools/fake_bus.py (and later sim.py); the pod ignores this table.
 # The fake pod's path is a dumb stand-in. Real routes come from planner.py.

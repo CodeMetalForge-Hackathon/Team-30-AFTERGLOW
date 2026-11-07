@@ -102,6 +102,22 @@ repeat_s = 5
 pod_every_s = 2
 circles = true
 
+[search]
+# Trail pathing on the TV dashboard (tv.html). SAMPLE car parks and trail popularity until we
+# have the published trail-use data. The case is saved under runs/, never on the bus or LoRa.
+case_file = "runs/case_park.json"
+corridor_m = 40.0
+near_m = 800.0
+default_popularity = 0.1
+entrance_xy = [0.0, -470.0]   # Blackwoods Campground entrance
+car_parks = [
+  { name = "Gorham Mountain lot", x = 1150.0, y = 820.0 },
+  { name = "Otter Point lot", x = 1080.0, y = -250.0 },
+  { name = "Blackwoods trailhead lot", x = 150.0, y = 110.0 },
+  { name = "Otter Cove lot", x = 1045.0, y = 880.0 },
+]
+popularity = { "Ocean Path" = 1.0, "Gorham Mountain Trail" = 0.75, "Cadillac South Ridge Trail" = 0.5, "Cadillac Cliffs Path" = 0.35, "Quarry Trail" = 0.3, "Otter Cove Trail" = 0.3, "Cadillac South Ridge Trail Access" = 0.15, "Sea Path" = 0.1 }
+
 [sim]
 # Lanes over the search box ([locate] area_m).
 # A dumb stand-in path; real routes come from planner.py.
