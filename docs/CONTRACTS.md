@@ -253,7 +253,7 @@ lora_out.py stays a plain encoder of `ag/target`. These details:
 | 6 | r95 | uint8. v1 decimetres (to 25.5 m); v2 metres (to 255 m) |
 | 7 | state and flags | Low 4 bits state (0 heard, 1 localized, 2 pinned, 3 confirmed). Bit 4 SOS, bit 5 thermal, bit 6 radar, bit 7 camera |
 | 8 | confidence | 0–255 = c × 255 |
-| 9 | priority and class | High nibble prio 1–4; low nibble class: 0 other, 1 findmy, 2 findhub, 3 samsung_off, 4 ref, 5 wifi |
+| 9 | priority and class | High nibble prio 1–4; low nibble class: 0 other, 1 findmy, 2 findhub, 3 samsung_off, 4 ref, 5 wifi, 6 apple_other (never sent in practice: live devices are never tracked or pinned) |
 | 10 | breaths per minute | 0 = unknown |
 | 11 | SOS answer | Bit 0 hurt, bit 1 can walk, bits 2–7 headcount (0–63) |
 | 12–13 | seconds since last heard | uint16 |

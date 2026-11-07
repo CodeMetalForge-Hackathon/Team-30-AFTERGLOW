@@ -25,7 +25,7 @@ ALL = "ag/#"
 RETAINED = {COVERAGE, MODE}
 
 # Beacon classes, and their 4-bit codes in the LoRa alert
-CLS_CODES = {"other": 0, "findmy": 1, "findhub": 2, "samsung_off": 3, "ref": 4, "wifi": 5}
+CLS_CODES = {"other": 0, "findmy": 1, "findhub": 2, "samsung_off": 3, "ref": 4, "wifi": 5, "apple_other": 6}
 ALWAYS_REPORTED = {"findmy", "findhub", "samsung_off", "ref"}
 
 STATES = ["heard", "localized", "pinned", "confirmed"]  # order = the alert's state code
