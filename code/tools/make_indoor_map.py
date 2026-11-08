@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write data/trails.geojson and data/zones.geojson for the taped indoor park.
+"""Write data/trails.geojson, data/zones.geojson and data/building.geojson for the taped indoor park.
 
     python3 tools/make_indoor_map.py            # write both files
     python3 tools/make_indoor_map.py --print    # show them, write nothing
@@ -35,6 +35,12 @@ ZONES = [
     ("park", "Taped park", "park", (-2.0, -5.0, 11.0, 7.0)),
 ]
 
+# The building the taped park is in, for the TV's Live tab: 60 State Street, Boston, in metres from
+# waypoint 0 (the origin). APPROXIMATE: drawn by hand (no map data offline), about 62 x 54 m with
+# State Street along the south side. Swap in the real outline (OSM way, or traced on geojson.io).
+BUILDING = ("bldg_1", "60 State Street", [(-30.0, -28.0), (32.0, -28.0), (32.0, 18.0), (24.0, 26.0),
+                                         (-30.0, 26.0), (-30.0, -28.0)])
+
 
 def lonlat(x, y, lat0, lon0):
     lat, lon = geo.to_latlon(x, y, lat0, lon0)
@@ -63,7 +69,13 @@ def build(cfg):
         "geometry": {"type": "Polygon",
                      "coordinates": [[lonlat(x, y, lat0, lon0) for x, y in rect(*box)]]},
     } for zid, name, kind, box in ZONES]}
-    return trails, zones
+    bid, bname, ring = BUILDING
+    building = {"type": "FeatureCollection", "features": [{
+        "type": "Feature",
+        "properties": {"id": bid, "name": bname, "kind": "building", "approximate": True},
+        "geometry": {"type": "Polygon", "coordinates": [[lonlat(x, y, lat0, lon0) for x, y in ring]]},
+    }]}
+    return trails, zones, building
 
 
 def main():
@@ -73,8 +85,11 @@ def main():
     a = ap.parse_args()
 
     cfg = config.load(a.config)
-    trails, zones = build(cfg)
-    for rel, doc in ((cfg["rules"]["trails_geojson"], trails), (cfg["rules"]["zones_geojson"], zones)):
+    trails, zones, building = build(cfg)
+    out = [(cfg["rules"]["trails_geojson"], trails), (cfg["rules"]["zones_geojson"], zones)]
+    if cfg["rules"].get("building_geojson"):
+        out.append((cfg["rules"]["building_geojson"], building))
+    for rel, doc in out:
         text = json.dumps(doc, indent=2) + "\n"
         if a.print:
             print(f"--- {rel}\n{text}")

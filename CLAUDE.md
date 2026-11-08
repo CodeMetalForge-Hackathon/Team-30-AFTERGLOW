@@ -49,9 +49,9 @@ code/
     dashboard.py        web server on [http] port: SSE state stream, /api/ctrl, /api/mode, /api/case, live/ and snaps/
     web/                dashboard front end: app.js (Preact+htm panels), map.js (Leaflet, metres), store.js (SSE reducer);
                         tv.html/tv.js/tv.css (operator TV around livemap.js, docs/TV.md); livemap.js (3D map, docs/LIVEMAP.md)
-  afterglow.toml        DEMO profile (taped indoor park); must be identical on the pod and the laptop
+  afterglow.toml        DEMO profile (taped indoor park at 60 State Street, Boston); must be identical on the pod and the laptop
   park.toml             PARK profile (realistic view, real Acadia trails), laptop only; same keys as afterglow.toml
-  data/                 trails/zones.geojson (indoor) and park_trails/park_zones.geojson (OSM); all lon/lat
+  data/                 trails/zones/building.geojson (indoor; building is approximate) and park_trails/park_zones.geojson (OSM); all lon/lat
   tools/fake_bus.py     fake pod per the profile's [sim] table, plus stand-in track/target/coverage
   tools/replay.py       replays a mosquitto_sub -v log with the original timing (debugging, demo backup)
   tools/make_park_map.py  data/park_*.geojson from OpenStreetMap (needs internet)
@@ -85,7 +85,7 @@ mosquitto_sub -v -t 'ag/#'                                               # watch
 .venv/bin/python -m afterglow.camera --fake [--frames 8]                 # fake camera: live/camera.jpg (on the Pi, no --fake)
 .venv/bin/python -m afterglow.dashboard [--config park.toml]             # dashboard on http://localhost:8080 (operator TV: /tv.html)
 .venv/bin/python tools/local_stack.py --config park.toml --speed 10      # whole laptop stack, no broker; open /tv.html
-.venv/bin/python tools/local_stack.py --config park.toml --feeds          # ... plus fake camera and heat pictures for the TV
+.venv/bin/python tools/local_stack.py --config park.toml --feeds          # ... plus fake camera and heat pictures for the TV (Live tab: /tv.html, Live)
 .venv/bin/python -m afterglow.dashboard --broker <pi-ip>                 # laptop dashboard against the pod's broker
 mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log                      # record a run
 .venv/bin/python tools/replay.py runs/1432.log [--loop] [--topics 'ag/obs/#,ag/pose']   # replay it

@@ -215,6 +215,16 @@ def test_http_live_picture_has_its_age(server, tmp_path):
         urllib.request.urlopen(base + "/live/camera.jpg", timeout=5)
 
 
+def test_meta_has_the_building_and_the_check_in_time():
+    cfg = config.load()
+    meta = make_meta(cfg, ParkMap.load(cfg))
+    assert meta["building"]["name"] == "60 State Street" and len(meta["building"]["ring"]) >= 4
+    assert meta["search"]["checkin_s"] == cfg["search"]["checkin_s"] == 300.0
+    assert meta["thermal"]["hot_min_c"] < meta["thermal"]["hot_max_c"]
+    park = config.load(config.DEFAULT.parent / "park.toml")
+    assert make_meta(park, ParkMap.load(park))["building"] is None
+
+
 def test_http_ctrl(server):
     base, _, bus = server
     code, out = post(base + "/api/ctrl", json.dumps({"cmd": "waypoint", "n": 3}).encode())

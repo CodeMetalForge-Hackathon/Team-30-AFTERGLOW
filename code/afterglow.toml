@@ -7,16 +7,17 @@
 # (tests/test_parkmap.py checks), so add a new key to both.
 
 [mission]
-name = "Taped indoor park"   # shown in the dashboard header
+name = "60 State Street"   # shown in the dashboard header: the taped indoor park at the venue
 # Mission origin: every module works in metres east (x) and north (y) of here.
 # Leave both at 0.0 to use the GPS's first good fix (position.py prints it; copy it
 # here and onto the laptop). For the indoor demo, set it to the coordinates you map
 # taped waypoint 0 to.
-# Indoor demo: Acadia, the same point the docs/CONTRACTS.md examples use. To put the ATAK
-# markers at the venue instead, change these two values and rerun
-# tools/make_indoor_map.py, because the map files are in lon/lat around this point.
-origin_lat = 44.3386
-origin_lon = -68.2733
+# Indoor demo: 60 State Street, Boston (the venue; GPS can't get a fix inside), so the TV map
+# and the ATAK markers land on the building. Waypoint 0 is here. If you change these two values,
+# rerun tools/make_indoor_map.py, because the map files are in lon/lat around this point.
+# (Was Acadia, 44.3386, -68.2733, the point the docs/CONTRACTS.md examples use.)
+origin_lat = 42.35889
+origin_lon = -71.05667
 # Salt for hashing device addresses. Empty = a new random salt each run.
 salt = ""
 
@@ -133,6 +134,9 @@ pins_file = "runs/pins_demo.json"
 pins_max_age_min = 60
 trails_geojson = "data/trails.geojson"
 zones_geojson = "data/zones.geojson"
+# The building outline for the TV's Live tab (dashboard only). tools/make_indoor_map.py writes it;
+# "" = no building. The 60 State Street outline is APPROXIMATE: replace it with the real one if you can.
+building_geojson = "data/building.geojson"
 
 [locate]
 # Placeholders until ME 2's range test. Indoors use about 1 m cells; outdoors about 5 m.
@@ -177,6 +181,10 @@ car_parks = [
 ]
 popularity = { "Taped trail" = 1.0 }
 
+# After "team on the way", the TV asks for a check-in on the found person this often (seconds),
+# and the fake pod flies one. The drone never decides: the pilot flies the real check-in.
+checkin_s = 300.0
+
 [sim]
 # Read only by tools/fake_bus.py (and later sim.py); the pod ignores this table.
 # The fake pod's path is a dumb stand-in. Real routes come from planner.py.
@@ -191,8 +199,7 @@ rssi_p0 = -48.0
 rssi_n = 2.4
 rssi_sigma = 4.0
 rssi_floor = -98.0         # quieter than this is never heard
-checkin_s = 60.0           # after "team on the way", the pod drops by the person this often (sim seconds)...
-checkin_dwell_s = 15.0     # ...and circles this long, then goes back to its sweep
+checkin_dwell_s = 15.0     # each [search] checkin_s, the fake pod circles the found person this long, then goes back to its sweep
 # Hidden phones. Omit x and y for one that rides on the pod (the team phone). person = true: someone
 # is with it, so the stand-in thermal reads warm and the camera sees them when the pod is close.
 phones = [

@@ -111,6 +111,7 @@ pins_file = "runs/pins_park.json"   # its own file, so the two profiles never mi
 pins_max_age_min = 60
 trails_geojson = "data/park_trails.geojson"   # tools/make_park_map.py writes both
 zones_geojson = "data/park_zones.geojson"
+building_geojson = ""      # no building outdoors (the TV's Live tab shows the park map's bounds)
 
 [locate]
 cell_m = 10.0
@@ -153,6 +154,10 @@ car_parks = [
 ]
 popularity = { "Ocean Path" = 1.0, "Gorham Mountain Trail" = 0.75, "Cadillac South Ridge Trail" = 0.5, "Cadillac Cliffs Path" = 0.35, "Quarry Trail" = 0.3, "Otter Cove Trail" = 0.3, "Cadillac South Ridge Trail Access" = 0.15, "Sea Path" = 0.1 }
 
+# After "team on the way", the TV asks for a check-in on the found person this often (seconds),
+# and the fake pod flies one. The drone never decides: the pilot flies the real check-in.
+checkin_s = 300.0
+
 [sim]
 # Lanes over the search box ([locate] area_m).
 # A dumb stand-in path; real routes come from planner.py.
@@ -166,8 +171,7 @@ rssi_p0 = -48.0
 rssi_n = 2.4
 rssi_sigma = 4.0
 rssi_floor = -98.0
-checkin_s = 120.0          # after "team on the way", the pod drops by the person this often...
-checkin_dwell_s = 30.0     # ...and circles this long, then goes back to its sweep
+checkin_dwell_s = 30.0     # each [search] checkin_s, the fake pod circles the found person this long, then goes back to its sweep
 # Two things to find, so the map stays readable: a false signal first, then the person. Off-trail distances measured with
 # parkmap.dist_to_trail (trails and roads).
 phones = [

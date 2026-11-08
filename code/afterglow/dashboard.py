@@ -47,6 +47,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import config as cfgmod
+from . import geo
 from .bus import Bus, PrintBus
 from .case import CaseStore
 from .contracts import (ALL, CTRL, MODE, OBS_BLE, OBS_WIFI, PLAN, POSE, RETAINED, TARGET, TRACK,
@@ -230,11 +231,29 @@ def make_meta(cfg: dict, pm: ParkMap) -> dict:
         "live": {"thermal": "/live/thermal.png", "camera": "/live/camera.jpg"},
         "dirs": {"live": http["live_dir"], "snaps": http["snaps_dir"]},
         "map": pm.to_json(),
+        "building": building(cfg),
+        "thermal": {"hot_min_c": cfg["thermal"]["hot_min_c"], "hot_max_c": cfg["thermal"]["hot_max_c"]},
         "search": {"car_parks": cfg["search"]["car_parks"], "entrance_xy": cfg["search"]["entrance_xy"],
-                   "corridor_m": cfg["search"]["corridor_m"],
+                   "corridor_m": cfg["search"]["corridor_m"], "checkin_s": cfg["search"]["checkin_s"],
                    # the box the sweep and the grids cover, for the map to zoom to
                    "area": [round(v, 1) for v in (cfg["locate"]["area_m"] or pm.bounds())]},
     }
+
+
+def building(cfg: dict) -> dict | None:
+    """[rules] building_geojson in metres for the TV's Live tab: {"name", "approximate", "ring"}, or None."""
+    rel = cfg["rules"].get("building_geojson")
+    if not rel:
+        return None
+    try:
+        f = json.loads(cfgmod.resolve(cfg, rel).read_text())["features"][0]
+    except (OSError, ValueError, KeyError, IndexError) as e:
+        log.warning("no building outline from %s: %s", rel, e)
+        return None
+    lat0, lon0 = cfg["mission"]["origin_lat"], cfg["mission"]["origin_lon"]
+    ring = [[round(v, 2) for v in geo.to_xy(lat, lon, lat0, lon0)] for lon, lat in f["geometry"]["coordinates"][0]]
+    props = f.get("properties", {})
+    return {"name": props.get("name", ""), "approximate": bool(props.get("approximate")), "ring": ring}
 
 
 def trail_step(cfg) -> float:

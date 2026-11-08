@@ -154,6 +154,51 @@ button { font: inherit; color: inherit; }
 .mapfeeds { position: absolute; right: 0.8rem; bottom: 2.4rem; z-index: 5; width: min(18rem, 40%); display: flex; flex-direction: column; gap: 0.5rem; }
 .mapfeeds .feed { min-height: 0; aspect-ratio: 4 / 3; box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.5); }
 .mapfeeds .feed:first-child:not(:last-child) { aspect-ratio: 16 / 9; } /* the camera, when both show */
+/* Live tab */
+.livebtn { display: inline-flex; align-items: center; gap: 0.45rem; height: 2.6rem; padding: 0 1rem; border-radius: 0.55rem; border: 1px solid var(--line-2); background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; flex-shrink: 0; }
+.livebtn i { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--muted); }
+.livebtn.on { background: var(--pod); border-color: var(--pod); color: var(--bg); }
+.livebtn.on i { background: #ff5a5f; animation: podpulse 1.6s infinite; }
+.live { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 0.9rem; padding: 0 1rem; min-height: 0; }
+.livecell { min-height: 0; overflow: hidden; }
+.livecell > .feed, .livecell > .bmap { flex: 1 1 0; min-height: 0; }
+.livedata { overflow: auto; }
+.livegrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.4rem; }
+.livegrid > div { display: flex; flex-direction: column; gap: 0.45rem; min-width: 0; }
+.livegrid .row { font-size: 0.92rem; } .livegrid .row .num { font-weight: 500; }
+.livehead { font-weight: 700; font-size: 1rem; color: var(--text); }
+.livebig { font-size: 2.6rem; line-height: 1; }
+.thover { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.thover circle, .thover line { fill: none; stroke: #e6eadf; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.thover text { fill: #e6eadf; font-family: var(--mono); font-weight: 600; paint-order: stroke; stroke: rgba(0,0,0,.8); stroke-width: 3px; stroke-linejoin: round; }
+.thover.hot circle, .thover.hot line { stroke: var(--p3); stroke-width: 3; } .thover.hot text { fill: var(--p3); }
+.spark { width: 100%; height: 3.2rem; background: var(--panel-2); border-radius: 0.4rem; }
+.spark polyline { fill: none; stroke: var(--tan); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.spark .band { fill: rgba(224, 164, 58, 0.16); }
+.livecell > .bmapbox { flex: 1 1 0; min-height: 0; position: relative; }
+.bmap { position: absolute; inset: 0; width: 100%; height: 100%; background: var(--panel-2); border-radius: 0.5rem; }
+.bzoom { position: absolute; left: 0.6rem; top: 0.6rem; z-index: 1; display: inline-flex; border: 1px solid var(--line-2); border-radius: 0.45rem; overflow: hidden; background: var(--panel); }
+.bzoom button { border: 0; background: transparent; color: var(--muted); padding: 0.35rem 0.7rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+.bzoom button + button { border-left: 1px solid var(--line-2); }
+.bzoom button.on { color: var(--pod); background: var(--panel-2); }
+.bmap .b-bldg { fill: #1f2a22; stroke: #c3c9b8; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.bmap .b-zone { fill: none; stroke: var(--line-2); stroke-width: 1.5; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+.bmap .b-campground { fill: rgba(185, 119, 47, 0.18); stroke: var(--tan); }
+.bmap .b-trail { fill: none; stroke: #f2c26b; stroke-width: 3; vector-effect: non-scaling-stroke; }
+.bmap .b-wp circle { fill: var(--panel); stroke: var(--muted); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.bmap .b-wp text, .bmap .b-lbl, .bmap .b-scale text, .bmap .b-north text { fill: var(--text); font-family: var(--sans); font-weight: 600; }
+.bmap .b-path { fill: none; stroke: var(--pod); stroke-opacity: 0.5; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.bmap .b-pinr { fill: none; stroke-width: 2; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+.bmap .b-pod circle { fill: var(--pod); stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.bmap .b-pod .halo { fill: rgba(61, 185, 255, 0.2); stroke: none; }
+.bmap .b-pod.stale circle { fill: var(--muted); }
+.bmap .b-scale line { stroke: var(--text); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.bmap .b-north path { fill: var(--text); }
+/* check-in reminder */
+.ban-checkin { background: #2c2410; border: 2px solid var(--amber); color: var(--text); }
+.ban-checkin .chipbig { color: var(--amber); }
+.ban-checkin button { border-color: var(--amber); color: var(--amber); }
+.duetxt { color: var(--amber); font-weight: 700; }
 .maptag .seglbl { border: 0; border-radius: 0; color: var(--muted); }
 
 /* map */
@@ -190,6 +235,8 @@ button { font: inherit; color: inherit; }
   .grid, .grid.wide-right { grid-template-columns: 1fr; }
   .mapbox { min-height: 60vh; order: -1; }
   .tv { height: auto; min-height: 100vh; }
+  .live { grid-template-columns: 1fr; grid-template-rows: none; }
+  .livecell { min-height: 22rem; } .livegrid { grid-template-columns: 1fr; }
 }
 
 /* simulation controls (local_stack.py only) */

@@ -27,7 +27,7 @@ Checking a ping (sim only, a stand-in for planner.py homing): when the ranger pr
 Investigate (ag/ctrl investigate), the fake pod flies to that pin and circles it until the pin
 is cleared (then it goes back to its path) or confirmed (then it stays). Once the ranger marks a
 team on the way and goes back to a sweep (ag/mode patrol or night with the pin confirmed), the
-pod goes back to that sweep and drops by the person every [sim] checkin_s for checkin_dwell_s.
+pod goes back to that sweep and drops by the person every [search] checkin_s for [sim] checkin_dwell_s.
 Its stand-in camera and
 thermal publish ag/vision and ag/thermal: a phone with `person = true` in [sim] phones reads warm
 and shows a person when the pod is close; anything else reads at air temperature.
@@ -147,7 +147,7 @@ class Pather:
         self.orbit_m = 8.0
         self.dt = dt
         self.watch = None  # (x, y) of a found person to drop by now and then, or None
-        self.watch_every = max(1, round(cfg["sim"]["checkin_s"] / dt))  # steps between check-ins
+        self.watch_every = max(1, round(cfg["search"]["checkin_s"] / dt))  # steps between check-ins
         self.watch_dwell = max(1, round(cfg["sim"]["checkin_dwell_s"] / dt))  # steps circling each time
         self.since_visit = 0
         self.visiting = False

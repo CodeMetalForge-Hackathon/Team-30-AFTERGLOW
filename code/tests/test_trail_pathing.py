@@ -282,7 +282,7 @@ def test_team_on_the_way_sweeps_and_checks_in(park_pm):
     run = pod.run(0)
     [next(run) for _ in range(5 * 60)]
     pod.on_mode({"mode": "patrol"})  # team on the way: back to the day sweep
-    hz, every, dwell = PARK["pose"]["publish_hz"], PARK["sim"]["checkin_s"], PARK["sim"]["checkin_dwell_s"]
+    hz, every, dwell = PARK["pose"]["publish_hz"], PARK["search"]["checkin_s"], PARK["sim"]["checkin_dwell_s"]
     poses = [m for _, m, _ in (next(run) for _ in range(int(hz * (every * 2.5 + 200))))]
     near = [math.dist((m["x"], m["y"]), person) < pod.pather.orbit_m + 1 for m in poses]
     away = [math.dist((m["x"], m["y"]), person) > 60 for m in poses]
