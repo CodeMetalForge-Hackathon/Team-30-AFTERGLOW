@@ -45,7 +45,7 @@ imu_addr = 0x4B            # SparkFun BNO086, ADR jumper open (0x4A only if ADR 
 # makes /dev/video* nodes too, so the numbers shift between boots.
 device = "/dev/thermal"    # udev symlink (pi/99-afterglow.rules); falls back to /dev/v4l/by-id/*HikCamera*
 fps = 4                    # live/thermal.png and ag/thermal this often
-rotate = 0                 # 0, 90, 180 or 270 degrees clockwise, so the picture is upright as mounted
+rotate = 270               # = 90 counterclockwise. 0, 90, 180 or 270 degrees clockwise, so the picture is upright as mounted
 flip = false               # mirror left-right
 # hot, when the camera gives temperatures: a body-warm spot well above the rest of the frame (placeholders)
 hot_min_c = 30.0
@@ -78,7 +78,7 @@ sensor_fps = 10            # frames a second the sensor runs at (never below fps
 width = 1280              # picture size: the whole field of view, scaled down from the 2304x1296 sensor mode
 height = 720
 quality = 80               # JPEG quality, 1-95 (lower = smaller files over the hotspot)
-rotate = 0                 # 0, 90, 180 or 270 degrees clockwise, so the picture is upright as mounted
+rotate = 90                # 0, 90, 180 or 270 degrees clockwise, so the picture is upright as mounted
 flip = false               # mirror left-right
 
 [lora]

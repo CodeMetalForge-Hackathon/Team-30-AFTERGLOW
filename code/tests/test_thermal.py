@@ -30,7 +30,7 @@ class Collect:
 
 
 def make(tmp_path, **kw):
-    cfg = {**CFG, "thermal": {**CFG["thermal"], **kw}}
+    cfg = {**CFG, "thermal": {**CFG["thermal"], "rotate": 0, "flip": False, **kw}}  # upright, whatever the pod's mounting
     bus = Collect()
     return Thermal(cfg, bus, tmp_path), bus
 
@@ -165,7 +165,8 @@ def test_command_line_fake_dry_run(tmp_path):
     for line in lines:
         topic, body = line.split(" ", 1)
         assert topic == THERMAL and validate(topic, json.loads(body)) == []
-    assert read_png(tmp_path / "live" / "thermal.png") == (256, 192)
+    sideways = CFG["thermal"]["rotate"] % 180 == 90  # the config's mounting turns the 256x192 frame
+    assert read_png(tmp_path / "live" / "thermal.png") == ((192, 256) if sideways else (256, 192))
 
 
 def test_no_camera_stops_with_a_hint(tmp_path):
