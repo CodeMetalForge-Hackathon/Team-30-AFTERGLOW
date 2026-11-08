@@ -57,7 +57,7 @@ class OnAdvert : public BLEAdvertisedDeviceCallbacks {
   void onResult(BLEAdvertisedDevice dev) override {
     int c = classify(dev);
     counts[c]++;
-    if (!REPORT_ALL && (c == C_APPLE_OTHER || c == C_OTHER)) return;
+    if (!REPORT_ALL && c == C_OTHER) return;   // was: (c == C_APPLE_OTHER || c == C_OTHER)
     Serial1.printf("{\"type\":\"ble\",\"addr\":\"%s\",\"cls\":\"%s\",\"rssi\":%d}\n",
                    dev.getAddress().toString().c_str(), CLS_NAMES[c], dev.getRSSI());
   }
