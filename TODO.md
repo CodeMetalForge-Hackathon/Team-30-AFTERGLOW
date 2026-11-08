@@ -173,7 +173,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - [ ] Set `[camera] rotate`/`flip` once the camera is mounted (it isn't yet).
 - [x] **health (UT)**: `ag/sys` from `vcgencmd`, ports, disk, GPS fix and LoRa, plus `batt_pct: null`. Done Sat 7 Nov ~21:20 (`afterglow/health.py`, PR #10): it never opens hardware; omni, wifi, thermal and camera count as working while their data is fresh.
   - **All 9 pod modules start at boot** (`systemctl enable`: bridge, position, tracker, locate, geofence, lora_out, thermal, camera, health). `systemctl status 'afterglow@*'` lists them; `journalctl -u afterglow@<name> -f` shows a log.
-  - [ ] **Power:** `throttled` read `0x50000` (under-voltage and throttling since boot) on the power bank with the cameras running. Try a shorter, thicker USB-C cable or a stronger bank; after a reboot it must stay `0x0`.
+  - [ ] **Power:** `throttled` read `0x50000` (under-voltage and throttling since boot) on the power bank with the cameras running. **Decided Sat 7 Nov: for the demo the Pi is powered from the laptop's USB-C.** Use a short, thick cable straight into the laptop (no hub), and keep the Pi at least 1 m from the Pluto. After a reboot with the cameras running for 5 minutes, `throttled` must stay `0x0`.
 - [ ] Put ME 2's range numbers in by hour 7: the localized and pinned radii, the lane spacing and `fake_bus.py`'s RSSI model.
 - [ ] **(I6, hour 7, 17:00):** carried along the taped trail, a pin lands within 5 m and shows its off-trail distance. Save a screenshot and the measured error.
 - [ ] **(I7, hour 12, 22:00):** with the closed pod on the drone and props off, run two passes → pin → Investigate → thermal and camera panel → ATAK marker over LoRa. **Record the backup video.**
