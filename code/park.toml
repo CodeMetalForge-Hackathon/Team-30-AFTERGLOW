@@ -121,6 +121,11 @@ detect_m = 40.0
 area_m = [1000.0, 400.0, 1300.0, 860.0]
 stale_s = 30
 
+[health]
+# health.py -> ag/sys for the dashboard's Pod panel. It never opens a radio, port or camera.
+period_s = 5               # publish this often
+stale_s = 30               # a part (omni, wifi, thermal, camera, GPS fix) counts as working if heard within this
+
 [http]
 port = 8080
 live_dir = "live"
