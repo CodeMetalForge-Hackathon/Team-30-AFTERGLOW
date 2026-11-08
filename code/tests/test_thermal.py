@@ -216,3 +216,55 @@ def test_warm_camera_drift_is_corrected():
     cold, _ = thermal.parse_raw(ht203u_buffer(np.full((192, 256), 5101, np.uint16), 2250), *cal)
     warm, _ = thermal.parse_raw(ht203u_buffer(np.full((192, 256), 4998, np.uint16), 2466), *cal)
     assert abs(float(cold.mean()) - 22.0) < 0.3 and abs(float(warm.mean()) - 22.0) < 0.3
+
+
+def test_no_v4l2_ctl_stops_with_the_install_hint(monkeypatch):
+    from afterglow import config, thermal
+    monkeypatch.setattr(thermal, "find_device", lambda th: "/dev/thermal")
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(SystemExit, match="v4l-utils"):
+        thermal.check_camera(config.load()["thermal"])
+
+
+def test_camera_reader_survives_a_failure_and_retries(monkeypatch):
+    """v4l2-ctl failing (here: missing) once must not kill the reader thread: it retries and frames arrive."""
+    import threading
+    from afterglow import config, thermal
+
+    frame = ht203u_buffer(np.full((192, 256), 5101, np.uint16))
+
+    class Proc:  # a v4l2-ctl stream that gives one frame, then stays open (parks the daemon thread for good)
+        def __init__(self):
+            self.stdout, self.sent = self, False
+
+        def read(self, n):
+            if not self.sent:
+                self.sent = True
+                return frame
+            threading.Event().wait()
+
+        def kill(self):
+            pass
+
+        def wait(self):
+            pass
+
+    calls = []
+
+    def popen(*a, **kw):
+        calls.append(a)
+        if len(calls) == 1:
+            raise FileNotFoundError("v4l2-ctl")
+        return Proc()
+
+    monkeypatch.setattr(thermal, "find_device", lambda th: "/dev/thermal")
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/v4l2-ctl")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: None)
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    got = []
+    t = threading.Thread(target=lambda: got.append(next(thermal.camera_frames(config.load(), retry_s=0.01))), daemon=True)
+    t.start()
+    t.join(timeout=5)
+    assert got, "no frame after the reader's first failure"
+    celsius, is_c, src = got[0]
+    assert len(calls) == 2 and is_c and src == "ht203u" and abs(float(np.median(celsius)) - 22.0) < 0.2

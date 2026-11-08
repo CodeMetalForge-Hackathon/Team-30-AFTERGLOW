@@ -19,6 +19,7 @@ import argparse
 import logging
 import math
 import os
+import shutil
 import struct
 import sys
 import time
@@ -221,9 +222,18 @@ def find_device(th: dict) -> str:
     raise SystemExit(f"no thermal camera: {dev} missing and no /dev/v4l/by-id/*HikCamera* (plugged in?)")
 
 
-def camera_frames(cfg: dict):
+def check_camera(th: dict) -> str:
+    """The camera's device, or SystemExit with what to do: no camera, or no v4l2-ctl to read it with."""
+    dev = find_device(th)
+    if shutil.which("v4l2-ctl") is None:
+        raise SystemExit("v4l2-ctl not installed, so the thermal camera can't be read (sudo apt install -y v4l-utils)")
+    return dev
+
+
+def camera_frames(cfg: dict, retry_s: float = 2.0):
     """The real HT-203U: v4l2-ctl streams raw 256x392 YUYV frames (25 fps) into a pipe; a thread keeps
-    only the newest, so run() always gets a fresh frame at [thermal] fps. Restarts the stream if it dies."""
+    only the newest, so run() always gets a fresh frame at [thermal] fps. Restarts the stream if it dies,
+    and the reader thread logs and retries on any error rather than dying quietly."""
     import subprocess
     import threading
 
@@ -233,36 +243,41 @@ def camera_frames(cfg: dict):
     latest = {"buf": None, "n": 0}
     cond = threading.Condition()
 
-    find_device(th)  # no camera: stop now with a clear message, not in the thread
+    check_camera(th)  # no camera or no v4l2-ctl: stop now with a clear message, not in the thread
+
+    def stream(dev):
+        """One v4l2-ctl stream, until it ends."""
+        # Setting the format can fail with "Input/output error" when it's already set: harmless.
+        subprocess.run(["v4l2-ctl", "-d", dev, f"--set-fmt-video=width={RAW_W},height={RAW_H},pixelformat=YUYV"],
+                       capture_output=True, timeout=10)
+        p = subprocess.Popen(["v4l2-ctl", "-d", dev, "--stream-mmap", "--stream-count=0", "--stream-to=-"],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        log.info("thermal camera streaming from %s", dev)
+        try:
+            while True:
+                buf = p.stdout.read(FRAME_BYTES)
+                if not buf or len(buf) < FRAME_BYTES:
+                    return
+                with cond:
+                    latest["buf"], latest["n"] = buf, latest["n"] + 1
+                    cond.notify_all()
+        finally:
+            p.kill()
+            p.wait()  # reap it, so restarts don't leave zombie processes
 
     def reader():
         while True:
             try:
                 dev = find_device(th)
+                stream(dev)
+                log.error("thermal stream from %s stopped; restarting in %g s", dev, retry_s)
             except SystemExit as e:  # unplugged: keep trying
-                log.error("%s; retrying in 2 s", e)
-                time.sleep(2)
-                continue
-            # Setting the format can fail with "Input/output error" when it's already set: harmless.
-            subprocess.run(["v4l2-ctl", "-d", dev, f"--set-fmt-video=width={RAW_W},height={RAW_H},pixelformat=YUYV"],
-                           capture_output=True)
-            p = subprocess.Popen(["v4l2-ctl", "-d", dev, "--stream-mmap", "--stream-count=0", "--stream-to=-"],
-                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            log.info("thermal camera streaming from %s", dev)
-            try:
-                while True:
-                    buf = p.stdout.read(FRAME_BYTES)
-                    if len(buf) < FRAME_BYTES:
-                        break
-                    with cond:
-                        latest["buf"], latest["n"] = buf, latest["n"] + 1
-                        cond.notify_all()
-            finally:
-                p.kill()
-            log.error("thermal stream from %s stopped; restarting in 2 s", dev)
-            time.sleep(2)
+                log.error("%s; retrying in %g s", e, retry_s)
+            except Exception:  # v4l2-ctl gone, a pipe error: say so and keep trying
+                log.exception("thermal camera reader failed; retrying in %g s", retry_s)
+            time.sleep(retry_s)
 
-    threading.Thread(target=reader, daemon=True).start()
+    threading.Thread(target=reader, daemon=True, name="thermal-reader").start()
     seen = 0
     while True:
         with cond:
@@ -311,7 +326,7 @@ def main():
         frames = fake_frames(a.seed)
     else:
         try:
-            find_device(cfg["thermal"])
+            check_camera(cfg["thermal"])
         except SystemExit as e:
             log.error("%s; use --fake for made-up frames", e)
             sys.exit(2)
