@@ -12,7 +12,8 @@
        several pod positions; the dot sits at its real bearing from the latest ag/pose, with r95 drawn round it.
      Read-only: nothing here publishes ag/ctrl or ag/mode.
      URL options: ?m=5 (edge in metres), ?s=10 (drop a signal not heard for this long),
-     ?demo=1 (a fake pod walking a loop past fake beacons; no server data).
+     ?demo=1 (a fake pod walking a loop past fake beacons; no server data),
+     ?compact=1 (radar and nearest readout only: the "Nearby signals" pane on tv.html's 60 State St page).
      Embed: <iframe src="/nearby.html" style="width:100%;height:600px;border:0"></iframe> -->
 <style>
 @font-face { font-family: 'IBM Plex Sans'; font-weight: 400; src: url(vendor/ibm-plex/ibm-plex-sans-latin-400-normal.woff2) format('woff2'); }
@@ -119,6 +120,25 @@ aside { border-left: 1px solid var(--hair); background: var(--surface); display:
 .empty { padding: 10px 16px 14px; color: var(--text-3); font-size: 13px; }
 .foot { padding: 8px 16px; border-top: 1px solid var(--hair); font-size: 12px; color: var(--text-3); }
 
+/* ?compact=1: the corner pane on the operator TV (tv.js IndoorStage): the radar and the nearest readout only */
+body.compact .app { display: block; position: relative; height: 100%; }
+body.compact header, body.compact .legend, body.compact .note, body.compact .list, body.compact .foot { display: none; }
+body.compact .stage { position: absolute; inset: 0; padding: 4px; }
+body.compact #radar { max-height: none; }
+body.compact aside { position: absolute; left: 0; bottom: 0; border: 0; border-top-right-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent); }
+body.compact .nearest { padding: 6px 10px; border: 0; gap: 0 10px; }
+body.compact .nearest .k { font-size: 10px; }
+body.compact .nearest .v { font-size: 18px; }
+body.compact .nearest .v small { font-size: 11px; }
+body.compact .nearest .t { font-size: 11px; }
+body.compact .nearest .arrow { width: 34px; height: 34px; }
+body.compact .nearest .arrow svg { width: 22px; height: 22px; }
+body.compact .heard text { display: none; }   /* a crowded room is all rings: only located dots keep a label */
+body.compact .loc text { font-size: 6.5px; }
+body.compact .ring-label { font-size: 6px; }
+body.compact .north { font-size: 9px; }
+
 @media (max-width: 760px) {
   .app { grid-template: auto minmax(320px, 55vh) 1fr / 1fr; height: auto; min-height: 100%; }
   aside { border-left: 0; border-top: 1px solid var(--hair); }
@@ -172,6 +192,7 @@ const WINDOW_S = Math.max(2, +q.get('s') || 10);   // a heard signal not heard f
 const KEEP_S = 60;                                  // a located beacon stays this long after its last sighting
 const EDGE_X = 4;                                   // located beacons out to EDGE_X x MAX_M sit on the rim, pointing at them
 const DEMO = q.get('demo') === '1';
+if (q.get('compact') === '1') document.body.classList.add('compact');
 const R0 = 16, R1 = 100, K = (R1 - R0) / MAX_M;     // svg radius of 0 m and of the edge; svg units per metre
 let model = { p0: -48, n: 2.4 };                    // replaced by /api/map
 
