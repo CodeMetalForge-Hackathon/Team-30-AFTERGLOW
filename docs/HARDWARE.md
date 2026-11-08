@@ -11,16 +11,16 @@ USB-C power bank 5 V 3 A ──USB-C──► Raspberry Pi 5 16 GB + Active Cool
                                     │
    OMNI  XIAO ESP32S3 #1 ── UART0  /dev/ttyAMA0  921600 ──┤  BLE beacons (passive)
    WIFI  XIAO ESP32S3 #2 ── UART3  /dev/ttyAMA3  921600 ──┤  Wi-Fi probes, SOS page
-   LoRa  RFM95W (SX1276) ── SPI1   /dev/spidev1.0 ────────┤──► 915 MHz ──► RFM95W + XIAO #3 ── USB ── laptop ──► ATAK phone
+   LoRa  RFM95W (SX1276) ── SPI1   /dev/spidev1.0 ────────┤──► 915 MHz ──► ADALM-PLUTO SDR ── USB ── laptop ──► ATAK phone
    IMU   BNO086          ── I²C-1  0x4B, INT + RST ───────┤
-   Thermal MLX90640      ── I²C-1  0x33 (arriving later, Qwiic from the IMU)
+   Thermal HTI HT-203U   ── USB  /dev/v4l/by-id/… (replaces the MLX90640; Linux format still to check)
    Camera Module 3       ── CSI ribbon
    AI HAT+               ── PCIe ribbon  /dev/hailo0
    Radar MR60BHA2 kit    ── USB  /dev/radar  (tier 3)
-   GPS   none yet: only a u-blox ANN-MB5 antenna. UART2 (/dev/ttyAMA2) is reserved for a receiver
+   GPS   SparkFun NEO-F10N + ANN-MB5 antenna ── UART2  /dev/ttyAMA2  38400 (off for the indoor demo: gps = "")
 ```
 
-We have three XIAO ESP32S3 boards: OMNI, WIFI and the laptop radio. **There's no spare.**
+We have three XIAO ESP32S3 boards: OMNI, WIFI and XIAO #3. There's only **one RFM95W** (the pod's), so the laptop receives LoRa with an **ADALM-PLUTO** SDR instead, and XIAO #3 is now the spare.
 
 ## Device table
 
@@ -29,13 +29,13 @@ We have three XIAO ESP32S3 boards: OMNI, WIFI and the laptop radio. **There's no
 | OMNI board (XIAO #1, BLE scanner) | Pins 8 TX, 10 RX, 2 5V, 9 GND | `/dev/ttyAMA0` | 921600 8N1 | pyserial | `tools/check_hw.py --only omni` |
 | WIFI board (XIAO #2, probes + SOS page) | Pins 24 TX, 21 RX, 2 5V, 14 GND | `/dev/ttyAMA3` | 921600 8N1 | pyserial | `--only wifi` |
 | Pod LoRa radio (Adafruit RFM95W) | SPI1: pins 12, 35, 38, 40; RST 22; G0 18; 3.3 V 17; GND 39 | `/dev/spidev1.0` | `[lora]` in the config | adafruit-circuitpython-rfm9x via Blinka; `afterglow/radio.py` | `--only lora` (sends one heartbeat) |
-| Laptop LoRa radio (RFM95W + XIAO #3) | USB to the laptop | `/dev/cu.usbmodem*` (macOS) | `firmware/lora_rx/`, 115200 | pyserial; `afterglow/lora_rx.py` | `lora_rx.py --print` logs "radio settings match" |
+| Laptop LoRa receiver (ADALM-PLUTO SDR + RX antenna) | Its **USB** micro-USB port (not PWR) to the laptop; antenna on the **RX** SMA | libiio `usb:` (or `ip:192.168.2.1`) | `[lora]` in the config; 915 MHz is inside the stock 325–3800 MHz range | GNU Radio + gr-lora_sdr (conda); `tools/pluto_rx.py` → `lora_rx.py` | `iio_info -s` lists the Pluto; then the pod's heartbeat shows in `ag/alert` |
 | IMU: SparkFun BNO086 (SEN-22857) | Pins 1, 3, 5, 6; INT pin 15 (GPIO22); RST pin 16 (GPIO23) | I²C bus 1, `0x4B` | 400 kHz | adafruit-circuitpython-bno08x | `--only i2c` |
-| Thermal MLX90640 (later) | Qwiic from the IMU | I²C bus 1, `0x33` | 32×24, a few fps at 400 kHz | adafruit-circuitpython-mlx90640 | `--only i2c` |
+| Thermal: HTI HT-203U (replaces the MLX90640) | USB-C plug, through a USB-C-to-A adapter to a USB port | a V4L2 video device; use `/dev/v4l/by-id/…`, never `/dev/videoN` | 256×192; whether it sends temperatures over USB is unchecked (TODO, `thermal.py`) | OpenCV (`python3-opencv` from apt) | `v4l2-ctl --list-formats-ext`; `--only thermal` to write |
 | Camera Module 3 (imx708) | CSI ribbon, 22-to-15-pin | libcamera camera 0 | 4608×2592 full frame | picamera2 (apt) | `rpicam-hello --list-cameras` |
 | AI HAT+ 26 TOPS (Hailo-8) | PCIe ribbon + header | `/dev/hailo0` | PCIe Gen 3 | hailo-all (apt) | `hailortcli fw-control identify` |
 | Radar MR60BHA2 kit (tier 3) | USB-C to a USB 2 port | `/dev/ttyACM*` → `/dev/radar` | 115200 JSON lines, from our sketch | pyserial | `--only usb_serial` |
-| GPS (none yet) | Reserved: pins 4, 7, 29, 30 | `/dev/ttyAMA2` | the receiver's default, usually 38400 | pynmea2 | `--only gps` (SKIP while `gps = ""`) |
+| GPS: SparkFun NEO-F10N + ANN-MB5 antenna | Pins 29 (its TX), 7 (its RX), 30 GND; power per its labels (5 V pin 4, else 3V3) | `/dev/ttyAMA2` | 38400 | pynmea2 | `--only gps` (SKIP while `gps = ""`) |
 | Power | USB-C power bank, 5 V 3 A | — | no `PSU_MAX_CURRENT`, no `usb_max_current_enable` | — | `vcgencmd get_throttled` must be `0x0` |
 
 ## Pin map
@@ -45,9 +45,9 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
 | Pin | Signal | Goes to | | Pin | Signal | Goes to |
 |---|---|---|---|---|---|---|
 | 1 | 3.3 V | IMU 3V3 | | 2 | 5 V | OMNI + WIFI 5 V (Y-lead) |
-| 3 | GPIO2 SDA | IMU SDA | | 4 | 5 V | GPS VCC (reserved) |
+| 3 | GPIO2 SDA | IMU SDA | | 4 | 5 V | GPS VCC (if the breakout takes 5 V) |
 | 5 | GPIO3 SCL | IMU SCL | | 6 | GND | IMU GND |
-| 7 | GPIO4 UART2 TX | GPS RX (reserved) | | 8 | GPIO14 UART0 TX | OMNI D9 (RX) |
+| 7 | GPIO4 UART2 TX | GPS RX | | 8 | GPIO14 UART0 TX | OMNI D9 (RX) |
 | 9 | GND | OMNI GND | | 10 | GPIO15 UART0 RX | OMNI D10 (TX) |
 | | | | | 12 | GPIO18 SPI1 CE0 | LoRa CS (driven by code) |
 | | | | | 14 | GND | WIFI GND |
@@ -56,7 +56,7 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
 | 21 | GPIO9 UART3 RX | WIFI D10 (TX) | | 22 | GPIO25 | LoRa RST (active low) |
 | | | | | 24 | GPIO8 UART3 TX | WIFI D9 (RX) |
 | 27 | ID_SD | **AI HAT+ only, don't wire** | | 28 | ID_SC | **AI HAT+ only, don't wire** |
-| 29 | GPIO5 UART2 RX | GPS TX (reserved) | | 30 | GND | GPS GND (reserved) |
+| 29 | GPIO5 UART2 RX | GPS TX | | 30 | GND | GPS GND |
 | 35 | GPIO19 SPI1 MISO | LoRa MISO | | 36 | GPIO16 | **Leave free:** the kernel's SPI1 CS after `cs0_pin=16` |
 | | | | | 38 | GPIO20 SPI1 MOSI | LoRa MOSI |
 | 39 | GND | LoRa GND | | 40 | GPIO21 SPI1 SCLK | LoRa SCK |
@@ -72,9 +72,7 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
 | | D10 (GPIO9), `Serial1` TX | Pi UART RX (pin 10 OMNI, 21 WIFI) |
 | | 5V, GND | Pi pin 2; GND pin 9 (OMNI) or 14 (WIFI) |
 | | D6, D7 | unused |
-| XIAO #3 (laptop radio) | D8 SCK, D9 MISO, D10 MOSI | RFM95W SCK, MISO, MOSI |
-| | D0, D1, D3 | RFM95W CS, RST, G0 |
-| | 5V, GND | RFM95W VIN, GND |
+| XIAO #3 | — | **Spare, not wired.** It was the laptop radio's host; the Pluto replaced that. `firmware/lora_rx/` still works if a second RFM95W turns up |
 
 ## Pi setup (once)
 
@@ -90,7 +88,7 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
    - `pi/99-afterglow.rules` gives the radar a stable `/dev/radar`;
    - `pi/mosquitto-afterglow.conf` lets teammates watch the bus;
    - `pi/systemd/afterglow@.service` starts modules at boot.
-5. Run `cd code && .venv/bin/python tools/check_hw.py`. Bring-up is done when every connected part passes. GPS shows SKIP until we have a receiver.
+5. Run `cd code && .venv/bin/python tools/check_hw.py`. Bring-up is done when every connected part passes. GPS shows SKIP while `gps = ""`.
 
 ## Gotchas we already know about
 
@@ -105,21 +103,28 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
   - The pod radio is on SPI1. adafruit_rfm9x drives CS on GPIO18 itself, so `config.txt` moves the kernel's CS to the free GPIO16 (`dtoverlay=spi1-1cs,cs0_pin=16`). Without that you get "GPIO busy".
 - **GPIO from Python:** use gpiozero, lgpio or Blinka. `RPi.GPIO` doesn't work on a Pi 5.
 - **LoRa:**
-  - Both RFM95Ws need the 915 MHz spring antenna soldered to ANT **before they power up**. Never transmit without it.
-  - The laptop radio only listens; only the pod transmits.
+  - The pod's RFM95W needs the 915 MHz spring antenna soldered to ANT **before it powers up**. Never transmit without it.
+  - The laptop side is an ADALM-PLUTO SDR on USB, receive only (antenna on RX; never transmit from it). It doesn't decode LoRa itself: GNU Radio's gr-lora_sdr does that on the laptop (`tools/pluto_rx.py`).
+  - Pluto on macOS: plug into the port marked **USB**, not PWR. Use the libiio URI `usb:`; the `ip:192.168.2.1` network link may not come up on macOS (older Pluto firmware uses RNDIS).
+  - Keep the Pluto at least 1 m from the pod: a 13 dBm transmitter next to it can overload the receiver.
   - It's plain LoRa with no encryption, so anyone on 915 MHz can read an alert. Alerts carry a pin, never a device address or ID. `lora_rx.py` drops other teams' packets by node address.
-  - If nothing arrives, check that the `cfg` line `lora_rx.py` logs matches `[lora]`. Then check that lora_out isn't silenced: a remembered `lora_off` leaves `runs/lora_off.json`, and lora_out logs "LoRa is OFF" at start-up.
+  - If nothing arrives, check that `pluto_rx.py` runs with the same `[lora]` table as the pod (same config file), and that the Pluto sees the signal at all (a waterfall at 915 MHz, e.g. in gqrx). Then check that lora_out isn't silenced: a remembered `lora_off` leaves `runs/lora_off.json`, and lora_out logs "LoRa is OFF" at start-up.
   - Only one process may drive the radio. Stop `afterglow@lora_out` before `check_hw.py --only lora`.
-- **USB serial:** the radar is the only USB device now. Still use `/dev/radar` or `/dev/serial/by-id/…`, never `ttyACM0`.
+- **USB serial:** the radar is the only USB serial device. Still use `/dev/radar` or `/dev/serial/by-id/…`, never `ttyACM0`.
+- **Thermal camera (HT-203U):**
+  - It's a phone accessory (8–14 µm, −20 to 550 °C, ±2 °C, 28 g) powered from the USB port.
+  - One user got a picture from it on Linux as a plain video device. Nobody we found has read temperatures from it there, so check its formats first (TODO, `thermal.py`).
+  - The Camera Module 3 also makes `/dev/video*` nodes, so the numbers shift between boots. Use `/dev/v4l/by-id/…` or a `/dev/thermal` udev rule.
+  - Its field of view is unknown, so measure how high it can still see a person.
 - **Power:**
-  - A 5 V 3 A power bank can't announce 5 A, so the Pi may warn and will limit its USB ports to 600 mA. That's fine, because the radar is the only USB device.
+  - A 5 V 3 A power bank can't announce 5 A, so the Pi may warn and will limit its USB ports to 600 mA in total. The radar and the thermal camera should fit; check `get_throttled` with both plugged in.
   - Don't set `PSU_MAX_CURRENT=5000` or `usb_max_current_enable=1`. Both tell the Pi it can draw more than the bank gives.
   - The real risk is voltage sag. If `get_throttled` isn't `0x0` with everything running (detector included), use a shorter, thicker USB-C cable, or run the detector only during Investigate.
 - **Heat:** the AI HAT+ adds heat. With the lid closed for 20 minutes, `vcgencmd measure_temp` must stay under 80 °C. If it doesn't, run the detector only during Investigate.
 - **I²C:**
   - The BNO086 sits at `0x4B` (ADR jumper open). SparkFun says it only runs reliably with RST and INT connected, which is why they're wired.
   - Start from `BNO08X_I2C(board.I2C(), address=0x4B, reset=DigitalInOut(board.D23))`.
-  - If reads fail now and then, drop the bus to 100 kHz (`dtparam=i2c_arm_baudrate=100000`) until the thermal camera arrives. The MLX90640 needs 400 kHz for useful frame rates.
+  - If reads fail now and then, drop the bus to 100 kHz (`dtparam=i2c_arm_baudrate=100000`). The IMU is the only I²C part now that the thermal camera is USB, so nothing needs 400 kHz.
 - **Camera and Hailo from a venv:** both come from apt, so the venv must be created with `--system-site-packages`, or the imports fail.
 - **Hailo detection:**
   - Start from a model that's already compiled. `rpicam-apps` ships Hailo post-processing stages (see `/usr/share/rpi-camera-assets/hailo_*.json`), and Hailo's `hailo-rpi5-examples` repository has Python detection pipelines.
@@ -128,9 +133,8 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
   - The kit ships with ESPHome. Reflash its XIAO ESP32C6 with an Arduino sketch (`Seeed_Arduino_mmWave`, class `SEEED_MR60BHA2`) that prints JSON lines at 115200. `radar.py` maps them onto `ag/radar`.
   - Updating the radar module's own firmware wipes the sketch, so reflash it afterwards.
 - **GPS:**
-  - We have no receiver, only an ANN-MB5 antenna, so `[serial] gps = ""` and position.py runs on the taped waypoints (`ag/ctrl` `waypoint`).
-  - If we find a u-blox receiver with a UART, wire it to the reserved pins and set `gps = "/dev/ttyAMA2"`. One with Qwiic could sit on I²C at `0x42` instead, but that needs new code.
-  - Indoors there's no fix anyway.
+  - A SparkFun NEO-F10N (L1/L5) with the ANN-MB5 antenna is wired to UART2. It sends NMEA at 38400 (checked Sat 7 Nov; indoors it sees 4 satellites but gets no fix).
+  - **Keep `[serial] gps = ""` for the indoor demo**, so position.py runs on the taped waypoints (`ag/ctrl` `waypoint`). A fix near a window would place the pod relative to the Acadia origin. Set `gps = "/dev/ttyAMA2"` only for an outdoor test or after moving the origin to the venue.
 - **Radio coexistence (on a larger drone):**
   - Our LoRa is 915 MHz, which shares a band with an ELRS 900 MHz control link.
   - The SOS page is 2.4 GHz Wi-Fi, which shares a band with ELRS 2.4 GHz.
@@ -143,4 +147,4 @@ These matter for the pitch: we demo the payload on its own, and it's ready to fl
 - **Flight time:** a 5" FPV carrying the 0.4 kg pod flies only about 2–3 minutes; a 7" does better. Patrol legs must be short.
 - **No autopilot:** Betaflight has no waypoint missions. `planner.py` proposes legs; the ranger accepts them on the dashboard; the visual observer reads heading and distance to the pilot.
 - **Radar** reads breathing only when landed within about 1.5 m. Drone vibration swamps it in flight.
-- **Thermal** is 32×24 pixels. At 30 m a person is smaller than one pixel, so flag heat only from a low hover, under about 8 m.
+- **Thermal** is 256×192 pixels (the HT-203U), eight times the old MLX90640's 32×24, which lost a person at about 8 m. Measure the new limit before quoting it in the pitch.

@@ -90,6 +90,14 @@ def test_bridge_hashes_and_never_leaks_address():
     assert validate(topic, msg) == []
 
 
+def test_bridge_keeps_apple_other_lines():
+    # the scanner sends apple_other with REPORT_ALL on; the bridge used to drop it as an unknown class
+    line = '{"type":"ble","addr":"AA:BB:CC:DD:EE:01","cls":"apple_other","rssi":-60}'
+    topic, msg = convert(line, "omni", Hasher("s"), t=1)
+    assert topic == OBS_BLE and msg["cls"] == "apple_other" and validate(topic, msg) == []
+    assert alert.decode(alert.encode(sample_target(cls="apple_other")))["cls"] == "apple_other"
+
+
 def test_bridge_new_salt_changes_ids():
     h = Hasher("a")
     first = h("aa:bb:cc:dd:ee:ff")

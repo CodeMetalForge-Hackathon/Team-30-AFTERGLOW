@@ -29,7 +29,17 @@ radar = "/dev/radar"
 [i2c]
 # Not used in this profile; kept so both profiles have the same keys.
 imu_addr = 0x4B
-thermal_addr = 0x33
+
+[thermal]
+# Same as afterglow.toml (thermal.py --fake works with either profile).
+device = "/dev/thermal"
+fps = 4
+rotate = 0
+flip = false
+hot_min_c = 30.0
+hot_max_c = 45.0
+hot_rise_c = 5.0
+hot_z = 6.0
 
 [lora]
 # Same radio settings as afterglow.toml, so lora_rx.py works with either profile.

@@ -41,17 +41,27 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
 ## Phase 1: Bring-up and first data (hours 0–3, until 13:00, checkpoints I1–I5)
 
 **Hardware (UT)**
-- [ ] Image the Pi, run `bash pi/setup_pi.sh` and reboot (no `PSU_MAX_CURRENT`: it's a 3 A power bank). `check_hw.py` passes for every connected part. **(I1)**
-- [ ] Copy the ESP32 sketches (scanner, wifi_listener, sos_page) from the plan doc into `firmware/`. They aren't in the repo. Each must print on `Serial1.begin(921600, SERIAL_8N1, D9, D10)`, not `Serial` (see `firmware/README.md`). The scanner sends `findmy` only for `4C 00 12 19`.
-- [ ] OMNI streams `ble` lines, and a real `findmy` beacon reaches `ag/obs/ble` through `bridge.py`. **(I2)** Check the separated/near split on our AirTag and a powered-off iPhone.
+- [x] Image the Pi, run `bash pi/setup_pi.sh` and reboot (no `PSU_MAX_CURRENT`: it's a 3 A power bank). `check_hw.py` passes for every connected part. **(I1)**
+  - Done Sat 7 Nov: Bookworm 64-bit, user `pi`, repo at `/home/pi/afterglow`. `check_hw.py --only config power serial_ports mqtt` all PASS on the bare Pi (nothing wired yet); rerun the full check as each part is connected.
+  - No travel router: the Pi and the laptop use Rohan's phone hotspot (the building Wi-Fi blocked HTTPS). SSH from the Mac works (fixed Sat 7 Nov ~17:55). The Pi's Mosquitto is open to the hotspot (`pi/mosquitto-afterglow.conf`), so the Mac can `mosquitto_sub -h <pi-ip>`.
+- [x] ESP32 sketches into `firmware/` (scanner and wifi_listener; sos_page has its own tier-2 item, "sos_page firmware (UT)"). Each must print on `Serial1.begin(921600, SERIAL_8N1, D9, D10)`, not `Serial` (see `firmware/README.md`). The scanner sends `findmy` only for `4C 00 12 19`.
+  - [x] No plan-doc sketches existed, so they were written from `firmware/README.md` and CONTRACTS.md: `firmware/scanner/scanner.ino` and `firmware/wifi_listener/wifi_listener.ino`. USB debug shows per-class counts, never an address.
+  - [x] Compiled and flashed both in the Arduino IDE (Sat 7 Nov). Bench check over USB: both counts rise as expected. Both wired to the Pi (~18:05): `check_hw.py --only omni wifi` passes, and `ag/obs/ble` and `ag/obs/wifi` reach the Mac with hashed ids on channels 1, 6 and 11.
+  - [x] **SW:** `apple_other` is now in `contracts.CLS_CODES` (alert class code 6), so the bridge keeps those lines with `REPORT_ALL` on instead of dropping them. **Contract change, tell the team.**
+- [x] OMNI streams `ble` lines, and a real `findmy` beacon reaches `ag/obs/ble` through `bridge.py`. **(I2)** Done Sat 7 Nov ~18:15: OMNI on UART0, strangers' `findmy` tags reach `ag/obs/ble` (hashed ids, about one line per tag every 2 s), watched from the Mac via the Pi's broker. Bench counts in a crowded building: `findmy` about 1.5/s vs `apple_other` about 240/s, so the split looks right.
+  - [x] ~~Still to check before I6: a powered-off iPhone shows up as `findmy`.~~ **Dropped Sat 7 Nov:** the team decided not to test it; the crowded-room counts are the evidence for the split.
+  - Mac setup note: the venv needs Homebrew's Python 3.12 (macOS's own `python3` is 3.9 and lacks `tomllib`); brew's Mosquitto needed a `mosquitto.conf` created. `check_hw.py` now masks addresses in its sample line (it used to print them raw).
 - [ ] Put the radar's serial number in `pi/99-afterglow.rules` so `/dev/radar` exists.
-- [ ] **LoRa link (I4):**
-  - [ ] Solder the spring antennas to both RFM95Ws, and wire the pod radio to SPI1 and the other to XIAO #3 (`docs/HARDWARE.md`).
-  - [ ] Flash XIAO #3 with `firmware/lora_rx/lora_rx.ino` (Library Manager: **LoRa** by Sandeep Mistry).
-  - [ ] Laptop: `.venv/bin/python -m afterglow.lora_rx --print` logs "radio settings match the config".
-  - [ ] Pi: `check_hw.py --only lora` passes, and the heartbeat (`"kind":4`) shows up on the laptop.
-- [ ] ~~GPS NMEA by a window (I5).~~ **Blocked:** we have only the ANN-MB5 antenna, no receiver. Ask the hardware desk for any u-blox board with a UART; if one turns up, wire it to the reserved pins, set `gps = "/dev/ttyAMA2"` and run `check_hw.py --only gps`. Until then, position comes from waypoint taps.
-- [ ] If the Pi user isn't `pi` or the clone isn't at `/home/pi/afterglow`, fix `User=` and the paths in `pi/systemd/afterglow@.service`.
+- [x] **LoRa link (I4):** done Sat 7 Nov 19:23, pod RFM95W → Pluto → `ag/alert` on the Mac.
+  - **Changed Sat 7 Nov:** we have only **one RFM95W**. The laptop receives with an **ADALM-PLUTO SDR** (USB to the Mac, antenna on RX) and gr-lora_sdr; XIAO #3 is now the spare. Docs updated (HARDWARE, CONTRACTS, MODULES, firmware/README). The `rx` line format is unchanged.
+  - [x] Wire the pod RFM95W to SPI1 with its spring antenna.
+  - [x] Pi: `check_hw.py --only lora` passes ("sent a heartbeat"): proves the pod radio without any receiver. Done Sat 7 Nov (Blinka's first run installs its Pi 5 deps and fails once; now in `requirements-pi.txt`).
+  - [x] Mac: GNU Radio + gr-lora_sdr in conda env `sdr` (`brew install miniforge`, then `conda create -n sdr -c tapparelj -c conda-forge gnuradio-lora_sdr gnuradio-iio libiio`); `iio_info -s` lists the Pluto at `usb:0.1.5`.
+  - [x] **SW:** `tools/pluto_rx.py` (Pluto → gr-lora_sdr → `rx` lines, settings from `[lora]`) and `lora_rx --stdin`. `pluto_rx.py --selftest` (fake heartbeat, noise, 10 kHz offset, no Pluto) decodes into a valid `ag/alert`.
+  - [x] The pod's heartbeat (`"kind":4`) shows up in `ag/alert` on the Mac. Done Sat 7 Nov 19:19: `check_hw --only lora` on the Pi → Pluto (AGC, about 1 m) → `pluto_rx | lora_rx --stdin`. 6 other teams' packets heard and dropped as `not_ours`.
+  - Fallback if the SDR decode isn't working by I7: `cot_out --wifi <pi-ip>` gets the pins to ATAK over the hotspot; show the LoRa bursts on a Pluto waterfall.
+- [x] **GPS NMEA by a window (I5).** Done Sat 7 Nov ~19:40: NEO-F10N on UART2 sends NMEA at 38400 (the config's `gps_baud`); indoors it sees 4 GPS satellites at 6–21 dB-Hz, no fix yet. Still to do: a fix at a window or outside. **Unblocked Sat 7 Nov:** we have a SparkFun NEO-F10N (L1/L5) breakout for the ANN-MB5 antenna. Wire its TX → Pi pin 29, RX → pin 7, GND → pin 30, power per its labels (5V/VIN → pin 4, else 3V3 shared from pin 1 or 17). Test NMEA on `/dev/ttyAMA2` (38400, else 9600). **Keep `gps = ""` for the indoor demo:** a fix near a window would place the pod relative to the Acadia origin. Set it only for an outdoor test or after moving the origin to the venue.
+- [x] (Not needed: the user is `pi` and the clone is at `/home/pi/afterglow`.) If the Pi user isn't `pi` or the clone isn't at `/home/pi/afterglow`, fix `User=` and the paths in `pi/systemd/afterglow@.service`.
 
 **Software (SW), on the fake bus: done** (reviewed and pushed Sat 7 Nov)
 - [x] Dashboard skeleton (`dashboard.py` + `afterglow/web/`): the event stream with its full-state resend, a Leaflet map with trails and zones, live pose and raw observations, all running on the fake bus. **(I3: pins and coverage move, checked in both profiles.)**
@@ -133,8 +143,9 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - sends one packet per loop, so a `lora_off` gets in between even at SF10; a missing radio is retried every 10 s, and each open first frees the SPI1 bus and pins the last one claimed;
   - tested with a stub radio, and the whole path with no hardware: `fake_bus --print | lora_out --dry-run | lora_rx --dry-run | cot_out --dry-run` (120 s: 104 packets, all decoded, 3 pins and the pod on ATAK).
   - **Contract change, tell the team (Utility):** new `[lora]` keys `repeat_s`, `alert_version` (1 indoors, 2 in `park.toml`) and `off_file`. lora_out owns the radio while it runs: stop it before `check_hw.py --only lora`, and health must not open the radio for `ag/sys` `lora`.
-  - [ ] **UT, on the Pi:** `python -m afterglow.lora_out` with XIAO #3 on the laptop: pins and the heartbeat reach `lora_rx.py --print`; `lora_off` silences it; then `sudo systemctl enable --now afterglow@lora_out`.
-- [x] **`lora_rx.py` (SW, laptop):** XIAO #3's lines → `ag/alert` on the laptop's broker. It drops other teams' packets and checks the radio settings at start-up. Tested on fake lines; I4 proves it on the radios.
+  - [x] **UT, on the Pi:** `python -m afterglow.lora_out` with the Pluto receiver on the laptop: pins and the heartbeat reach `ag/alert`; `lora_off` silences it. Done 19:23 with `fake_bus --speed 5`: heartbeat every 5 s with the pod moving, P1–P3 heard → localized → pinned, `lora_on` resends every pin at once. No drops seen at about 1 m.
+  - [x] `sudo systemctl enable --now afterglow@lora_out` (stop it before `check_hw.py --only lora`). Done 19:25; the unit file had to be copied to `/etc/systemd/system/` first (`setup_pi.sh` now does that).
+- [x] **`lora_rx.py` (SW, laptop):** receiver lines (was XIAO #3, now the Pluto via `pluto_rx.py`) → `ag/alert` on the laptop's broker. It drops other teams' packets and checks the radio settings at start-up. Tested on fake lines; I4 proves it on the radios.
 - [x] **`cot_out.py` (SW, laptop)** reads `ag/alert` and sends CoT XML over UDP to `[atak] send_to` (default `239.2.3.1:6969`). It needs no pytak, which is now dropped from `requirements-laptop.txt`:
   - spot markers named by pin number as on the dashboard (`P3`), coloured by priority, with a remarks line and the 95% circle;
   - the pod is a friendly drone marker, placed from the heartbeat;
@@ -143,7 +154,18 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - tested on decoded alerts (`lora_rx --dry-run | cot_out --dry-run`), and live with `--wifi localhost` against the fake bus: a listener on the multicast group got every pin, circle and pod marker.
   - **Contract changes, tell the team (Utility):** lora_out's heartbeat must carry the pod's latest `x`, `y` (CONTRACTS.md, "LoRa alert"). The alert's byte 1 is now the **pin number**, not the track (`alert.encode(target)` handles it; `ag/alert` has `pin` instead of `track`), so two pins on one track (every SOS-only pin is `T0`) stay two ATAK markers. There's a new `[atak]` config table in both profiles.
   - [ ] On a real phone (iTAK over TCP; ATAK too if we can borrow one) on the travel router: check the marker type, the colours, whether the circle is the right size (it's sent as a radius), status in the remarks, and that Clear removes the marker.
-- [ ] **`thermal.py` view (UT)**: MLX90640 at about 4 Hz, written to `live/thermal.png` (temp file, then rename), and the warmest spot on `ag/thermal`.
+- [ ] **`thermal.py` view (UT)**: **the thermal camera is now the HTI HT-203U**, a USB-C phone thermal camera (256×192), not the MLX90640 (HARDWARE.md). Frames at about 4 Hz go to `live/thermal.png` (temp file, then rename), and the warmest spot goes on `ag/thermal`.
+  - [ ] **First, 10 minutes on the Pi:** plug it in through a USB-C-to-A adapter, then run `lsusb`, `v4l2-ctl --list-devices` and `v4l2-ctl -d /dev/videoN --list-formats-ext`, and post the output to the team. The formats decide the design:
+    - **a double-height frame (256×384) or a 16-bit format:** real temperatures. Similar cameras (Topdon TC001, InfiRay P2) put raw temperatures under the picture. `max_c` is in °C, and `hot` means the warmest spot is at least about 30 °C, at least about 5 °C above the frame's median, and under about 45 °C (so not an engine or sun-baked rock);
+    - **only 256×192 YUYV or MJPEG:** a picture with automatic contrast and no °C. `hot` then comes from how far the warm spot stands out, and `max_c` must become `null` (contract change).
+  - [x] **Everything but the camera reader (SW, Sat 7 Nov):** `afterglow/thermal.py` takes a frame in °C or 0–255 brightness, finds the warmest 3×3 spot, decides `hot` (CONTRACTS.md, "Thermal spot"), writes `live/thermal.png` (temp file, then rename; heat palette, cyan box round a hot spot) and publishes `ag/thermal`. It skips bad frames.
+    - `--fake`: a person-sized 34 °C blob drifting over a cool background, out of frame for part of each 40 s loop (hot about 60% of frames), plus a 48 °C rock that must never count. **Dashboard teammate: build the thermal panel against `python -m afterglow.thermal --fake`.**
+    - New `[thermal]` table in both profiles: `device`, `fps` (4), `rotate`, `flip`, the hot thresholds (all placeholders).
+    - Tests in `tests/test_thermal.py`; live through Mosquitto at 4 Hz. About 5 ms a frame on the laptop.
+    - **Contract change, tell the team:** `ag/thermal` gains `w`, `h` and `src` (`ht203u` or `fake`); `col`/`row` are in the 256×192 frame; `max_c` may be `null` (picture only). The dashboard shows `max_c` with `toFixed`, so it needs a `null` case and should mark `src: "fake"`.
+    - Clean-up done: `[i2c] thermal_addr`, the 0x33 check, the MLX90640 driver and its config.txt comment are gone. `pi/setup_pi.sh` now installs `python3-opencv` and `v4l-utils`; **on the already-set-up Pi, run `sudo apt install -y python3-opencv v4l-utils` by hand.**
+  - [ ] **After the Pi test:** write `camera_frames()` in `thermal.py` (OpenCV; it says "use --fake" until then), set `[thermal] device`, add a `/dev/thermal` rule to `pi/99-afterglow.rules` (never `/dev/videoN`: the Camera Module 3 makes `/dev/video*` nodes too) and `check_hw.py --only thermal` (open the device, grab one frame). Expect a frozen frame or two when the camera clicks its shutter. Then tune the thresholds and `rotate`/`flip` on real frames.
+  - **ME:** it doesn't fit the 12 mm thermal hole, and its USB-C plug sticks out of its 46×70×14 mm body. It needs a new spot on the sensor face, pointing the same way as the camera.
 - [ ] **health (UT)**: `ag/sys` from `vcgencmd`, ports, disk, GPS fix and LoRa, plus `batt_pct: null`. Reuse the checks in `check_hw.py`.
 - [ ] Put ME 2's range numbers in by hour 7: the localized and pinned radii, the lane spacing and `fake_bus.py`'s RSSI model.
 - [ ] **(I6, hour 7, 17:00):** carried along the taped trail, a pin lands within 5 m and shows its off-trail distance. Save a screenshot and the measured error.
@@ -164,7 +186,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - runs the CPU colour-anomaly check;
   - is tuned for recall, and runs only during Investigate if heat or power fails.
 - [ ] **Dashboard live feeds (SW):** MJPEG streams of the camera and thermal views from `dashboard.py`, in place of the once-a-second image reload. `person.py` also writes a smaller preview more often, because it runs at only about 1 fps while it tiles frames.
-- [ ] **`thermal.py` flag (UT):** flag hot spots only from a low hover, under 8 m, using the pose's `z`.
+- [ ] **`thermal.py` flag (UT):** flag hot spots only below `[thermal] max_alt_m`, using the pose's `z`. The old 8 m limit was for the MLX90640's 32×24 pixels; the HT-203U's 256×192 should allow much more, so measure it: the height at which a person still covers a few pixels. Then geofence sets `flags.thermal` on the investigating pin (Phase 2, geofence).
 - [ ] **`sim.py` (SW):**
   - a park-scale simulator over Acadia, using a trails GeoJSON (done: the `park.toml` profile and `data/park_*.geojson`);
   - simulated phones using the measured range;
@@ -182,6 +204,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 ## Phase 4: Demo hardening and freeze (hours 16–26)
 
 - [ ] Load the best run's replay and test it, as the backup if the hardware fails.
+- [ ] **Fix the simulator's wording before anyone shows it (`simulator/`, PR #4).** It breaks the one rule on screen. When it finds heat or motion it shows "PERSON CONFIRMED" and "MISSING PERSON FOUND", and it says it "sends the GPS fix to incident command". Make it propose and leave the decision to the ranger: e.g. "LIKELY PERSON · RANGER CONFIRM" and "proposes the pin to the ranger", in `simulator/index.html` and `simulator/README.md`. The no-heat case ("ranger review") is already right. Also decide whether it stays "TrailSAR" or becomes AFTERGLOW.
 - [ ] Demo setup:
   - a 10-minute baseline at the demo spot, with any team trackers on the pod, so they show grey instead of relying on `with_drone`;
   - a team iPhone switched off at least 20 minutes early and hidden;

@@ -1,6 +1,6 @@
 # ESP32 firmware: what the Pi and the laptop expect
 
-The plan doc has the scanner, wifi_listener and sos_page sketches. **Change their serial port to `Serial1` on D9/D10 (below) when you copy them in.** This page covers only what the firmware must do for the Python side to work. Owner: Utility.
+The sketches are `scanner/` (OMNI), `wifi_listener/` (WIFI) and `lora_rx/` (laptop radio). sos_page (tier 2) isn't written yet. All pod sketches print to the Pi on `Serial1` at D9/D10 (below), and their USB debug output never shows an address. This page covers only what the firmware must do for the Python side to work. Owner: Utility.
 
 Pins and parts come from `docs/HARDWARE.md`. The line formats are in `docs/CONTRACTS.md`, "Serial lines from the ESP32 boards".
 
@@ -43,7 +43,10 @@ Pins and parts come from `docs/HARDWARE.md`. The line formats are in `docs/CONTR
   - The pod switches the page off if it hurts the pilot's link.
 - **Known clash:** while the SOS access point is up, the radio stays on the AP's channel, so the probe listener only hears that one channel. That's fine: the SOS page is for Investigate, when we're hovering over a pin.
 
-## Laptop LoRa radio: XIAO #3 + RFM95W (`lora_rx/`)
+## Laptop LoRa radio: XIAO #3 + RFM95W (`lora_rx/`): not used now
+
+**We have only one RFM95W**, so the laptop receives with an ADALM-PLUTO SDR and gr-lora_sdr (`code/tools/pluto_rx.py`, see `docs/HARDWARE.md`). XIAO #3 is the spare. Keep this sketch: it's the receiver again if a second RFM95W turns up.
+
 
 - `lora_rx/lora_rx.ino` is a listen-only modem. It prints every packet as a JSON line on USB, and `code/afterglow/lora_rx.py` does the filtering and decoding.
 - **Arduino IDE:** board `XIAO_ESP32S3`, USB CDC On Boot: Enabled. Library: **LoRa** by Sandeep Mistry, from the Library Manager.
@@ -53,6 +56,12 @@ Pins and parts come from `docs/HARDWARE.md`. The line formats are in `docs/CONTR
   - It passes the RadioHead header through as plain bytes, which is exactly what the pod's adafruit_rfm9x sends.
 - **Radio settings** are `#define`s at the top of the sketch. They must match `[lora]` in `code/afterglow.toml`; `tests/test_lora_rx.py` checks.
 - Solder the 915 MHz spring antenna to ANT before powering it. This is the last XIAO; there's no spare.
+
+## Reference beacon: spare XIAO #3 (`ref_beacon/`)
+
+- A test target we control: it advertises manufacturer data `FF FF 'A' 'G'`, which OMNI reports as `ref`. Tracker and geofence pin it in patrol and night, not in search.
+- Used for I6 (a pin within 5 m), the range test and the demo baseline. No wiring: USB-C power and the U.FL antenna.
+- **Quiet on purpose** (`ESP_PWR_LVL_N12`): a beacon whose median RSSI stays above `[track] with_drone_rssi` (-55) while the pod moves is taken to ride on the pod and never pinned. If OMNI doesn't hear it, try `N6`; if it goes grey (`with_drone`), go lower.
 
 ## Pod LoRa radio
 

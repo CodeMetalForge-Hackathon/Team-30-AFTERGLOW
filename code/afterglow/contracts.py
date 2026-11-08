@@ -19,19 +19,20 @@ PLAN = "ag/plan"
 MODE = "ag/mode"
 CTRL = "ag/ctrl"
 SYS = "ag/sys"
-ALERT = "ag/alert"  # laptop only: a LoRa alert heard by XIAO #3, decoded by lora_rx.py
+ALERT = "ag/alert"  # laptop only: a LoRa alert heard by the laptop receiver (Pluto SDR), decoded by lora_rx.py
 ALL = "ag/#"
 # The broker keeps the latest message on these, so a module that starts late gets it at once.
 RETAINED = {COVERAGE, MODE}
 
 # Beacon classes, and their 4-bit codes in the LoRa alert
-CLS_CODES = {"other": 0, "findmy": 1, "findhub": 2, "samsung_off": 3, "ref": 4, "wifi": 5}
+CLS_CODES = {"other": 0, "findmy": 1, "findhub": 2, "samsung_off": 3, "ref": 4, "wifi": 5, "apple_other": 6}
 ALWAYS_REPORTED = {"findmy", "findhub", "samsung_off", "ref"}
 
 STATES = ["heard", "localized", "pinned", "confirmed"]  # order = the alert's state code
 TRACK_STATES = STATES[:3]  # only the ranger's Confirm sets "confirmed", on ag/target; the tracker never does
 MODES = ["patrol", "night", "investigate", "search"]
 POSE_SRC = ["gps", "waypoint", "replay", "sim"]  # gps/waypoint = the real pod; the dashboard badges the others
+THERMAL_SRC = ["ht203u", "fake"]  # optional ag/thermal src; the panel marks fake heat
 PIN_STATUS = ["new", "acknowledged", "investigating", "confirmed", "cleared"]
 RULES = ["day_offtrail", "night_outside_camp", "search", "sos"]
 CTRL_CMDS = {
@@ -92,6 +93,13 @@ def validate(topic: str, msg: dict) -> list[str]:
         for key in ("covered", "p"):
             if len(msg.get(key) or []) != n:
                 problems.append(f"{key} must have nx*ny = {n} cells")
+    if topic == THERMAL:
+        if not isinstance(msg.get("hot"), bool):
+            problems.append(f"thermal hot must be true or false, not {msg.get('hot')!r}")
+        if "max_c" in msg and msg["max_c"] is not None and not isinstance(msg["max_c"], (int, float)):
+            problems.append(f"thermal max_c must be a number or null, not {msg['max_c']!r}")
+        if "src" in msg and msg["src"] not in THERMAL_SRC:
+            problems.append(f"bad thermal src {msg['src']!r}")
     if topic == POSE and msg.get("src") not in POSE_SRC:
         problems.append(f"bad pose src {msg.get('src')!r}")
     if topic == MODE and msg.get("mode") not in MODES:

@@ -1,11 +1,11 @@
 pi_pin,signal,gpio,linux,goes_to,suggested_colour
-1,3.3V,,,IMU 3V3 (thermal via Qwiic later),red
+1,3.3V,,,IMU 3V3,red
 2,5V,,,OMNI 5V and WIFI 5V (Y-lead),red
 3,SDA,GPIO2,i2c-1,IMU SDA,blue
-4,5V,,,GPS VCC (reserved: no receiver yet),red
+4,5V,,,GPS VCC (NEO-F10N; if it takes 5 V),red
 5,SCL,GPIO3,i2c-1,IMU SCL,yellow
 6,GND,,,IMU GND,black
-7,UART2 TX,GPIO4,/dev/ttyAMA2,GPS RX (reserved),green
+7,UART2 TX,GPIO4,/dev/ttyAMA2,GPS RX,green
 8,UART0 TX,GPIO14,/dev/ttyAMA0,OMNI D9 (RX),green
 9,GND,,,OMNI GND,black
 10,UART0 RX,GPIO15,/dev/ttyAMA0,OMNI D10 (TX),white
@@ -20,8 +20,8 @@ pi_pin,signal,gpio,linux,goes_to,suggested_colour
 24,UART3 TX,GPIO8,/dev/ttyAMA3,WIFI D9 (RX),green
 27,ID_SD,GPIO0,,AI HAT+ ID chip: do not wire,
 28,ID_SC,GPIO1,,AI HAT+ ID chip: do not wire,
-29,UART2 RX,GPIO5,/dev/ttyAMA2,GPS TX (reserved),white
-30,GND,,,GPS GND (reserved),black
+29,UART2 RX,GPIO5,/dev/ttyAMA2,GPS TX,white
+30,GND,,,GPS GND,black
 35,SPI1 MISO,GPIO19,spidev1.0,LoRa MISO,
 36,SPI1 CS (kernel),GPIO16,,nothing: the kernel's CS after cs0_pin=16; leave free,
 38,SPI1 MOSI,GPIO20,spidev1.0,LoRa MOSI,

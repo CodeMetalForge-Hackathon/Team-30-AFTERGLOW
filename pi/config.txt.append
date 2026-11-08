@@ -1,7 +1,7 @@
 # AFTERGLOW pod: append to /boot/firmware/config.txt, then reboot.
 # Never set dtparam=spi=on: SPI0 would take GPIO8/9 from WIFI's UART3.
 dtparam=i2c_arm=on
-# 400 kHz for the MLX90640; drop to 100000 if the BNO086 reads fail (until the thermal camera arrives)
+# 400 kHz; drop to 100000 if the BNO086 reads fail (the thermal camera is USB now, not I2C)
 dtparam=i2c_arm_baudrate=400000
 # UART0 on GPIO14/15 (pins 8, 10) -> /dev/ttyAMA0: OMNI board
 dtparam=uart0=on

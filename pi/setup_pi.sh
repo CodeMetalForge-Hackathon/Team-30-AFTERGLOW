@@ -11,7 +11,8 @@ echo "== packages"
 sudo apt update
 sudo apt full-upgrade -y
 sudo apt install -y mosquitto mosquitto-clients i2c-tools python3-venv python3-pip \
-                    python3-picamera2 python3-lgpio hailo-all git
+                    python3-picamera2 python3-lgpio hailo-all git \
+                    python3-opencv v4l-utils
 
 echo "== config.txt"
 if ! grep -q "AFTERGLOW pod" "$CFG"; then
@@ -30,6 +31,11 @@ sudo usermod -aG dialout,i2c,spi,gpio,video "$USER"
 
 echo "== Mosquitto"
 sudo systemctl enable --now mosquitto
+
+echo "== SSH (on at every boot) and the module service file (enable modules one by one later)"
+sudo systemctl enable --now ssh
+sudo cp "$CODE/../pi/systemd/afterglow@.service" /etc/systemd/system/
+sudo systemctl daemon-reload
 
 echo "== Python venv (sees apt's picamera2 and Hailo packages)"
 python3 -m venv --system-site-packages "$CODE/.venv"

@@ -1,0 +1,235 @@
+"""thermal.py (tier 1 view, Utility): HTI HT-203U thermal camera -> live/thermal.png + ag/thermal.
+
+    python -m afterglow.thermal --fake                        # made-up frames, to the broker
+    python -m afterglow.thermal --fake --dry-run --frames 8   # no broker: print ag/thermal (still writes the PNG)
+    python -m afterglow.thermal                               # on the Pi: the real camera (after the format test)
+
+Every frame goes through Thermal.handle_frame(): find the warm spot, decide `hot`, write the
+picture for the dashboard (temp file, then rename) and publish ag/thermal (CONTRACTS.md).
+
+A frame is a 2-D array, in one of two kinds:
+- degrees C, if the camera gives temperatures: `max_c` is the spot's temperature, and `hot`
+  means body-warm (the [thermal] band) and well above the rest of the frame;
+- 0-255 brightness, if it gives only a picture with automatic contrast: `max_c` is null, and
+  `hot` means the spot stands far out from the rest of the frame.
+Which one the HT-203U sends on Linux is still unknown (TODO.md, "thermal.py"), so the real
+camera reader isn't written yet. --fake feeds made-up frames in degrees C.
+"""
+import argparse
+import logging
+import math
+import os
+import struct
+import sys
+import time
+import zlib
+from pathlib import Path
+
+import numpy as np
+
+from . import config as cfgmod
+from .bus import Bus, PrintBus
+from .contracts import THERMAL, now_ms
+
+log = logging.getLogger("thermal")
+
+MIN_SPAN_C = 8.0  # the picture's colour range is at least this many degrees, so a flat scene doesn't look on fire
+HOT_EDGE_PX = 5  # an engine's or a hot rock's rim cools through the body band: ignore this many pixels round it
+MARK = (0, 255, 255)  # cyan box round a hot spot
+# Ironbow-style palette: black, purple, red, orange, yellow, white.
+_ANCHORS = [(0.0, (0, 0, 16)), (0.2, (64, 0, 128)), (0.4, (170, 0, 140)),
+            (0.6, (235, 70, 20)), (0.8, (255, 180, 0)), (1.0, (255, 255, 230))]
+PALETTE = np.stack([np.interp(np.linspace(0, 1, 256), [a for a, _ in _ANCHORS], [c[i] for _, c in _ANCHORS])
+                    for i in range(3)], axis=1).round().astype(np.uint8)
+
+
+def box3(a: np.ndarray) -> np.ndarray:
+    """3x3 mean, so a single hot pixel (noise, a dead pixel) can't be the spot on its own."""
+    h, w = a.shape
+    p = np.pad(a, 1, mode="edge")
+    return sum(p[dy:dy + h, dx:dx + w] for dy in range(3) for dx in range(3)) / 9.0
+
+
+def png_bytes(rgb: np.ndarray) -> bytes:
+    """An 8-bit RGB PNG from an (h, w, 3) uint8 array, with only the standard library."""
+    h, w, _ = rgb.shape
+    raw = np.concatenate([np.zeros((h, 1), np.uint8), rgb.reshape(h, w * 3)], axis=1).tobytes()
+
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 3)) + chunk(b"IEND", b""))
+
+
+def write_atomic(path: Path, data: bytes):
+    """Write to a temp file, then rename over the old one, so the dashboard never reads half a frame."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+class Thermal:
+    def __init__(self, cfg: dict, bus, live_dir: str | os.PathLike):
+        th = cfg["thermal"]
+        self.bus = bus
+        self.out = Path(live_dir) / "thermal.png"
+        self.hot_min_c, self.hot_max_c = float(th["hot_min_c"]), float(th["hot_max_c"])
+        self.hot_rise_c = float(th["hot_rise_c"])
+        self.hot_z = float(th["hot_z"])
+        self.rotate = int(th["rotate"]) % 360
+        self.flip = bool(th["flip"])
+        if self.rotate % 90:
+            raise ValueError(f"[thermal] rotate must be 0, 90, 180 or 270, not {th['rotate']}")
+        self.frames = 0
+        self.bad = 0
+        self.was_hot = None
+
+    def _orient(self, a):
+        if self.flip:
+            a = a[:, ::-1]
+        return np.rot90(a, k=-(self.rotate // 90))  # clockwise
+
+    def handle_frame(self, frame, celsius: bool, src: str, t: int | None = None):
+        """One frame in; writes the PNG, publishes ag/thermal and returns that message. None for a bad frame."""
+        a = np.asarray(frame, dtype=float)
+        if a.ndim != 2 or min(a.shape) < 3 or not np.isfinite(a).all():
+            self.bad += 1
+            if self.bad in (1, 10) or self.bad % 100 == 0:
+                log.warning("skipped %d bad frame(s); last shape %s", self.bad, a.shape)
+            return None
+        a = self._orient(a)
+        h, w = a.shape
+        sm = box3(a)
+        med = float(np.median(a))
+        if celsius:
+            # The warmest body-warm spot; a hot engine or sun-baked rock is outside the band and can't hide a person.
+            band = (sm >= self.hot_min_c) & (sm <= self.hot_max_c)
+            too_hot = sm > self.hot_max_c
+            if too_hot.any():
+                near = too_hot.astype(float)
+                for _ in range(HOT_EDGE_PX):
+                    near = box3(near)  # grows the too-hot area by a pixel each time
+                band &= near == 0
+            pick = np.where(band, sm, -np.inf) if band.any() else sm
+            row, col = np.unravel_index(int(np.argmax(pick)), pick.shape)
+            peak = float(sm[row, col])
+            score = (peak - med) / self.hot_rise_c if band[row, col] else 0.0
+            max_c = round(peak, 1)
+        else:
+            # Picture only: the camera's automatic contrast stretches any scene, so measure the spot
+            # in spreads of the frame (median absolute deviation), not in brightness levels.
+            row, col = np.unravel_index(int(np.argmax(sm)), sm.shape)
+            peak = float(sm[row, col])
+            spread = max(1.4826 * float(np.median(np.abs(a - med))), 1.0)
+            score = (peak - med) / spread / self.hot_z
+            max_c = None
+        hot = score >= 1.0
+        conf = round(min(1.0, max(0.0, score / 2)), 2)  # 0.5 at the threshold, 1.0 at twice it
+
+        write_atomic(self.out, png_bytes(self.render(a, celsius, (row, col) if hot else None)))
+        msg = {"t": t or now_ms(), "max_c": max_c, "hot": hot, "col": int(col), "row": int(row),
+               "w": w, "h": h, "conf": conf, "src": src}
+        self.bus.publish(THERMAL, msg)
+        self.frames += 1
+        if hot != self.was_hot:
+            log.info("hot spot at col %d row %d (%s)" if hot else "no hot spot (warmest col %d row %d, %s)",
+                     col, row, f"{max_c} C" if max_c is not None else "no temperatures")
+            self.was_hot = hot
+        return msg
+
+    def render(self, a, celsius, spot=None) -> np.ndarray:
+        """False-colour picture of the frame, with a box round the hot spot."""
+        if celsius:
+            # Tops out at hot_max_c, so an engine or a hot rock (white) can't wash out a person.
+            lo = float(np.percentile(a, 1))
+            hi = max(min(float(a.max()), self.hot_max_c), lo + MIN_SPAN_C)
+            idx = (a - lo) / (hi - lo) * 255
+        else:
+            idx = a
+        rgb = PALETTE[np.clip(idx, 0, 255).astype(np.uint8)]
+        if spot is not None:
+            h, w = a.shape
+            r, c = spot
+            r0, r1, c0, c1 = max(r - 6, 0), min(r + 6, h - 1), max(c - 6, 0), min(c + 6, w - 1)
+            rgb[r0, c0:c1 + 1] = rgb[r1, c0:c1 + 1] = MARK
+            rgb[r0:r1 + 1, c0] = rgb[r0:r1 + 1, c1] = MARK
+        return rgb
+
+
+def fake_frame(i: int, rng: np.random.Generator, w: int = 256, h: int = 192) -> np.ndarray:
+    """Frame i of the made-up scene, in degrees C.
+
+    A cool background (16-18 C), a sun-warmed rock at 48 C in one corner (too hot for a person,
+    so it's ignored) and a person-sized blob at about 34 C drifting on a slow loop. The blob is
+    out of the frame for part of each loop, so `hot` turns on and off.
+    """
+    yy, xx = np.mgrid[0:h, 0:w]
+    a = 16.0 + 2.0 * yy / h + rng.normal(0, 0.15, (h, w))
+    a += 32.0 * np.exp(-(((xx - 0.88 * w) / 5) ** 2 + ((yy - 0.15 * h) / 4) ** 2))  # the rock
+    ph = 2 * math.pi * i / 160  # 40 s a loop at 4 frames a second
+    cx, cy = w / 2 + 0.62 * w * math.sin(ph), h / 2 + 0.25 * h * math.sin(2 * ph)
+    blob = np.exp(-(((xx - cx) / 4) ** 2 + ((yy - cy) / 8) ** 2))  # about 8 x 16 px: a person some way off
+    return a + (34.0 - a) * blob
+
+
+def fake_frames(seed: int = 0):
+    rng = np.random.default_rng(seed)
+    i = 0
+    while True:
+        yield fake_frame(i, rng), True, "fake"
+        i += 1
+
+
+def camera_frames(cfg: dict):
+    """The real HT-203U through OpenCV. Written after the format test on the Pi (TODO.md)."""
+    raise NotImplementedError(
+        "the real camera reader comes after the 10-minute format test on the Pi (TODO.md, thermal.py); "
+        "use --fake until then")
+
+
+def run(th: Thermal, frames, fps: float, limit: int = 0, sleep: bool = True):
+    period = 1.0 / fps
+    due = time.monotonic()
+    for n, (frame, celsius, src) in enumerate(frames, 1):
+        th.handle_frame(frame, celsius, src)
+        if limit and n >= limit:
+            return
+        if sleep:
+            due += period
+            time.sleep(max(0.0, due - time.monotonic()))
+            due = max(due, time.monotonic() - period)  # after a stall, don't rush to catch up
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--config")
+    ap.add_argument("--fake", action="store_true", help="made-up frames instead of the camera")
+    ap.add_argument("--dry-run", action="store_true", help="print ag/thermal instead of publishing, as fast as it can")
+    ap.add_argument("--frames", type=int, default=0, help="stop after this many frames (0 = run until stopped)")
+    ap.add_argument("--seed", type=int, default=0, help="--fake: noise seed")
+    a = ap.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s", stream=sys.stderr)
+    cfg = cfgmod.load(a.config)
+    live = cfgmod.resolve(cfg, cfg["http"]["live_dir"])
+
+    try:
+        frames = fake_frames(a.seed) if a.fake else camera_frames(cfg)
+    except NotImplementedError as e:
+        log.error("%s", e)
+        sys.exit(2)
+
+    bus = PrintBus() if a.dry_run else Bus(cfg["mqtt"]["host"], cfg["mqtt"]["port"], "thermal")
+    th = Thermal(cfg, bus, live)
+    log.info("writing %s at %s fps from %s", th.out, cfg["thermal"]["fps"], "fake frames" if a.fake else "the camera")
+    try:
+        run(th, frames, float(cfg["thermal"]["fps"]), a.frames, sleep=not a.dry_run)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        bus.close()
+
+
+if __name__ == "__main__":
+    main()

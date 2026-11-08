@@ -1,11 +1,12 @@
-"""lora_rx.py (tier 1, Software, laptop): XIAO #3's USB lines -> ag/alert on the laptop's broker.
+"""lora_rx.py (tier 1, Software, laptop): receiver lines -> ag/alert on the laptop's broker.
 
-    python -m afterglow.lora_rx                         # finds XIAO #3's port, publishes to localhost
-    python -m afterglow.lora_rx --port /dev/cu.usbmodem1101 --print   # real radio, print, no broker
+    python tools/pluto_rx.py | python -m afterglow.lora_rx --stdin          # Pluto SDR (now), publishes to localhost
+    python tools/pluto_rx.py | python -m afterglow.lora_rx --stdin --print  # Pluto SDR, print, no broker
+    python -m afterglow.lora_rx [--port /dev/cu.usbmodem1101] [--print]      # old path: XIAO #3 + RFM95W on USB
     python -m afterglow.lora_rx --dry-run < lines.txt   # no radio, no broker
 
-XIAO #3 (firmware/lora_rx/) is a dumb modem: it prints every packet it hears as one JSON line,
-header and all. This module keeps only 16-byte alerts sent from the pod to the laptop, decodes
+The receiver (tools/pluto_rx.py on the Pluto, or XIAO #3's firmware/lora_rx/) is a dumb modem:
+it prints every packet it hears as one JSON line, header and all. This module keeps only 16-byte alerts sent from the pod to the laptop, decodes
 them with alert.decode and publishes ag/alert. See docs/CONTRACTS.md, "Laptop LoRa radio".
 """
 import argparse
@@ -105,6 +106,18 @@ class LoraRx:
         self.stats[ALERT] += 1
         self.bus.publish(ALERT, msg)
 
+    def read_lines(self, lines):
+        """Read receiver lines until they end (tools/pluto_rx.py piped in). Exits if its settings differ."""
+        next_stats = time.monotonic() + 30
+        for line in lines:
+            self.handle_line(line.strip())
+            if self.radio_ok is False:
+                raise SystemExit("the receiver's radio settings differ from [lora] in the config")
+            if time.monotonic() > next_stats:
+                log.info("stats: %s", dict(self.stats))
+                next_stats = time.monotonic() + 30
+        log.info("receiver closed its output; stats: %s", dict(self.stats))
+
     def read_port(self, port: str, baud: int):
         """Read XIAO #3 forever, reopening after an unplug. Exits if its radio settings differ."""
         import serial  # pyserial; imported here so --dry-run works without it
@@ -141,6 +154,7 @@ def main():
     ap.add_argument("--config")
     ap.add_argument("--port", help="XIAO #3's serial port (default: [lora] rx_port, or the only one found)")
     ap.add_argument("--print", action="store_true", help="read the radio, print instead of publishing")
+    ap.add_argument("--stdin", action="store_true", help="read receiver lines from stdin (tools/pluto_rx.py) instead of a USB port")
     ap.add_argument("--dry-run", action="store_true", help="read lines from stdin, print instead of publishing")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -154,11 +168,14 @@ def main():
         log.info("stats: %s", dict(rx.stats))
         return
 
-    port = a.port or find_port(lcfg)
+    port = None if a.stdin else (a.port or find_port(lcfg))
     bus = PrintBus() if a.print else Bus(cfg["mqtt"]["host"], cfg["mqtt"]["port"], "lora_rx")
     rx = LoraRx(bus, lcfg)
     try:
-        rx.read_port(port, lcfg["rx_baud"])
+        if a.stdin:
+            rx.read_lines(sys.stdin)
+        else:
+            rx.read_port(port, lcfg["rx_baud"])
     except KeyboardInterrupt:
         pass
     finally:

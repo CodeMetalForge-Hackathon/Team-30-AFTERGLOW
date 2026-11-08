@@ -39,7 +39,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 | `ag/coverage` (**new**) | locate.py | `{"t":…,"x0":-50,"y0":-50,"cell_m":5,"nx":60,"ny":40,"covered":[0,1,1,…],"p":[0,12,255,…],"pct":0.62}` | Coverage and probability grids for the dashboard, about 1 Hz, **retained** so a reloaded dashboard gets it at once. See "Coverage grid" below. Stays on the pod, never goes over LoRa |
 | `ag/track` (**changed**) | tracker.py | `{"t":…,"track":"T1","ids":["7f3a9c21","e9910b4c"],"cls":"findmy","x":18.5,"y":9.0,"r95":12.0,"state":"localized","passes":2,"last_s":4,"with_drone":false,"baseline":false,"c":0.62}` | Best estimate for one beacon, about once a second. `ids` lists the rotating keys followed through key changes (the last 4). `with_drone` marks beacons that move with the drone, such as our own phones. Optional `baseline` (**new**): heard during the baseline, so grey and never pinned. Optional `c` (**new**): confidence 0–1, which geofence copies onto the pin. See "Tracks" below |
 | `ag/target` (**changed**) | geofence.py | `{"t":…,"pin":"P3","track":"T1","x":18.5,"y":9.0,"lat":44.3387,"lon":-68.2731,"r95":12.0,"c":0.82,"prio":2,"cls":"findmy","state":"localized","last_s":4,"off_trail_m":46,"zone":"trail_corridor","rule":"day_offtrail","status":"new","flags":{"sos":false,"thermal":true,"radar":false,"camera":true},"br":null}` | **The one record** the dashboard, LoRa alerts and ATAK use. One per pin. `state` and `last_s` come from the track (see "How geofence fills a pin"). Optional `sos` (`{"hurt":true,"walk":false,"count":2}`) once an SOS answer is attached |
-| `ag/thermal` | thermal.py | `{"t":…,"max_c":33.8,"hot":true,"col":17,"row":9,"conf":0.7}` | Warmest spot in the 32×24 frame. Frames for the panel are image files over HTTP, not MQTT (see "Images over HTTP") |
+| `ag/thermal` (**changed**) | thermal.py | `{"t":…,"max_c":33.8,"hot":true,"col":120,"row":80,"w":256,"h":192,"conf":0.8,"src":"ht203u"}` | The warm spot in the HT-203U's frame, about 4 times a second (see "Thermal spot"). Frames for the panel are image files over HTTP, not MQTT (see "Images over HTTP") |
 | `ag/vision` (**new**) | person.py | `{"t":…,"kind":"person","conf":0.82,"box":[1820,940,96,140],"snap":"snaps/1731000000123.jpg","track":"T1"}` | Camera check. `kind` is `person` or `colour` (the Monviso-style colour check). `snap` is also its URL path on port 8080 |
 | `ag/radar` | radar.py | `{"t":…,"present":true,"range_m":1.1,"br":14,"hr":72}` | Breathing and heart rate, landed only (tier 3) |
 | `ag/plan` (**new**) | planner.py | `{"t":…,"id":"L7","kind":"homing","legs":[{"to_x":20,"to_y":5,"heading_deg":72,"dist_m":35,"alt_m":8}],"status":"proposed"}` | Legs for the pilot. `kind` is `patrol`, `grid` or `homing`. The ranger accepts on the dashboard; the observer reads heading and distance to the pilot |
@@ -150,6 +150,16 @@ geofence.py listens to `ag/sos`, not lora_out.py, because priority 1 and `flags.
 - The `[locate]` table holds `cell_m`, `detect_m`, `stale_s` and `area_m`, the box the grids cover (empty means the map's `park` zone). The grid is capped at 20,000 cells: past that, `cell_m` grows. `cell_m` and `detect_m` are placeholders until ME 2's range test.
 - The 95% circle needs no topic of its own, because `x`, `y` and `r95` are already on `ag/track` and `ag/target`.
 
+### Thermal spot
+
+- thermal.py sends one `ag/thermal` per frame, about 4 times a second (`[thermal] fps`), and writes the same frame to `live/thermal.png` with a cyan box round a hot spot.
+- `col` and `row` are the spot's pixel in a `w` × `h` frame: 256 × 192, or 192 × 256 after a 90° `rotate`. The spot is the warmest 3 × 3 patch, so one noisy pixel can't be it.
+- **With temperatures:** `max_c` is the spot in °C. The spot is the warmest patch inside the body band (`hot_min_c`–`hot_max_c`, 30–45 °C), or the warmest overall if nothing is in the band. `hot` means it's in the band and at least `hot_rise_c` (5 °C) above the frame's median, so an engine or a sun-baked rock never counts. Nor does its rim, which cools through the band: patches within 5 pixels of anything above `hot_max_c` are skipped.
+- **Picture only** (no temperatures): `max_c` is `null`, and `hot` means the spot stands at least `hot_z` spreads (median absolute deviations) above the frame's median.
+- `conf` is 0–1: 0.5 right at the `hot` threshold, 1.0 at twice it.
+- `src` is `ht203u` (the camera) or `fake` (`thermal.py --fake`). The panel should mark fake heat.
+- Whether the HT-203U gives temperatures on Linux is still to check (TODO.md), so readers must handle both kinds. All the thresholds are placeholders in the `[thermal]` table.
+
 ## Map files
 
 The config's `[rules]` `trails_geojson` and `zones_geojson` name them, relative to the config file (open them with `config.resolve`). They're stored in GeoJSON lon/lat; read them in metres through `afterglow/parkmap.py` (`ParkMap.load(cfg)`), which geofence, the dashboard and the fake bus all share.
@@ -214,15 +224,18 @@ Pi → WIFI  {"cmd":"sos_on"}   {"cmd":"sos_off"}
 - A `ble` line carries only the class and the RSSI, never payload bytes. The hardware reference's proposed `key` field (the payload hex) would break the privacy rules, so it isn't used. Its `mac` is our `addr`, and its `t` isn't needed, because the Pi stamps time.
 - The bridge drops lines that aren't valid JSON and counts them in its log.
 
-### Laptop LoRa radio (XIAO #3 → laptop USB)
+### Laptop LoRa receiver (ADALM-PLUTO → laptop)
 
-XIAO #3 (`firmware/lora_rx/`) only listens. It prints every packet it hears, one JSON line each, and doesn't filter. The port is `/dev/cu.usbmodem*` on macOS; read it at 115200 with pyserial. `lora_rx.py` handles all of it.
+**Changed (Sat 7 Nov):** we have only one RFM95W, so the laptop receives with an ADALM-PLUTO SDR, not RFM95W + XIAO #3. The line format below is unchanged and stays the boundary:
+- `tools/pluto_rx.py` runs gr-lora_sdr on the Pluto's samples, using the config's `[lora]` table, and prints one `rx` line per decoded packet with a good CRC, on stdout. It may print `rssi` and `snr` as `null` (an SDR has no calibrated RSSI), and `ag/alert` allows that.
+- `lora_rx.py --stdin` reads those lines and publishes `ag/alert`, exactly as it did from XIAO #3's USB port. It doesn't filter: `lora_rx.py` drops other teams' packets.
+- The old path (XIAO #3 + a second RFM95W, `firmware/lora_rx/`, read at 115200 from `/dev/cu.usbmodem*`) still works if a second RFM95W turns up.
 
 ```
-XIAO #3 → laptop  {"type":"rx","rssi":-71,"snr":9.5,"hex":"a2a10700<32 hex chars: the alert>"}
-XIAO #3 → laptop  {"type":"cfg","freq":915.000,"sf":7,"bw":125000,"cr":5,"pre":8}
-XIAO #3 → laptop  {"type":"err","msg":"no RFM95W: …"}
-laptop → XIAO #3  ?        (asks for the cfg line)
+receiver → laptop  {"type":"rx","rssi":-71,"snr":9.5,"hex":"a2a10700<32 hex chars: the alert>"}
+receiver → laptop  {"type":"cfg","freq":915.000,"sf":7,"bw":125000,"cr":5,"pre":8}
+receiver → laptop  {"type":"err","msg":"no radio: …"}
+laptop → XIAO #3  ?        (asks for the cfg line; XIAO #3 only)
 ```
 
 - `hex` is the whole packet: the 4-byte RadioHead header (to, from, id, flags), then the payload.
@@ -258,7 +271,7 @@ lora_out.py stays a plain encoder of `ag/target`. These details:
 | 6 | r95 | uint8. v1 decimetres (to 25.5 m); v2 metres (to 255 m) |
 | 7 | state and flags | Low 4 bits state (0 heard, 1 localized, 2 pinned, 3 confirmed). Bit 4 SOS, bit 5 thermal, bit 6 radar, bit 7 camera |
 | 8 | confidence | 0–255 = c × 255 |
-| 9 | priority and class | High nibble prio 1–4; low nibble class: 0 other, 1 findmy, 2 findhub, 3 samsung_off, 4 ref, 5 wifi |
+| 9 | priority and class | High nibble prio 1–4; low nibble class: 0 other, 1 findmy, 2 findhub, 3 samsung_off, 4 ref, 5 wifi, 6 apple_other (never sent in practice: live devices are never tracked or pinned) |
 | 10 | breaths per minute | 0 = unknown |
 | 11 | SOS answer | Bit 0 hurt, bit 1 can walk, bits 2–7 headcount (0–63) |
 | 12–13 | seconds since last heard | uint16 |
@@ -267,8 +280,8 @@ lora_out.py stays a plain encoder of `ag/target`. These details:
 
 Changes from the plan doc's layout: version 2 adds a metres scale, because a park-scale pin can be farther than 25.5 m from where it was heard. Bit 7 and byte 15 were the gas-hazard fields; the drone build has no gas sensor, so they now carry the camera flag and the off-trail distance.
 
-**Radio settings:** the config's `[lora]` table: 915.0 MHz, SF7, 125 kHz, coding rate 4/5, preamble 8, CRC on, sync word left at the default. Both radios must match exactly.
-- `firmware/lora_rx/lora_rx.ino` copies the numbers, and `tests/test_lora_rx.py` fails if they drift apart.
+**Radio settings:** the config's `[lora]` table: 915.0 MHz, SF7, 125 kHz, coding rate 4/5, preamble 8, explicit header, CRC on, sync word left at the default (0x12, the private-network word; gr-lora_sdr's default matches). Both ends must match exactly.
+- `tools/pluto_rx.py` reads the numbers from the config itself. `firmware/lora_rx/lora_rx.ino` (the old XIAO #3 path) copies them, and `tests/test_lora_rx.py` fails if they drift apart.
 - SF 9–10 trades speed for range. Change it in both places after ME 2's range test.
 
 **Filtering:** there's no private channel, so `lora_rx.py` keeps a packet only if all of these hold:
