@@ -57,7 +57,7 @@ def target(**kw):
     m = {"t": int(T0 * 1000), "pin": "P3", "track": "T1", "x": 4.0, "y": 6.0, "lat": 0, "lon": 0, "r95": 1.5,
          "c": 0.82, "prio": 2, "cls": "findmy", "state": "pinned", "last_s": 2, "off_trail_m": 6,
          "zone": "off_trail", "rule": "day_offtrail", "status": "new",
-         "flags": {"sos": False, "thermal": False, "radar": False, "camera": False}, "br": None}
+         "flags": {"sos": False, "thermal": False, "radar": False, "camera": False}}
     m.update(kw)
     assert validate(TARGET, m) == []
     return m

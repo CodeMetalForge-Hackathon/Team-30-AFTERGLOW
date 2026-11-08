@@ -19,7 +19,7 @@ def target(**kw):
     m = {"t": 1731000000123, "pin": "P3", "track": "T1", "x": 40.0, "y": 60.0, "lat": 0, "lon": 0, "r95": 12.0,
          "c": 0.82, "prio": 2, "cls": "findmy", "state": "localized", "last_s": 2, "off_trail_m": 46,
          "zone": "off_trail", "rule": "day_offtrail", "status": "new",
-         "flags": {"sos": False, "thermal": False, "radar": False, "camera": False}, "br": None}
+         "flags": {"sos": False, "thermal": False, "radar": False, "camera": False}}
     m.update(kw)
     return m
 

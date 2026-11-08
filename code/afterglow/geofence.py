@@ -181,7 +181,7 @@ class Geofence:
             self.since.pop(name, None)
             self.n += 1
             pin = f"P{self.n}"
-            self.pins[pin] = {"pin": pin, "rule": rule, "status": "new", "flags": dict(NO_FLAGS), "br": None}
+            self.pins[pin] = {"pin": pin, "rule": rule, "status": "new", "flags": dict(NO_FLAGS)}
             self.links[name] = pin
             log.info("%s: new pin for %s %s (%s)", pin, tr["cls"], name, rule)
             self.stats["pins"] += 1
@@ -298,7 +298,7 @@ class Geofence:
                 self.n += 1
                 p = self.pins[f"P{self.n}"] = {
                     "pin": f"P{self.n}", "track": "T0", "rule": "sos", "status": "new", "cls": "wifi",
-                    "c": 0.0, "state": "heard", "r95": self.sos_r95, "flags": dict(NO_FLAGS), "br": None}
+                    "c": 0.0, "state": "heard", "r95": self.sos_r95, "flags": dict(NO_FLAGS)}
                 self.sos_pin = p["pin"]
                 self.stats["pins"] += 1
             if self.pose is None:

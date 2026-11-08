@@ -237,7 +237,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 
 ## Stretch goals (only if ahead, most valuable first)
 
-- [ ] **`radar.py` (tier 3, UT):** MR60BHA2 breathing and heart rate on `ag/radar`, landed within 1.5 m. Feeds the alert's `br` byte and the `radar` flag.
+- [ ] **`radar.py` (tier 3, UT):** MR60BHA2 presence on `ag/radar`, landed within 1.5 m. Feeds the alert's `radar` flag.
 - [ ] **CalTopo export (tier 3, SW):** pins and coverage as GeoJSON, plus a live marker through CalTopo's position API.
 - [ ] **LoRa fallback view (tier 3, SW):** once the laptop loses Wi-Fi to the Pi, the dashboard on the laptop shows pins from `lora_rx.py`, without feeds.
 - [ ] **Live outdoor position test (tier 3, UT):** a GPS fix with the pod on the drone, logged against a phone's GPS.

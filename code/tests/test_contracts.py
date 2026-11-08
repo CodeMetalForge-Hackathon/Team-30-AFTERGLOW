@@ -16,7 +16,7 @@ def sample_target(**kw):
     m = {"t": 1, "pin": "P3", "track": "T7", "x": 412.0, "y": -88.0, "r95": 12.0, "c": 0.82,
          "prio": 2, "cls": "findmy", "status": "new", "state": "localized",
          "flags": {"sos": False, "thermal": True, "radar": False, "camera": True},
-         "br": 14, "sos": {"hurt": True, "walk": False, "count": 2}, "last_s": 4,
+         "sos": {"hurt": True, "walk": False, "count": 2}, "last_s": 4,
          "battery": None, "off_trail_m": 46}
     m.update(kw)
     return m
@@ -33,7 +33,8 @@ def test_alert_is_16_bytes_and_round_trips():
     assert d["flags"] == m["flags"]
     assert abs(d["c"] - 0.82) < 1 / 255
     assert d["sos"] == {"hurt": True, "walk": False, "count": 2}
-    assert d["br"] == 14 and d["last_s"] == 4 and d["off_trail_m"] == 46 and d["battery"] is None
+    assert d["last_s"] == 4 and d["off_trail_m"] == 46 and d["battery"] is None
+    assert pkt[10] == 0 and "br" not in d  # byte 10 is reserved
 
 
 def test_alert_v1_is_decimetres():

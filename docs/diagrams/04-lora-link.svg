@@ -121,13 +121,13 @@
     <path d="M102,446 V440 H222 V446"/>
     <path d="M226,446 V440 H532 V446"/>
     <path d="M536,446 V440 H718 V446"/>
-    <path d="M722,446 V440 H842 V446"/>
+    <path d="M784,446 V440 H842 V446"/>
     <path d="M846,446 V440 H1090 V446"/>
   </g>
   <text class="grp" x="162" y="434" text-anchor="middle">which pin</text>
   <text class="grp" x="379" y="434" text-anchor="middle">where</text>
   <text class="grp" x="627" y="434" text-anchor="middle">how sure, how urgent</text>
-  <text class="grp" x="782" y="434" text-anchor="middle">the person</text>
+  <text class="grp" x="813" y="434" text-anchor="middle">the person</text>
   <text class="grp" x="968" y="434" text-anchor="middle">context</text>
 
   <g text-anchor="middle">
@@ -154,6 +154,7 @@
   <g fill="#ffffff" stroke="#64748b" stroke-width="1.2">
     <rect x="100" y="468" width="992" height="58" rx="4"/>
   </g>
+  <rect x="720" y="468.6" width="62" height="56.8" fill="#f1f5f9"/>
   <g stroke="#cbd5e1" stroke-width="1">
     <line x1="162" y1="468" x2="162" y2="526"/><line x1="224" y1="468" x2="224" y2="526"/>
     <line x1="348" y1="468" x2="348" y2="526"/><line x1="472" y1="468" x2="472" y2="526"/>
@@ -171,7 +172,7 @@
     <text class="c1" x="565" y="492">state</text><text class="c2" x="565" y="509">+ 4 flags</text>
     <text class="c1" x="627" y="492">conf</text><text class="c2" x="627" y="509">c × 255</text>
     <text class="c1" x="689" y="492">prio</text><text class="c2" x="689" y="509">+ class</text>
-    <text class="c1" x="751" y="492">breaths</text><text class="c2" x="751" y="509">per min</text>
+    <text class="c1" x="751" y="492" style="fill:#94a3b8">reserved</text><text class="c2" x="751" y="509">always 0</text>
     <text class="c1" x="813" y="492">SOS</text><text class="c2" x="813" y="509">answer</text>
     <text class="c1" x="906" y="492">last heard</text><text class="c2" x="906" y="509">seconds ago</text>
     <text class="c1" x="999" y="492">battery</text><text class="c2" x="999" y="509">percent</text>
