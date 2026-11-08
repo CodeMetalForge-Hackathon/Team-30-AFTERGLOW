@@ -39,8 +39,9 @@ code/
     locate.py           ag/pose + ag/track -> retained ag/coverage (coverage and probability grids over [locate] area_m)
     geofence.py         ag/track + map + ag/mode -> ag/target (rules, prio, the pin status guard, SOS); saves pins to runs/
     planner.py          ag/target + ag/pose + ag/mode -> ag/plan: homing, grid and patrol legs; proposes only, accept_leg/reject_leg decide
-    thermal.py          HT-203U frames (or --fake) -> live/thermal.png + ag/thermal (warm spot, hot); camera reader not written yet
+    thermal.py          HT-203U frames via v4l2-ctl (or --fake) -> live/thermal.png + ag/thermal (warm spot, hot)
     camera.py           Camera Module 3 (or --fake) -> live/camera.jpg, a live view for the camera panel (no MQTT, no detection)
+    health.py           pod health (temperature, throttling, disk, which parts are publishing) -> ag/sys for the Pod panel
     radio.py            opens the pod's RFM95W on SPI1 from the config's [lora] table (lora_out, check_hw)
     lora_out.py         pod: ag/target (+ ag/pose, ag/sys) -> 16-byte alerts on the RFM95W every [lora] repeat_s, plus a heartbeat; obeys lora_off
     lora_rx.py          laptop: receiver lines (Pluto SDR via tools/pluto_rx.py) -> ag/alert (drops other teams' packets)
@@ -54,6 +55,7 @@ code/
   park.toml             PARK profile (realistic view, real Acadia trails), laptop only; same keys as afterglow.toml
   data/                 trails/zones/building.geojson (indoor; building is approximate) and park_trails/park_zones.geojson (OSM); all lon/lat
   tools/fake_bus.py     fake pod per the profile's [sim] table, plus stand-in track/target/coverage
+  tools/local_stack.py  the laptop stack in one process, no broker: fake pod or a replay -> real tracker/locate/geofence -> dashboard
   tools/replay.py       replays a mosquitto_sub -v log with the original timing (debugging, demo backup)
   tools/make_park_map.py  data/park_*.geojson from OpenStreetMap (needs internet)
   tools/check_hw.py     PASS/FAIL/SKIP for each pod part (run on the Pi); --only lora sends one heartbeat
@@ -61,11 +63,13 @@ code/
   tools/make_indoor_map.py  writes data/*.geojson from the origin and waypoints
   tools/draw_map.py     draws the map files to docs/maps/indoor_map.png
   tests/                pytest
-docs/                   CONTRACTS.md, HARDWARE.md, MODULES.md, drone_build_plan.md, AFTERGLOW Hardware.pdf
+docs/                   CONTRACTS.md, HARDWARE.md, MODULES.md, TV.md, LIVEMAP.md, drone_build_plan.md, AFTERGLOW Hardware.pdf
   maps/                 map pictures
   wiring/               pins.csv (current); diagrams and wiring_and_build.html (out of date)
 pi/                     setup_pi.sh, config.txt lines, udev rule (radar), Mosquitto conf, systemd unit
 firmware/               what the ESP32 boards must send; lora_rx/ is the old XIAO #3 receiver sketch (unused: the Pluto replaced it)
+tak/                    TAK add-on: field teams' phones (iTAK/ATAK) <-> the operator TV (tak_link.py, tak_stack.py); tests in code/tests/test_tak_*
+simulator/              TrailSAR browser simulator of a whole mission in real parks; separate from code/, all simulated
 ```
 
 On the Pi, clone the repo to `/home/pi/afterglow`, because `pi/systemd/afterglow@.service` assumes that path.

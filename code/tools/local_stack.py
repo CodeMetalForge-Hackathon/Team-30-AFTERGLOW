@@ -42,7 +42,7 @@ sys.path.insert(0, str(TOOLS.parent))
 sys.path.insert(0, str(TOOLS))
 from afterglow import config as cfgmod  # noqa: E402
 from afterglow.case import CaseStore  # noqa: E402
-from afterglow.contracts import ALL, CTRL, MODE, OBS_BLE, OBS_WIFI, POSE, SOS, TARGET, THERMAL, TRACK, now_ms  # noqa: E402
+from afterglow.contracts import ALL, CTRL, MODE, POSE, SOS, TARGET, THERMAL, TRACK, now_ms  # noqa: E402
 from afterglow.dashboard import Commands, State, make_handler, make_meta  # noqa: E402
 from afterglow.geofence import Geofence  # noqa: E402
 from afterglow.locate import MIN_WALL_S as LOCATE_MIN_WALL_S  # noqa: E402

@@ -1,6 +1,5 @@
 """The committed map files must load and match the shared config (origin and waypoints)."""
 import json
-from pathlib import Path
 
 import pytest
 

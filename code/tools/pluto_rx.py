@@ -112,7 +112,7 @@ def selftest(lcfg: dict, samp_rate: int) -> int:
     """Modulate one heartbeat exactly as the pod would send it (RadioHead header + 16 bytes),
     add noise and a 10 kHz frequency error, and decode it. No Pluto needed."""
     import pmt
-    from gnuradio import blocks, channels, gr
+    from gnuradio import blocks, channels
     from gnuradio import lora_sdr as l
 
     p = lora_params(lcfg, samp_rate)

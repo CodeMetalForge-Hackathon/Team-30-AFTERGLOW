@@ -1,4 +1,4 @@
-# Laptop: LoRa receiver (XIAO #3 over USB), ATAK output, simulator, dashboard development
+# Laptop: LoRa receiver (lora_rx; the Pluto itself needs the conda "sdr" env), ATAK output, simulator, dashboard development
 paho-mqtt>=2.0
 pyserial>=3.5
 pynmea2>=1.19

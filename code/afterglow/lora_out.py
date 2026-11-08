@@ -1,7 +1,7 @@
 """lora_out.py (tier 1, Utility; written by Software): ag/target -> 16-byte LoRa alerts from the pod's RFM95W.
 
     python -m afterglow.lora_out                  # on the Pi: the RFM95W on SPI1 (afterglow/radio.py), local broker
-    python -m afterglow.lora_out --print          # read the bus, print what XIAO #3 would hear instead of sending
+    python -m afterglow.lora_out --print          # read the bus, print the receiver lines instead of sending
     python tools/fake_bus.py --print --duration 120 | python -m afterglow.lora_out --dry-run \\
         | python -m afterglow.lora_rx --dry-run | python -m afterglow.cot_out --dry-run   # no radio, no broker
 
@@ -286,7 +286,7 @@ class PodRadio:
 
 
 class PrintRadio:
-    """Stand-in for --print and --dry-run: prints the line XIAO #3 would, so lora_rx --dry-run can read it.
+    """Stand-in for --print and --dry-run: prints the line the receiver would, so lora_rx --dry-run can read it.
     rssi and snr are 0, so nobody mistakes it for a real link."""
 
     def __init__(self, lcfg: dict):
@@ -318,9 +318,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config")
     ap.add_argument("--broker", help="MQTT host (default: the config's [mqtt] host)")
-    ap.add_argument("--print", action="store_true", help="read the bus, print XIAO #3's lines instead of sending")
+    ap.add_argument("--print", action="store_true", help="read the bus, print the receiver lines instead of sending")
     ap.add_argument("--dry-run", action="store_true",
-                    help="read `mosquitto_sub -v` lines from stdin, print XIAO #3's lines (no radio, no broker)")
+                    help="read `mosquitto_sub -v` lines from stdin, print the receiver lines (no radio, no broker)")
     a = ap.parse_args()
     # Logs go to stderr, so the printed lines can be piped into lora_rx --dry-run
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s", stream=sys.stderr)

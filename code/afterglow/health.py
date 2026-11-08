@@ -17,11 +17,9 @@ disk) and watches the bus: a part counts as working when its module published re
 """
 import argparse
 import logging
-import os
 import re
 import shutil
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path

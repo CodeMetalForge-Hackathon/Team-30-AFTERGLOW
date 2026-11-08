@@ -19,20 +19,23 @@ Everything runs on the Raspberry Pi 5 in the pod. Programs talk over MQTT topics
 README.md            start here
 TODO.md              phased plan, ticked as we go
 CLAUDE.md            instructions for Claude Code
-docs/                CONTRACTS.md, HARDWARE.md, MODULES.md, drone_build_plan.md
+docs/                CONTRACTS.md, HARDWARE.md, MODULES.md, TV.md, LIVEMAP.md, drone_build_plan.md
   maps/              indoor_map.png (the taped park), park_map.png (the realistic park view)
-  wiring/            diagrams, pins.csv, wiring_and_build.html
+  wiring/            pins.csv (current); diagrams and wiring_and_build.html (out of date)
 code/
   afterglow.toml     DEMO profile: the taped indoor park, real pod (identical on pod and laptop)
   park.toml          PARK profile: realistic view on real Acadia trails, laptop only, simulated
-  afterglow/         contracts.py, alert.py, geo.py, bus.py, config.py, parkmap.py,
-                     bridge.py, position.py, radio.py, lora_rx.py and dashboard.py (tier 1, working)
-    web/             the dashboard front end (Preact + htm, Leaflet; vendored, no CDN)
-  data/              trails.geojson, zones.geojson (indoor); park_trails.geojson, park_zones.geojson (OSM)
-  tools/             check_hw.py, fake_bus.py, replay.py, make_indoor_map.py, make_park_map.py, draw_map.py
+  afterglow/         one module per process (python -m afterglow.<name>):
+                     pod: bridge, position, tracker, locate, geofence, planner, thermal, camera, lora_out, health
+                     laptop: lora_rx, cot_out, dashboard (with case, the missing-person case)
+                     shared: contracts, alert, geo, bus, config, parkmap, trails, radio
+    web/             the dashboard and operator TV (Preact + htm, Leaflet, MapLibre; vendored, no CDN)
+  data/              trails.geojson, zones.geojson, building.geojson (indoor); park_trails.geojson, park_zones.geojson (OSM)
+  tools/             fake_bus.py, local_stack.py, replay.py, check_hw.py, pluto_rx.py, make_indoor_map.py, make_park_map.py, draw_map.py
   tests/             pytest
 pi/                  setup_pi.sh, config.txt.append, udev rules, Mosquitto config, systemd service
-firmware/            README.md: what the ESP32 boards must send (Serial1 on D9/D10); lora_rx/: the laptop radio's sketch
+firmware/            README.md: what the ESP32 boards must send (Serial1 on D9/D10); lora_rx/: old laptop radio sketch (unused, the Pluto replaced it)
+tak/                 TAK add-on: the field teams' phones (iTAK/ATAK) and the operator TV as one system (tak/README.md)
 simulator/           TrailSAR mission simulator: the drone's sweep, beacon homing and thermal check in real parks (browser, all simulated)
 ```
 
@@ -51,11 +54,16 @@ mosquitto_sub -v -t 'ag/#'                       # watch the bus
 
 Run the dashboard and the fake bus with the same profile.
 
-**Live map feed.** `web/livemap.js` draws the live bus on a 3D terrain map with labels and a key (pod at height, its hearing radius, where beacons were heard, tracks, pins, coverage). It only draws; the dashboard keeps the buttons. Open `http://localhost:8080/livemap.html`, embed that page, or use the `LiveMap` class (same methods as `map.js`'s `MapView`). See [`docs/LIVEMAP.md`](docs/LIVEMAP.md). **No Mosquitto** (e.g. Windows): `tools/local_stack.py` runs a source, the real tracker and geofence, and the dashboard in one process:
+**Live map feed.** `web/livemap.js` draws the live bus on a 3D terrain map with labels and a key (pod at height, its hearing radius, where beacons were heard, tracks, pins, coverage). It only draws; the dashboard keeps the buttons. Open `http://localhost:8080/livemap.html`, embed that page, or use the `LiveMap` class (same methods as `map.js`'s `MapView`). See [`docs/LIVEMAP.md`](docs/LIVEMAP.md).
+
+**No Mosquitto** (e.g. Windows): `tools/local_stack.py` runs a source, the real tracker, locate and geofence, and the dashboard in one process:
 ```
 .venv/bin/python tools/local_stack.py --config park.toml --speed 10            # fake pod
+.venv/bin/python tools/local_stack.py --config park.toml --feeds               # ... plus fake camera and heat pictures
 .venv/bin/python tools/local_stack.py --config park.toml --replay runs/1432.log --loop   # a recorded real run
-``` To record a run and play it back, the demo backup:
+```
+
+To record a run and play it back, the demo backup:
 ```
 mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log
 .venv/bin/python tools/replay.py runs/1432.log --loop
@@ -71,8 +79,8 @@ Every module takes `--config`, or set `AFTERGLOW_CONFIG=park.toml`. Both files m
 ```
 bash pi/setup_pi.sh                     # packages, config.txt, venv; then reboot
 cd code && .venv/bin/python tools/check_hw.py
-.venv/bin/python -m afterglow.bridge    # ESP32 lines → ag/obs/*
-.venv/bin/python -m afterglow.position  # GPS → ag/pose
+sudo systemctl enable --now afterglow@bridge afterglow@position   # one service per module, starts at boot
+systemctl status 'afterglow@*'                                    # what's running; journalctl -u afterglow@<name> -f for a log
 ```
 
 ## Still open

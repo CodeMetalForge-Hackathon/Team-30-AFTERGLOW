@@ -100,17 +100,6 @@ function distToCamp(meta, x, y) { // 0 inside a campground, Infinity if there ar
   }
   return best;
 }
-function nearestTrail(meta, x, y) {
-  let best = { name: null, d: Infinity };
-  for (const l of meta.map.lines) {
-    if (l.kind === 'road' || !l.name) continue;
-    for (let i = 0; i < l.pts.length - 1; i++) {
-      const d = segDist(x, y, l.pts[i], l.pts[i + 1]);
-      if (d < best.d) best = { name: l.name, d };
-    }
-  }
-  return best;
-}
 const heading = (dx, dy) => (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
 function routeBins(route) { // points every BIN_M metres along the route (evenly, across vertices)
   const out = [];
