@@ -171,7 +171,9 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
     - `--fake`: grass, a trail and a person in an orange jacket walking a loop, marked FAKE. **Dashboard teammate: build the camera panel against `python -m afterglow.camera --fake`** (it reloads `/live/camera.jpg`).
   - [x] **On the Pi:** `check_hw.py --only camera` passes (imx708_wide on CAM/DISP 0), `python -m afterglow.camera` writes a sharp `live/camera.jpg` with the time on it, and `afterglow@camera` is enabled. Done Sat 7 Nov ~20:58.
   - [ ] Set `[camera] rotate`/`flip` once the camera is mounted (it isn't yet).
-- [ ] **health (UT)**: `ag/sys` from `vcgencmd`, ports, disk, GPS fix and LoRa, plus `batt_pct: null`. Reuse the checks in `check_hw.py`.
+- [x] **health (UT)**: `ag/sys` from `vcgencmd`, ports, disk, GPS fix and LoRa, plus `batt_pct: null`. Done Sat 7 Nov ~21:20 (`afterglow/health.py`, PR #10): it never opens hardware; omni, wifi, thermal and camera count as working while their data is fresh.
+  - **All 9 pod modules start at boot** (`systemctl enable`: bridge, position, tracker, locate, geofence, lora_out, thermal, camera, health). `systemctl status 'afterglow@*'` lists them; `journalctl -u afterglow@<name> -f` shows a log.
+  - [ ] **Power:** `throttled` read `0x50000` (under-voltage and throttling since boot) on the power bank with the cameras running. Try a shorter, thicker USB-C cable or a stronger bank; after a reboot it must stay `0x0`.
 - [ ] Put ME 2's range numbers in by hour 7: the localized and pinned radii, the lane spacing and `fake_bus.py`'s RSSI model.
 - [ ] **(I6, hour 7, 17:00):** carried along the taped trail, a pin lands within 5 m and shows its off-trail distance. Save a screenshot and the measured error.
 - [ ] **(I7, hour 12, 22:00):** with the closed pod on the drone and props off, run two passes → pin → Investigate → thermal and camera panel → ATAK marker over LoRa. **Record the backup video.**
