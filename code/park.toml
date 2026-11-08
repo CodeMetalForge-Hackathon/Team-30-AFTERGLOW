@@ -40,6 +40,10 @@ hot_min_c = 30.0
 hot_max_c = 45.0
 hot_rise_c = 5.0
 hot_z = 6.0
+# HT-203U raw heat -> degrees C = raw / raw_per_c - raw_offset_c (two-point check Sat 7 Nov:
+# a wall read 5101, a palm 5303). The offset is set so the wall reads 22 C; redo it against a known temperature.
+raw_per_c = 16.0
+raw_offset_c = 296.8
 
 [camera]
 # Same as afterglow.toml (camera.py --fake works with either profile).
