@@ -126,7 +126,7 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
   - Start from `BNO08X_I2C(board.I2C(), address=0x4B, reset=DigitalInOut(board.D23))`.
   - If reads fail now and then, drop the bus to 100 kHz (`dtparam=i2c_arm_baudrate=100000`). The IMU is the only I²C part now that the thermal camera is USB, so nothing needs 400 kHz.
 - **Camera and Hailo from a venv:** both come from apt, so the venv must be created with `--system-site-packages`, or the imports fail.
-- **Hailo detection:**
+- **Hailo detection (stretch goal since Sat 7 Nov; `camera.py` is a plain live view):** the heat and power notes above about "the detector" apply only if it's built.
   - Start from a model that's already compiled. `rpicam-apps` ships Hailo post-processing stages (see `/usr/share/rpi-camera-assets/hailo_*.json`), and Hailo's `hailo-rpi5-examples` repository has Python detection pipelines.
   - Keep only the `person` class, and tile full frames into 640×640 pieces (build doc, "Person detection plan").
 - **Radar:**

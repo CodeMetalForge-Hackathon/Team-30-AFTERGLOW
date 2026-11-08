@@ -19,7 +19,7 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
   - [x] **`ag/target` gets `state` and `last_s`**, which geofence copies from the track. Only the ranger's Confirm sets `confirmed`.
   - [x] **SOS goes through geofence**, onto the investigating pin, or an SOS-only `T0` pin. **Battery** is `ag/sys` `batt_pct`, `null` for now, and goes out as 255.
   - [x] **New retained `ag/coverage` topic** from locate. Its settings are in the new `[locate]` config table.
-  - [x] **Images:** dashboard.py serves `live/` and `snaps/` on port 8080, and thermal.py and person.py just write files.
+  - [x] **Images:** dashboard.py serves `live/` and `snaps/` on port 8080, and thermal.py and camera.py just write files.
 - [x] Decide the dashboard stack. **Locked:**
   - **Server:** `dashboard.py` on Python's built-in `ThreadingHTTPServer`, port 8080. It subscribes to `ag/#`, keeps the latest message for each topic and each pin, and streams them to the browser with Server-Sent Events (`/api/events`). On every reconnect it resends the full state first. Buttons POST to `/api/ctrl` and `/api/mode`; the server stamps `t`, runs `validate()` and publishes. It also serves `live/`, `snaps/` and the map, converted to local metres once with `geo.py`.
   - **Front end:** `code/afterglow/web/` holds `index.html` and `app.js`. Panels use Preact + htm, and the map uses Leaflet in local metres (`CRS.Simple`). There is no build step and no CDN: the libraries are saved in `web/vendor/`.
@@ -123,14 +123,14 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - on the fake pod through the real tracker (20 seeds, 20 min indoors): patrol pins only the dead iPhone in 19 of 20, night ignores the campground tag in 20 of 20, search pins all three in 19 of 20. The misses are early tracker estimates: one about 9 m out while claiming ±3.6 m, and one team phone marked `with_drone` only after 46 s.
   - **Contract change, tell the team:** `day_offtrail` now skips campgrounds (otherwise the campground tag gets pinned in patrol and demo step 8 can't show night ignoring it). New `[rules]` keys `pin_hold_s`, `pins_file`, `pins_max_age_min` in both profiles. `fake_bus.py` now sends `off_trail_m` `null`, not 9999, when there's no trail.
   - Park sim only: the tracker's key-rotation splits give some phones 2–3 pins, and `airtag_pack` (39 m off trail) is estimated at 20–29 m, under the 30 m threshold, so patrol often misses it. Both are tracker limits (see above).
-  - Tier 2: set `flags.thermal`, `flags.camera` from `ag/thermal` and `ag/vision` (it carries `track`) on the investigating pin.
+  - Tier 2: set `flags.thermal` from `ag/thermal` on the investigating pin. (`flags.camera` from `ag/vision` waits for the stretch person detector.)
 - [ ] **`dashboard.py` (SW)**. Most of this landed with the Phase 1 skeleton:
   - [x] pins with Acknowledge, Investigate, Clear and Confirm buttons. Confirm needs two clicks and only works while the pin is being investigated. Each button shows "waiting for geofence" until the status changes, and warns if it never does;
   - [x] a mode switch for patrol, night, investigate and search;
   - [ ] Baseline and New search buttons. New search should also drop old tracks and pins from the dashboard's state (`dashboard.py` and `store.js`), since the tracker forgets them. Baseline tracks already show grey;
   - [x] waypoint taps for the indoor park, on the map and as a 0–7 strip in the Pod panel;
   - [x] the coverage and probability overlays, and pod health from `ag/sys`;
-  - [ ] the thermal and camera panel (it reloads the `live/` images about once a second);
+  - [ ] the thermal and camera panel (it reloads the `live/` images about once a second). **Scale each picture to fit** (`object-fit: contain`): a 90° `rotate` in config makes it portrait (CONTRACTS.md, "Images over HTTP");
   - [x] serves `live/` and `snaps/` on port 8080;
   - [x] takes a `--broker` flag (it overrides `[mqtt] host`), so it also runs on the laptop. Each instance has its own MQTT client id, so the Pi's and the laptop's can share a broker;
   - [ ] draw `ag/plan` legs, with Accept and Reject (`accept_leg`, `reject_leg`), once `planner.py` exists.
@@ -166,6 +166,10 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
     - Clean-up done: `[i2c] thermal_addr`, the 0x33 check, the MLX90640 driver and its config.txt comment are gone. `pi/setup_pi.sh` now installs `python3-opencv` and `v4l-utils`; **on the already-set-up Pi, run `sudo apt install -y python3-opencv v4l-utils` by hand.**
   - [ ] **After the Pi test:** write `camera_frames()` in `thermal.py` (OpenCV; it says "use --fake" until then), set `[thermal] device`, add a `/dev/thermal` rule to `pi/99-afterglow.rules` (never `/dev/videoN`: the Camera Module 3 makes `/dev/video*` nodes too) and `check_hw.py --only thermal` (open the device, grab one frame). Expect a frozen frame or two when the camera clicks its shutter. Then tune the thresholds and `rotate`/`flip` on real frames.
   - **ME:** it doesn't fit the 12 mm thermal hole, and its USB-C plug sticks out of its 46×70×14 mm body. It needs a new spot on the sensor face, pointing the same way as the camera.
+- [ ] **`camera.py` (SW)**: a live view from the Camera Module 3 for the dashboard's camera panel, so the ranger sees more than thermal. **Changed Sat 7 Nov:** person detection (Hailo YOLO, tiling, the colour check) is now a stretch goal, and the camera module is `camera.py`, not `person.py`.
+  - [x] Written and tested on the laptop (Sat 7 Nov): writes `live/camera.jpg` at `[camera] fps` (2), 1280×720 (temp file, then rename), the whole field of view (the 2304×1296 sensor mode, scaled), continuous autofocus. The time it was taken is drawn bottom left, so a frozen feed is obvious. No MQTT. New `[camera]` table in both profiles.
+    - `--fake`: grass, a trail and a person in an orange jacket walking a loop, marked FAKE. **Dashboard teammate: build the camera panel against `python -m afterglow.camera --fake`** (it reloads `/live/camera.jpg`).
+  - [ ] **On the Pi:** `check_hw.py --only camera` passes, then `python -m afterglow.camera` and look at `live/camera.jpg`; set `rotate`/`flip` so it's upright as mounted; then `sudo systemctl enable --now afterglow@camera`.
 - [ ] **health (UT)**: `ag/sys` from `vcgencmd`, ports, disk, GPS fix and LoRa, plus `batt_pct: null`. Reuse the checks in `check_hw.py`.
 - [ ] Put ME 2's range numbers in by hour 7: the localized and pinned radii, the lane spacing and `fake_bus.py`'s RSSI model.
 - [ ] **(I6, hour 7, 17:00):** carried along the taped trail, a pin lands within 5 m and shows its off-trail distance. Save a screenshot and the measured error.
@@ -179,13 +183,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - patrol routes along the trails;
   - acts on `accept_leg` and `reject_leg`.
   The dashboard draws each leg with the heading and distance the observer reads to the pilot.
-- [ ] **`person.py` (SW)** writes `ag/vision` with a snapshot (`snaps/<t>.jpg`) and sets the pin's `camera` flag:
-  - writes `live/camera.jpg` about once a second for the panel, because only one process can open the camera;
-  - uses a precompiled Hailo YOLO model and keeps only the person class;
-  - tiles each 4608×2592 frame into overlapping 640×640 pieces (about 28 tiles, about 1 fps) and merges the boxes;
-  - runs the CPU colour-anomaly check;
-  - is tuned for recall, and runs only during Investigate if heat or power fails.
-- [ ] **Dashboard live feeds (SW):** MJPEG streams of the camera and thermal views from `dashboard.py`, in place of the once-a-second image reload. `person.py` also writes a smaller preview more often, because it runs at only about 1 fps while it tiles frames.
+- [ ] **Dashboard live feeds (SW):** MJPEG streams of the camera and thermal views from `dashboard.py`, in place of the once-a-second image reload; then raise `[camera] fps`.
 - [ ] **`thermal.py` flag (UT):** flag hot spots only below `[thermal] max_alt_m`, using the pose's `z`. The old 8 m limit was for the MLX90640's 32×24 pixels; the HT-203U's 256×192 should allow much more, so measure it: the height at which a person still covers a few pixels. Then geofence sets `flags.thermal` on the investigating pin (Phase 2, geofence).
 - [ ] **`sim.py` (SW):**
   - a park-scale simulator over Acadia, using a trails GeoJSON (done: the `park.toml` profile and `data/park_*.geojson`);
@@ -222,7 +220,12 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 - [ ] **CalTopo export (tier 3, SW):** pins and coverage as GeoJSON, plus a live marker through CalTopo's position API.
 - [ ] **LoRa fallback view (tier 3, SW):** once the laptop loses Wi-Fi to the Pi, the dashboard on the laptop shows pins from `lora_rx.py`, without feeds.
 - [ ] **Live outdoor position test (tier 3, UT):** a GPS fix with the pod on the drone, logged against a phone's GPS.
-- [ ] **Fine-tuned person detector:**
+- [ ] **Person detection (stretch, SW; was tier 2 `person.py` until Sat 7 Nov):** added to `camera.py`, because only one process can open the camera. It writes `ag/vision` with a snapshot (`snaps/<t>.jpg`), and geofence sets the investigating pin's `camera` flag:
+  - a precompiled Hailo YOLO model on the AI HAT+, keeping only the person class;
+  - each 4608×2592 frame tiled into overlapping 640×640 pieces (about 28 tiles, about 1 fps), boxes merged;
+  - the CPU colour-anomaly check (no AI needed; could come first);
+  - tuned for recall; runs only during Investigate if heat or power fails. It only points: the ranger decides.
+- [ ] **Fine-tuned person detector** (after the one above):
   - train YOLO on HERIDAL on a GPU or Colab and export it to ONNX;
   - compile it with Hailo's Dataflow Compiler, using at least 1,024 calibration images.
   It took one developer a full weekend, so try it only with a GPU and spare time.

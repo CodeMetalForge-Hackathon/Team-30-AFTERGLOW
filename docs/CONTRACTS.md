@@ -40,7 +40,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 | `ag/track` (**changed**) | tracker.py | `{"t":…,"track":"T1","ids":["7f3a9c21","e9910b4c"],"cls":"findmy","x":18.5,"y":9.0,"r95":12.0,"state":"localized","passes":2,"last_s":4,"with_drone":false,"baseline":false,"c":0.62}` | Best estimate for one beacon, about once a second. `ids` lists the rotating keys followed through key changes (the last 4). `with_drone` marks beacons that move with the drone, such as our own phones. Optional `baseline` (**new**): heard during the baseline, so grey and never pinned. Optional `c` (**new**): confidence 0–1, which geofence copies onto the pin. See "Tracks" below |
 | `ag/target` (**changed**) | geofence.py | `{"t":…,"pin":"P3","track":"T1","x":18.5,"y":9.0,"lat":44.3387,"lon":-68.2731,"r95":12.0,"c":0.82,"prio":2,"cls":"findmy","state":"localized","last_s":4,"off_trail_m":46,"zone":"trail_corridor","rule":"day_offtrail","status":"new","flags":{"sos":false,"thermal":true,"radar":false,"camera":true},"br":null}` | **The one record** the dashboard, LoRa alerts and ATAK use. One per pin. `state` and `last_s` come from the track (see "How geofence fills a pin"). Optional `sos` (`{"hurt":true,"walk":false,"count":2}`) once an SOS answer is attached |
 | `ag/thermal` (**changed**) | thermal.py | `{"t":…,"max_c":33.8,"hot":true,"col":120,"row":80,"w":256,"h":192,"conf":0.8,"src":"ht203u"}` | The warm spot in the HT-203U's frame, about 4 times a second (see "Thermal spot"). Frames for the panel are image files over HTTP, not MQTT (see "Images over HTTP") |
-| `ag/vision` (**new**) | person.py | `{"t":…,"kind":"person","conf":0.82,"box":[1820,940,96,140],"snap":"snaps/1731000000123.jpg","track":"T1"}` | Camera check. `kind` is `person` or `colour` (the Monviso-style colour check). `snap` is also its URL path on port 8080 |
+| `ag/vision` (**new**, stretch) | camera.py (stretch: person detection) | `{"t":…,"kind":"person","conf":0.82,"box":[1820,940,96,140],"snap":"snaps/1731000000123.jpg","track":"T1"}` | Camera check. **Nothing publishes it yet:** person detection became a stretch goal on Sat 7 Nov, and camera.py only writes the live view. `kind` is `person` or `colour` (the Monviso-style colour check). `snap` is also its URL path on port 8080 |
 | `ag/radar` | radar.py | `{"t":…,"present":true,"range_m":1.1,"br":14,"hr":72}` | Breathing and heart rate, landed only (tier 3) |
 | `ag/plan` (**new**) | planner.py | `{"t":…,"id":"L7","kind":"homing","legs":[{"to_x":20,"to_y":5,"heading_deg":72,"dist_m":35,"alt_m":8}],"status":"proposed"}` | Legs for the pilot. `kind` is `patrol`, `grid` or `homing`. The ranger accepts on the dashboard; the observer reads heading and distance to the pilot |
 | `ag/mode` (**changed**) | dashboard.py | `{"t":…,"mode":"investigate"}` | `patrol`, `night`, `investigate` or `search` (the four modes in the build doc). **Retained**, so a restarted geofence or a second dashboard knows the mode at once. With no mode yet, geofence assumes `patrol` |
@@ -176,15 +176,16 @@ The config's `[rules]` `trails_geojson` and `zones_geojson` name them, relative 
 
 ## Images over HTTP
 
-dashboard.py serves everything on one port (`[http] port`, 8080), so there are no cross-origin problems. thermal.py and person.py only write files and need no web code.
+dashboard.py serves everything on one port (`[http] port`, 8080), so there are no cross-origin problems. thermal.py and camera.py only write files and need no web code.
 
 | URL on `http://<pi>:8080` | File | Written by |
 |---|---|---|
 | `/live/thermal.png` | `live/thermal.png` | thermal.py, about 4 times a second |
-| `/live/camera.jpg` | `live/camera.jpg` | person.py, about once a second. Only one process can open the camera, so person.py also feeds the panel |
-| `/snaps/<t>.jpg` | `snaps/<t>.jpg` (the path in `ag/vision` `snap`) | person.py, one per detection |
+| `/live/camera.jpg` | `live/camera.jpg` | camera.py, `[camera] fps` times a second (2), 1280×720 JPEG. The time it was taken is drawn bottom left (with FAKE from `--fake`), so the panel needs no MQTT message to show a frozen feed |
+| `/snaps/<t>.jpg` | `snaps/<t>.jpg` (the path in `ag/vision` `snap`) | stretch: camera.py's person detector, one per detection |
 
 - Write each live frame to a temporary file and rename it over the old one, so a reader never gets half a frame.
+- **Dashboard: scale each picture to fit its panel** (CSS `object-fit: contain`), never a fixed size. `[camera] rotate` or `[thermal] rotate` of 90 or 270 turns the picture on its side (the camera's becomes 720×1280).
 - The folders are `[http] live_dir` and `snaps_dir`, relative to `code/`. Neither is committed.
 - `python -m afterglow.dashboard` serves these URLs. Without it, `python -m http.server 8080` run from `code/` serves the same paths.
 

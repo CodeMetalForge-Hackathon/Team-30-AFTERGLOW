@@ -43,8 +43,8 @@ These are settled. Change one only as a team, and update this table when you do.
 | Position | **A GPS module on the pod's UART2** (u-blox M10 class, about 10 g), mounted on the drone's top plate. Indoors, use taped, numbered waypoints or a replayed GPS track | FPV flight controllers (Betaflight) don't hand their position to a companion computer, and many FPVs carry no GPS at all |
 | Radar | Stays where it is in the printed enclosure. Used only within about 1.5 m of a person, motors off. A pole mount is a later idea, not a priority | It reads breathing to about 1.5 m, and drone vibration swamps it in flight |
 | Magnetometer | Not used to find people | A heartbeat's magnetic field is about a million times weaker than Earth's; the IMU already has one anyway |
-| Camera | **Camera Module 3 + AI HAT+ back in.** Drill a 10 mm hole in the centre of the sensor face | Person check during Investigate |
-| Person detection | Ready-made detector compiled for the AI HAT+, plus tiling, plus a colour-anomaly check. Fine-tuning is a stretch goal | The chip runs models but can't train them, and compiling a custom model is slow |
+| Camera | **Camera Module 3 + AI HAT+ back in.** Drill a 10 mm hole in the centre of the sensor face. `camera.py` gives the ranger a live view next to thermal | So the ranger can see for themselves during Investigate |
+| Person detection | **Stretch goal (changed Sat 7 Nov).** If we're ahead: a ready-made detector compiled for the AI HAT+, plus tiling, plus a colour-anomaly check, added to `camera.py`. Fine-tuning comes after that | The live view already lets a human check; detection adds risk and time, and the chip can't train models |
 | Thermal | MLX90640 stays; use it from a low hover, under about 8 m | 32×24 pixels: at 30 m a person is smaller than one pixel |
 | Power | The FPV's flight battery through a 5 V, 5 A converter, into the printed PWR slot on a short USB-C pigtail. The USB-C power bank is for the bench and the pole | An FPV can't spare 200 g for a power bank, and its LiPo is already on board |
 | Mount | Two battery straps under the frame plus a cord tether; no print. A printed mount only if the straps don't hold, once the model is known | FPV frames vary too much to print blind; straps fit any of them |
@@ -207,7 +207,7 @@ Everything on the desk, with long wires, before anything goes into the box.
 - [ ] The LoRa board answers `meshtastic --info`, and a message crosses to board #2.
 - [ ] The radar reports breathing with a person 1 m away.
 - [ ] **GPS:** wire the module to pins 4, 7, 29 and 30 and set it by a window. NMEA lines show on `ttyAMA2`, and `position.py` gets a fix within a few minutes.
-- [ ] The ready-made person detector runs on the camera feed.
+- [ ] `camera.py` shows the live view on the dashboard. (Stretch: the ready-made person detector runs on the camera feed.)
 - [ ] **Power gate:** check the 5 V converter's output with a meter, then run the Pi from a charged flight LiPo through it. With everything running, including the detector, `vcgencmd get_throttled` reads `0x0`.
 
 **Done when:** every board works on the desk and the power gate passes.
@@ -288,7 +288,8 @@ Tier 1 is the core demo and must run end to end by hour 12. Tier 2 lands by the 
 | `lora_out.py`, `lora_rx.py`, `cot_out.py` | Pi, laptop | The 16-byte alert over Meshtastic, then a marker in ATAK | 1 | Utility, Software |
 | `thermal.py` | Pi | MLX90640 frames to the dashboard; flags the warmest spot from a low hover | 1 view, 2 flag | Utility |
 | `planner.py` | Pi | Patrol routes along trails, a search grid spaced by the measured range, and homing passes after a hit: one crossing pass, then a shrinking orbit. Shown on the dashboard for the ranger to accept, then flown by hand: the observer reads each leg's heading and distance to the pilot | 2 | Software |
-| `person.py` | Pi + AI HAT+ | Person detection on the camera (next section). Attaches "person likely, 0.82" and a snapshot to the pin | 2 | Software |
+| `camera.py` | Pi | A live view from the camera on the dashboard, next to thermal | 1 | Software |
+| Person detection (in `camera.py`) | Pi + AI HAT+ | Stretch goal: person detection on the camera (next section). Attaches "person likely, 0.82" and a snapshot to the pin | 3 | Software |
 | `sim.py` | Laptop | Park-scale simulator over a real park map (Acadia), with simulated phones using the measured range; runs day patrol, night sweep and active search | 2 | Software |
 | `sos_page` | WIFI board | The low-power "SOS-RESCUE" Wi-Fi page | 2 | Utility |
 | `radar.py` | Pi | Breathing reading, landed or on a pole | 3 | Utility |
@@ -296,6 +297,8 @@ Tier 1 is the core demo and must run end to end by hour 12. Tier 2 lands by the 
 | Live position test | Pi + FPV | A GPS fix outdoors with the pod on the drone, logged against a phone's GPS | 3 | Utility |
 
 ## Person detection plan
+
+**Stretch goal since Sat 7 Nov.** The tier 1 camera is a plain live view (`camera.py`); this plan applies only if we're ahead.
 
 Use a detector that already runs on the AI HAT+, and don't train anything during the build unless we're ahead. The chip runs models; it can't train them.
 
@@ -332,7 +335,7 @@ The core demo runs end to end by hour 12 (Saturday 22:00), the freeze is at hour
 | 0–3 (10–13) | Inserts, camera hole, lid-fix test | Tape the park: trail, numbered waypoints, campground zone; reference beacon | Dashboard map with trails and zones; `geofence.py`; simulator stub | Bench bring-up: config, AI HAT+, camera, serial ports, LoRa, GPS |
 | 3–7 (13–17) | 5 V converter and battery Y-lead; GPS mount; strap test | Range test at three heights; numbers to Software by hour 7 | `tracker.py`; `locate`; pins and buttons | Scanner on the bus; `position.py`; power gate |
 | 7–12 (17–22) | Assemble the pod, strap it on, weigh it, tether it; radio check | Accuracy passes; demo script draft | LoRa-to-ATAK path; thermal and camera panel | Harness; `lora_out.py`; `thermal.py`; lid-closed heat test |
-| 12–16 (22–02) | Cable strain relief, labels, rattle check | 10 blind passes; night-mode false alarms | `planner.py`: grid and homing passes; mission export | `person.py`: detector, tiling, colour check |
+| 12–16 (22–02) | Cable strain relief, labels, rattle check | 10 blind passes; night-mode false alarms | `planner.py`: grid and homing passes; mission export | Stretch, if ahead: person detector, tiling, colour check |
 | 16–19 (02–05) | Sleep | Evidence charts; rerun failed passes | Sleep | SOS page; fix what blocks the demo |
 | 19–22 (05–08) | Spare-parts kit; check every screw | Sleep | `sim.py` over Acadia; replay backup | Sleep |
 | 22–24 (08–10) | Freeze. Everyone: two full rehearsals, charge everything |  |  |  |

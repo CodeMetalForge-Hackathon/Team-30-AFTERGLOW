@@ -12,7 +12,7 @@ sudo apt update
 sudo apt full-upgrade -y
 sudo apt install -y mosquitto mosquitto-clients i2c-tools python3-venv python3-pip \
                     python3-picamera2 python3-lgpio hailo-all git \
-                    python3-opencv v4l-utils
+                    python3-opencv v4l-utils python3-pil fonts-dejavu-core
 
 echo "== config.txt"
 if ! grep -q "AFTERGLOW pod" "$CFG"; then

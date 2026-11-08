@@ -1,6 +1,6 @@
 # AFTERGLOW
 
-A search-assist sensing pod strapped under an FPV drone. It hears the Bluetooth beacons that lost, dead or switched-off phones and AirTags keep sending, and pins where they are on a park map. It then sends that pin to the ranger's laptop and ATAK phone over LoRa, with no Wi-Fi or cell needed. The camera (with person detection on the AI HAT+), thermal and radar help a human confirm. **The drone never decides: the planner proposes, and the ranger approves every pin and every leg.**
+A search-assist sensing pod strapped under an FPV drone. It hears the Bluetooth beacons that lost, dead or switched-off phones and AirTags keep sending, and pins where they are on a park map. It then sends that pin to the ranger's laptop and ATAK phone over LoRa, with no Wi-Fi or cell needed. A live camera view, thermal and radar help a human confirm. **The drone never decides: the planner proposes, and the ranger approves every pin and every leg.**
 
 Everything runs on the Raspberry Pi 5 in the pod. Programs talk over MQTT topics on the Pi. Only a 16-byte alert leaves the pod.
 

@@ -41,6 +41,16 @@ hot_max_c = 45.0
 hot_rise_c = 5.0
 hot_z = 6.0
 
+[camera]
+# Same as afterglow.toml (camera.py --fake works with either profile).
+fps = 2
+sensor_fps = 10
+width = 1280
+height = 720
+quality = 80
+rotate = 0
+flip = false
+
 [lora]
 # Same radio settings as afterglow.toml, so lora_rx.py works with either profile.
 freq_mhz = 915.0
