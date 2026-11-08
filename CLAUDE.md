@@ -34,7 +34,7 @@ code/
     config.py           loads afterglow.toml (env AFTERGLOW_CONFIG overrides the path); resolve() for paths in it
     parkmap.py          trails, roads and zones in metres: dist_to_trail, zone_at, bounds (geofence, dashboard, fake bus)
     bridge.py           ESP32 serial -> ag/obs/ble, ag/obs/wifi, ag/sos (hashes addresses)
-    position.py         GPS NMEA or taped waypoints -> ag/pose (no GPS receiver yet: waypoints only)
+    position.py         GPS NMEA or taped waypoints -> ag/pose (NEO-F10N on UART2 works; the indoor demo uses waypoints, gps = "")
     tracker.py          ag/obs/* + ag/pose -> ag/track (grid fit of the [track] RSSI model) and ag/pass
     locate.py           ag/pose + ag/track -> retained ag/coverage (coverage and probability grids over [locate] area_m)
     geofence.py         ag/track + map + ag/mode -> ag/target (rules, prio, the pin status guard, SOS); saves pins to runs/

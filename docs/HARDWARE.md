@@ -17,7 +17,7 @@ USB-C power bank 5 V 3 A ──USB-C──► Raspberry Pi 5 16 GB + Active Cool
    Camera Module 3       ── CSI ribbon
    AI HAT+               ── PCIe ribbon  /dev/hailo0
    Radar MR60BHA2 kit    ── USB  /dev/radar  (tier 3)
-   GPS   none yet: only a u-blox ANN-MB5 antenna. UART2 (/dev/ttyAMA2) is reserved for a receiver
+   GPS   SparkFun NEO-F10N + ANN-MB5 antenna ── UART2  /dev/ttyAMA2  38400 (off for the indoor demo: gps = "")
 ```
 
 We have three XIAO ESP32S3 boards: OMNI, WIFI and XIAO #3. There's only **one RFM95W** (the pod's), so the laptop receives LoRa with an **ADALM-PLUTO** SDR instead, and XIAO #3 is now the spare.
@@ -35,7 +35,7 @@ We have three XIAO ESP32S3 boards: OMNI, WIFI and XIAO #3. There's only **one RF
 | Camera Module 3 (imx708) | CSI ribbon, 22-to-15-pin | libcamera camera 0 | 4608×2592 full frame | picamera2 (apt) | `rpicam-hello --list-cameras` |
 | AI HAT+ 26 TOPS (Hailo-8) | PCIe ribbon + header | `/dev/hailo0` | PCIe Gen 3 | hailo-all (apt) | `hailortcli fw-control identify` |
 | Radar MR60BHA2 kit (tier 3) | USB-C to a USB 2 port | `/dev/ttyACM*` → `/dev/radar` | 115200 JSON lines, from our sketch | pyserial | `--only usb_serial` |
-| GPS (none yet) | Reserved: pins 4, 7, 29, 30 | `/dev/ttyAMA2` | the receiver's default, usually 38400 | pynmea2 | `--only gps` (SKIP while `gps = ""`) |
+| GPS: SparkFun NEO-F10N + ANN-MB5 antenna | Pins 29 (its TX), 7 (its RX), 30 GND; power per its labels (5 V pin 4, else 3V3) | `/dev/ttyAMA2` | 38400 | pynmea2 | `--only gps` (SKIP while `gps = ""`) |
 | Power | USB-C power bank, 5 V 3 A | — | no `PSU_MAX_CURRENT`, no `usb_max_current_enable` | — | `vcgencmd get_throttled` must be `0x0` |
 
 ## Pin map
@@ -45,9 +45,9 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
 | Pin | Signal | Goes to | | Pin | Signal | Goes to |
 |---|---|---|---|---|---|---|
 | 1 | 3.3 V | IMU 3V3 | | 2 | 5 V | OMNI + WIFI 5 V (Y-lead) |
-| 3 | GPIO2 SDA | IMU SDA | | 4 | 5 V | GPS VCC (reserved) |
+| 3 | GPIO2 SDA | IMU SDA | | 4 | 5 V | GPS VCC (if the breakout takes 5 V) |
 | 5 | GPIO3 SCL | IMU SCL | | 6 | GND | IMU GND |
-| 7 | GPIO4 UART2 TX | GPS RX (reserved) | | 8 | GPIO14 UART0 TX | OMNI D9 (RX) |
+| 7 | GPIO4 UART2 TX | GPS RX | | 8 | GPIO14 UART0 TX | OMNI D9 (RX) |
 | 9 | GND | OMNI GND | | 10 | GPIO15 UART0 RX | OMNI D10 (TX) |
 | | | | | 12 | GPIO18 SPI1 CE0 | LoRa CS (driven by code) |
 | | | | | 14 | GND | WIFI GND |
@@ -56,7 +56,7 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
 | 21 | GPIO9 UART3 RX | WIFI D10 (TX) | | 22 | GPIO25 | LoRa RST (active low) |
 | | | | | 24 | GPIO8 UART3 TX | WIFI D9 (RX) |
 | 27 | ID_SD | **AI HAT+ only, don't wire** | | 28 | ID_SC | **AI HAT+ only, don't wire** |
-| 29 | GPIO5 UART2 RX | GPS TX (reserved) | | 30 | GND | GPS GND (reserved) |
+| 29 | GPIO5 UART2 RX | GPS TX | | 30 | GND | GPS GND |
 | 35 | GPIO19 SPI1 MISO | LoRa MISO | | 36 | GPIO16 | **Leave free:** the kernel's SPI1 CS after `cs0_pin=16` |
 | | | | | 38 | GPIO20 SPI1 MOSI | LoRa MOSI |
 | 39 | GND | LoRa GND | | 40 | GPIO21 SPI1 SCLK | LoRa SCK |
@@ -88,7 +88,7 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
    - `pi/99-afterglow.rules` gives the radar a stable `/dev/radar`;
    - `pi/mosquitto-afterglow.conf` lets teammates watch the bus;
    - `pi/systemd/afterglow@.service` starts modules at boot.
-5. Run `cd code && .venv/bin/python tools/check_hw.py`. Bring-up is done when every connected part passes. GPS shows SKIP until we have a receiver.
+5. Run `cd code && .venv/bin/python tools/check_hw.py`. Bring-up is done when every connected part passes. GPS shows SKIP while `gps = ""`.
 
 ## Gotchas we already know about
 
@@ -128,9 +128,8 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
   - The kit ships with ESPHome. Reflash its XIAO ESP32C6 with an Arduino sketch (`Seeed_Arduino_mmWave`, class `SEEED_MR60BHA2`) that prints JSON lines at 115200. `radar.py` maps them onto `ag/radar`.
   - Updating the radar module's own firmware wipes the sketch, so reflash it afterwards.
 - **GPS:**
-  - We have no receiver, only an ANN-MB5 antenna, so `[serial] gps = ""` and position.py runs on the taped waypoints (`ag/ctrl` `waypoint`).
-  - If we find a u-blox receiver with a UART, wire it to the reserved pins and set `gps = "/dev/ttyAMA2"`. One with Qwiic could sit on I²C at `0x42` instead, but that needs new code.
-  - Indoors there's no fix anyway.
+  - A SparkFun NEO-F10N (L1/L5) with the ANN-MB5 antenna is wired to UART2. It sends NMEA at 38400 (checked Sat 7 Nov; indoors it sees 4 satellites but gets no fix).
+  - **Keep `[serial] gps = ""` for the indoor demo**, so position.py runs on the taped waypoints (`ag/ctrl` `waypoint`). A fix near a window would place the pod relative to the Acadia origin. Set `gps = "/dev/ttyAMA2"` only for an outdoor test or after moving the origin to the venue.
 - **Radio coexistence (on a larger drone):**
   - Our LoRa is 915 MHz, which shares a band with an ELRS 900 MHz control link.
   - The SOS page is 2.4 GHz Wi-Fi, which shares a band with ELRS 2.4 GHz.
