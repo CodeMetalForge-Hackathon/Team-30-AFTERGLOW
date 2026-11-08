@@ -130,8 +130,9 @@ the score yet.
 ## In the simulation
 
 While the mode is `search` and a case is open, `fake_bus.py` / `local_stack.py` fly the case's
-trail (to the nearest point, then back and forth along it) instead of the lanes. That's a
-stand-in for planner.py, which doesn't exist yet. The real pod flies what the pilot flies.
+trail (to the nearest point, then back and forth along it) instead of the lanes. `local_stack.py`
+also runs planner.py, so the leg card shows real proposals, but the fake pod doesn't fly accepted
+legs yet. The real pod flies what the pilot flies.
 
 ## The Live tab
 

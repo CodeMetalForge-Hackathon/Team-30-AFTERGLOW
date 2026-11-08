@@ -149,6 +149,17 @@ detect_m = 4.0             # indoor scale (park.toml: 40). A cell counts as cove
 area_m = []                # [x0, y0, x1, y1] the grids cover; empty = the map's "park" zone. Keep it under 20,000 cells, or the cells grow
 stale_s = 30               # a track not updated this long (the tracker dropped it) leaves the probability grid
 
+[plan]
+# planner.py -> ag/plan. It only proposes: the ranger accepts or rejects each plan, and the pilot flies
+# it by hand. Distances are placeholders until ME 2's range test.
+alt_m = 3.0                # patrol and grid legs fly this high (indoors: the carry height; park.toml: 40)
+homing_alt_m = 3.0         # homing legs, low for the thermal and camera check (park.toml: 25)
+cross_m = 3.0              # homing: the crossing pass runs this far past the pin; the first orbit is at most this wide (park.toml: 30)
+min_orbit_m = 1.0          # homing: no orbit tighter than this (park.toml: 20)
+lane_m = 3.0               # grid: lanes at most this far apart; under 2 x [locate] detect_m, so they overlap (park.toml: 60)
+patrol_m = 0.0             # patrol: fly this much of the trail, from where it passes nearest the pod; 0 = all of it (park.toml: 1200)
+arrive_m = 0.5             # a leg counts as flown with the pod this close to its end; keep it under min_orbit_m (park.toml: 10)
+
 [health]
 # health.py -> ag/sys for the dashboard's Pod panel. It never opens a radio, port or camera.
 period_s = 5               # publish this often

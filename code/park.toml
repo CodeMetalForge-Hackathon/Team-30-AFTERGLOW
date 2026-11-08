@@ -123,6 +123,16 @@ detect_m = 40.0
 area_m = [1000.0, 400.0, 1300.0, 860.0]
 stale_s = 30
 
+[plan]
+# planner.py -> ag/plan, at park scale. Placeholders until ME 2's range test.
+alt_m = 40.0               # patrol and grid legs (under the 120 m limit)
+homing_alt_m = 25.0        # homing legs, low for the thermal and camera check
+cross_m = 30.0             # homing: the crossing pass runs this far past the pin; the first orbit is at most this wide
+min_orbit_m = 20.0         # homing: no orbit tighter than this
+lane_m = 60.0              # grid: lanes at most this far apart; under 2 x [locate] detect_m, so they overlap
+patrol_m = 1200.0          # patrol: fly this much of the trail, from where it passes nearest the pod; 0 = all of it
+arrive_m = 10.0            # a leg counts as flown with the pod this close to its end; keep it under min_orbit_m
+
 [health]
 # health.py -> ag/sys for the dashboard's Pod panel. It never opens a radio, port or camera.
 period_s = 5               # publish this often

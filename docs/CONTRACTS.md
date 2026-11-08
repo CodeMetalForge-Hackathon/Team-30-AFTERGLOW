@@ -42,7 +42,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 | `ag/thermal` (**changed**) | thermal.py | `{"t":…,"max_c":33.8,"hot":true,"col":120,"row":80,"w":256,"h":192,"conf":0.8,"src":"ht203u"}` | The warm spot in the HT-203U's frame, about 4 times a second (see "Thermal spot"). Frames for the panel are image files over HTTP, not MQTT (see "Images over HTTP") |
 | `ag/vision` (**new**, stretch) | camera.py (stretch: person detection) | `{"t":…,"kind":"person","conf":0.82,"box":[1820,940,96,140],"snap":"snaps/1731000000123.jpg","track":"T1"}` | Camera check. **Nothing publishes it yet:** person detection became a stretch goal on Sat 7 Nov, and camera.py only writes the live view. `kind` is `person` or `colour` (the Monviso-style colour check). `snap` is also its URL path on port 8080 |
 | `ag/radar` | radar.py | `{"t":…,"present":true,"range_m":1.1,"br":14,"hr":72}` | Breathing and heart rate, landed only (tier 3) |
-| `ag/plan` (**new**) | planner.py | `{"t":…,"id":"L7","kind":"homing","legs":[{"to_x":20,"to_y":5,"heading_deg":72,"dist_m":35,"alt_m":8}],"status":"proposed"}` | Legs for the pilot. `kind` is `patrol`, `grid` or `homing`. The ranger accepts on the dashboard; the observer reads heading and distance to the pilot |
+| `ag/plan` (**new**) | planner.py | `{"t":…,"id":"L7","kind":"homing","legs":[{"to_x":20,"to_y":5,"heading_deg":72,"dist_m":35,"alt_m":8}],"status":"proposed","pin":"P3"}` | Legs for the pilot. `kind` is `patrol`, `grid` or `homing`; `status` is `proposed`, `accepted`, `rejected`, `done` or `dropped` (**changed**). Optional `pin` (homing) or `trail` (patrol). The ranger accepts on the dashboard; the observer reads heading and distance to the pilot. See "Plans" below |
 | `ag/mode` (**changed**) | dashboard.py | `{"t":…,"mode":"investigate"}` | `patrol`, `night`, `investigate` or `search` (the four modes in the build doc). **Retained**, so a restarted geofence or a second dashboard knows the mode at once. With no mode yet, geofence assumes `patrol` |
 | `ag/ctrl` | dashboard.py | `{"t":…,"cmd":"ack","pin":"P3"}` | Operator commands, listed below |
 | `ag/sys` (**new**) | health (Utility) | `{"t":…,"cpu_c":61.2,"throttled":"0x0","gps_fix":true,"lora":true,"disk_free_gb":41.0,"batt_pct":null}` | Pod health for the dashboard. Optional `batt_pct` (0–100, or `null`): `null` for now, because the pod runs on a USB power bank the Pi can't read. On a drone, a voltage divider from the LiPo into a XIAO analog pin would fill it (tier 3). `lora`: lora_out is running and not silenced (`false` after `lora_off`). Optional (**new**) `omni`, `wifi`, `thermal`, `camera`: that part's data arrived within `[health] stale_s` (`ag/obs/ble`, `ag/obs/wifi`, `ag/thermal`, `live/camera.jpg`). `gps_fix` is `null` while `[serial] gps = ""`. health.py never opens a radio, port or camera |
@@ -63,10 +63,10 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 
 | `cmd` | Extra fields | Who acts on it |
 |---|---|---|
-| `new_search` | none | bridge.py (new salt), tracker.py (clears every track; track numbers keep counting), locate.py (clears both grids) |
+| `new_search` | none | bridge.py (new salt), tracker.py (clears every track; track numbers keep counting), locate.py (clears both grids), planner.py (drops every open plan, then proposes again for the mode) |
 | `baseline_start`, `baseline_stop` | none | tracker.py: beacons heard between them get `baseline: true` on `ag/track` and show grey. Send `new_search` first: it changes every id |
-| `ack`, `investigate`, `clear`, `confirm` | `pin` | geofence.py updates the pin `status`, but only by the allowed changes under "Pin states and priority"; planner.py starts homing on `investigate` |
-| `accept_leg`, `reject_leg` | `id` | planner.py |
+| `ack`, `investigate`, `clear`, `confirm` | `pin` | geofence.py updates the pin `status`, but only by the allowed changes under "Pin states and priority"; planner.py proposes homing once the pin's `ag/target` status turns `investigating` (so an ignored click proposes nothing) |
+| `accept_leg`, `reject_leg` | `id` | planner.py: `accept_leg` on a proposed plan; `reject_leg` on a proposed or accepted one (the ranger stops it) |
 | `waypoint` | `n` (taped waypoint number) | position.py, indoors |
 | `lora_off`, `lora_on` | none | lora_out.py. Turn LoRa off if the pilot's control link drops |
 | `sos_on`, `sos_off` | none | bridge.py forwards to the WIFI board |
@@ -161,6 +161,22 @@ geofence.py listens to `ag/sos`, not lora_out.py, because priority 1 and `flags.
 - `conf` is 0–1: 0.5 right at the `hot` threshold, 1.0 at twice it.
 - `src` is `ht203u` (the camera) or `fake` (`thermal.py --fake`). The panel should mark fake heat.
 - Whether the HT-203U gives temperatures on Linux is still to check (TODO.md), so readers must handle both kinds. All the thresholds are placeholders in the `[thermal]` table.
+
+### Plans
+
+planner.py only proposes. Only the ranger's `accept_leg` makes a plan `accepted`, and nothing flies itself: the observer reads each leg to the pilot.
+
+- **Legs:** each has `to_x`, `to_y` (local metres), `heading_deg` (compass: 0 north, 90 east), `dist_m` and `alt_m`. Each leg is measured from the end of the one before; `legs[0]` from the pod's latest pose.
+- **What it proposes:**
+  - `homing`, when a pin's `ag/target` status turns `investigating`: a crossing pass from the pod straight over the pin to `cross_m` past it, then 6-leg orbits round the pin, first at its `r95` (kept between `min_orbit_m` and `cross_m`), then at half that. Carries `pin`.
+  - `grid`, when `ag/mode` turns `search`: east-west lanes at most `lane_m` apart over the grids' area (`[locate] area_m`, else the park zone), from the corner nearest the pod.
+  - `patrol`, when `ag/mode` turns `patrol` or `night`: the top-ranked trail from the pod (`trails.py`), `patrol_m` of it (0 = all), as legs within `arrive_m` of the trail. Carries `trail`.
+  - Nothing before the first `ag/mode` **and** the first `ag/pose`. A mode or pin that comes before the first pose (the retained `ag/mode` always does) is planned when the pose arrives, the newest one only.
+  - The same mode again proposes again only if it's a new click (a new `t`, not the retained copy after a reconnect) and no plan of its kind is open, for example after the ranger rejected it.
+- **Status:** `proposed` → `accepted` or `rejected` (clicks only); `accepted` → `rejected` (the ranger stops it) or `done` (the pod reached the last leg). A plan is `dropped` when a newer proposal replaces it (only one is `proposed` at a time), the ranger accepts another (only one is `accepted`), its pin stops being investigated (homing), or a `new_search` starts (which then proposes again for the current mode).
+- **Clock:** a plan's `t` is the pod's: planner.py follows the `t` of `ag/pose` only, because the dashboard stamps `ag/ctrl` and `ag/mode` with the laptop's clock, and the Pi's can be minutes off it.
+- **While open:** `legs[0]` is re-measured from each `ag/pose` and sent at most once a second. On an accepted plan, each leg the pod gets within `arrive_m` of is taken off the front. Open plans are sent again every 5 s, because `ag/plan` isn't retained.
+- `id` is `L1`, `L2`… and starts again at `L1` when planner.py restarts. The `[plan]` table holds `alt_m`, `homing_alt_m`, `cross_m`, `min_orbit_m`, `lane_m`, `patrol_m` and `arrive_m` (placeholders until ME 2's range test; keep `arrive_m` under `min_orbit_m`).
 
 ## Map files
 

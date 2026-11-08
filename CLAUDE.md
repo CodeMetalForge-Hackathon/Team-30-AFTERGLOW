@@ -38,6 +38,7 @@ code/
     tracker.py          ag/obs/* + ag/pose -> ag/track (grid fit of the [track] RSSI model) and ag/pass
     locate.py           ag/pose + ag/track -> retained ag/coverage (coverage and probability grids over [locate] area_m)
     geofence.py         ag/track + map + ag/mode -> ag/target (rules, prio, the pin status guard, SOS); saves pins to runs/
+    planner.py          ag/target + ag/pose + ag/mode -> ag/plan: homing, grid and patrol legs; proposes only, accept_leg/reject_leg decide
     thermal.py          HT-203U frames (or --fake) -> live/thermal.png + ag/thermal (warm spot, hot); camera reader not written yet
     camera.py           Camera Module 3 (or --fake) -> live/camera.jpg, a live view for the camera panel (no MQTT, no detection)
     radio.py            opens the pod's RFM95W on SPI1 from the config's [lora] table (lora_out, check_hw)
@@ -80,7 +81,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop.txt   # la
 .venv/bin/python tools/fake_bus.py --speed 5                             # fake data to local Mosquitto (demo profile)
 .venv/bin/python tools/fake_bus.py --config park.toml --speed 10         # park profile (realistic view)
 mosquitto_sub -v -t 'ag/#'                                               # watch the whole bus
-.venv/bin/python -m afterglow.tracker & .venv/bin/python -m afterglow.locate & .venv/bin/python -m afterglow.geofence [--fresh]   # real modules, with fake_bus --only pose,ble
+.venv/bin/python -m afterglow.tracker & .venv/bin/python -m afterglow.locate & .venv/bin/python -m afterglow.geofence [--fresh] & .venv/bin/python -m afterglow.planner   # real modules, with fake_bus --only pose,ble
 .venv/bin/python -m afterglow.thermal --fake [--dry-run --frames 8]      # fake thermal: live/thermal.png + ag/thermal
 .venv/bin/python -m afterglow.camera --fake [--frames 8]                 # fake camera: live/camera.jpg (on the Pi, no --fake)
 .venv/bin/python -m afterglow.dashboard [--config park.toml]             # dashboard on http://localhost:8080 (operator TV: /tv.html)
@@ -110,7 +111,7 @@ Anything past `--print` or `--dry-run` needs Mosquitto on the laptop (`brew inst
 - Modules are separate processes that talk only over MQTT: Mosquitto on the Pi at `localhost:1883`. Each message is one JSON object, and every topic starts with `ag/`. Only `ag/coverage` and `ag/mode` are retained (`contracts.RETAINED`). Only the 16-byte alert leaves the pod.
 - `t` is Unix time in milliseconds, stamped on the Pi by `contracts.now_ms()`. The ESP32s keep no clock.
 - Positions are in local metres: `x` is east and `y` is north of the mission origin set in `afterglow.toml`. Only `position.py` (inbound) and `cot_out.py` (outbound) convert lat/lon, both through `geo.py`.
-- Data flow: bridge → `ag/obs/*`; position → `ag/pose`; tracker → `ag/track`, `ag/pass`; locate → `ag/coverage`; geofence (also reads `ag/sos`) → `ag/target`; lora_out → pod RFM95W (SPI1) → 915 MHz → ADALM-PLUTO SDR → pluto_rx → lora_rx → `ag/alert` (laptop broker) → cot_out → ATAK. The dashboard writes `ag/ctrl` and `ag/mode`.
+- Data flow: bridge → `ag/obs/*`; position → `ag/pose`; tracker → `ag/track`, `ag/pass`; locate → `ag/coverage`; geofence (also reads `ag/sos`) → `ag/target`; planner (`ag/target`, `ag/pose`, `ag/mode`) → `ag/plan`, accepted only by the ranger; lora_out → pod RFM95W (SPI1) → 915 MHz → ADALM-PLUTO SDR → pluto_rx → lora_rx → `ag/alert` (laptop broker) → cot_out → ATAK. The dashboard writes `ag/ctrl` and `ag/mode`.
 - `ag/target` is the one record per pin that the dashboard, the LoRa alert and ATAK all consume. `geofence.py` owns it.
 
 ## Conventions

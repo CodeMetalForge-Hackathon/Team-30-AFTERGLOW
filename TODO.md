@@ -183,12 +183,15 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 
 ## Phase 3: Tier 2 (hours 12–22, until the 08:00 freeze, checkpoint I8 at 02:00)
 
-- [ ] **`planner.py` (SW)** writes `ag/plan`:
+- [x] **`planner.py` (SW, Sat 7 Nov)** writes `ag/plan` (CONTRACTS.md, "Plans"; tests in `test_planner.py`; runs in `local_stack.py`):
   - on `investigate`, homing legs: one crossing pass, then a shrinking orbit;
-  - a search grid spaced by the measured range;
+  - a search grid spaced by the measured range ([plan] `lane_m`, a placeholder);
   - patrol routes along the trails;
   - acts on `accept_leg` and `reject_leg`.
-  The dashboard draws each leg with the heading and distance the observer reads to the pilot.
+  The TV's leg card and Read to pilot card already show each leg's heading and distance.
+  - [ ] **On the Pi:** `sudo systemctl enable --now afterglow@planner`.
+  - [ ] Put ME 2's range numbers into the `[plan]` table (`lane_m`, `cross_m`, orbit sizes) with the others.
+  - [ ] Next: the fake pod flies accepted legs; the main dashboard (`app.js`) draws legs; the live map draws accepted legs too (only proposed now).
 - [ ] **Dashboard live feeds (SW):** MJPEG streams of the camera and thermal views from `dashboard.py`, in place of the once-a-second image reload; then raise `[camera] fps`.
 - [x] **`thermal.py` flag (SW, Sat 7 Nov ~22:20):** `hot` is never true above `[thermal] max_alt_m` (the latest `ag/pose` `z`; any height before the first pose). geofence sets `flags.thermal` once on the pin under investigation when `ag/thermal` is hot with the pod within `[rules] thermal_near_m` of the pin's 95% circle, and the flag stays set. New keys in both profiles; tests in `test_thermal.py` and `test_geofence.py`.
   - [ ] **UT: measure `max_alt_m`** (30 m now, a placeholder): the height at which a person still covers about 3×3 pixels, since the spot is a 3×3 mean. The old 8 m limit was for the MLX90640's 32×24 pixels. Also set `thermal_near_m` (2 m indoors, 10 m park) to about the thermal view's reach at hover height.

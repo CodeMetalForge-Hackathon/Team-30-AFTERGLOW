@@ -45,6 +45,7 @@ from afterglow.locate import MIN_WALL_S as LOCATE_MIN_WALL_S  # noqa: E402
 from afterglow.locate import Locate  # noqa: E402
 from afterglow.locate import guarded as locate_guarded  # noqa: E402
 from afterglow.parkmap import ParkMap  # noqa: E402
+from afterglow.planner import Planner  # noqa: E402
 from afterglow.tracker import Tracker, guarded  # noqa: E402
 
 log = logging.getLogger("local_stack")
@@ -91,7 +92,7 @@ def build(cfg, bus):
 
 
 def wire(cfg, bus, state, pm):
-    """A fresh tracker, geofence and locate on the bus, feeding the dashboard state."""
+    """A fresh tracker, geofence, locate and planner on the bus, feeding the dashboard state."""
     state.broker = True  # there's no broker to lose: the in-process bus is always there
     bus.subscribe(ALL, state.on_msg)
     tr = Tracker(cfg, bus)
@@ -110,6 +111,9 @@ def wire(cfg, bus, state, pm):
                 last[0] = time.monotonic()
     for topic in (POSE, TRACK, CTRL):
         bus.subscribe(topic, to_locate)
+    pl = Planner(cfg, bus, pm=pm)  # proposes legs only; the fake pod doesn't fly them (yet)
+    for topic in (TARGET, POSE, MODE, CTRL):
+        bus.subscribe(topic, pl.feed)
     return tr, g
 
 
