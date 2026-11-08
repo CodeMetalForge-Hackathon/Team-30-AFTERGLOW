@@ -32,7 +32,7 @@ cd code
 .venv/bin/python -m afterglow.dashboard --config park.toml            # or with Mosquitto + fake_bus.py
 ```
 
-Open `http://localhost:8081/tv.html` for Acadia (`park.toml`'s port) or `:8080` for 60 State St
+This is the one dashboard: `/` opens it (`/tv.html` works too). Open `http://localhost:8081` for Acadia (`park.toml`'s port) or `:8080` for 60 State St
 (`afterglow.toml`). Click once anywhere so the browser allows the ping chime. `?force=lora` shows
 the LoRa-only banner for the demo.
 
@@ -67,7 +67,7 @@ no case, day sweep, and every open TV reloads.
 Indoors, so no map: the stage is the pod's **camera and heat pictures**, big, with **nearby
 alerts** beside them (`nearby.html?compact=1`: the alert beacons around the pod (Find My, Find Hub,
 Samsung lost mode, ref; no live phones or Wi-Fi), north up; a ring is
-heard, distance only, a dot is located by tracker.py; "Full view" opens the whole page), then the **hall
+heard, distance only, a dot is located by tracker.py), then the **hall
 walk**, a strip with one straight walk line (`[imu] line_from` to `line_to`, a mark every metre,
 Base at the left, pings beside the line), then the live readings (warmest spot, Bluetooth scans,
 lost devices heard, strongest, last LoRa alert). Carry the pod forward along the line;
@@ -177,7 +177,7 @@ loading, so it never flickers. Pictures are scaled to fit, so a 90° `rotate` in
 (`sudo systemctl enable --now afterglow@dashboard`), then on the laptop
 `python -m afterglow.dashboard --broker <pi-ip>`: it fetches the pictures from the Pi's dashboard
 (`--pod` to name another host, `--pod off` to use the laptop's own `live/`). Opening
-`http://<pi-ip>:8080/tv.html` straight from the Pi works too.
+`http://<pi-ip>:8080` straight from the Pi works too.
 
 With no pod, `tools/local_stack.py --feeds` writes `camera.py --fake` and `thermal.py --fake`
 pictures. They aren't tied to the simulation: the heat picture's blob comes and goes on its own

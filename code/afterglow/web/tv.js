@@ -1273,7 +1273,7 @@ function IndoorStage({ meta, s, st, m, bt, pose, podStale, podSite, sel, setSel 
         </${LiveFeed}>
       </section>
       <section class="pane">
-        <div class="sh"><h2 class="h">Nearby alerts</h2><a class="aux" href="nearby.html" target="_blank" rel="noopener">Full view ↗</a></div>
+        <div class="sh"><h2 class="h">Nearby alerts</h2></div>
         <iframe class="nearby" src="nearby.html?compact=1" title="Alert beacons around the pod: rings heard, dots located"></iframe>
       </section>
     </div>

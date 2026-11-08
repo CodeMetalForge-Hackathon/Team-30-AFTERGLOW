@@ -3,7 +3,7 @@
 locate -> dashboard, no broker), plus tak_link.py both ways, the TV with the field teams, and a start at
 time zero. local_stack.py and the dashboard are unchanged: this file builds on them. See tak/README.md.
 
-    python tak/tak_stack.py --config code/park.toml                   # TV: http://localhost:8080/tv.html
+    python tak/tak_stack.py --config code/park.toml                   # TV: http://localhost:8080
     python tak/tak_stack.py --config code/park.toml --port 8090 --start-paused
     python tak/tak_stack.py --config code/park.toml --no-tak          # the TV with the TAK panels, no phones
 
@@ -195,7 +195,7 @@ def main():
     port = server.server_address[1]
     log.info("%s: %s -> tracker, geofence, locate -> dashboard + TAK, no broker", meta["name"],
              f"replay {a.replay}" if a.replay else "fake pod" + (", waiting for Start" if a.start_paused else ""))
-    log.info("operator TV: http://localhost:%d/tv.html", port)
+    log.info("dashboard: open http://localhost:%d", port)
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:

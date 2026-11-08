@@ -47,14 +47,14 @@ cd code && python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop
 .venv/bin/python -m pytest -q
 .venv/bin/python tools/fake_bus.py --speed 5     # fake pod + hidden phones, indoor; or --print without a broker
 .venv/bin/python tools/fake_bus.py --config park.toml --speed 10   # the same at park scale
-.venv/bin/python -m afterglow.dashboard          # then open http://localhost:8080 (add --config park.toml for the park)
-                                                 # the operator TV is http://localhost:8080/tv.html (docs/TV.md)
+.venv/bin/python -m afterglow.dashboard          # then open http://localhost:8080, the one dashboard (docs/TV.md)
+                                                 # add --config park.toml for the park (http://localhost:8081)
 mosquitto_sub -v -t 'ag/#'                       # watch the bus
 ```
 
 Run the dashboard and the fake bus with the same profile.
 
-**Live map feed.** `web/livemap.js` draws the live bus on a 3D terrain map with labels and a key (pod at height, its hearing radius, where beacons were heard, tracks, pins, coverage). It only draws; the dashboard keeps the buttons. Open `http://localhost:8080/livemap.html`, embed that page, or use the `LiveMap` class (same methods as `map.js`'s `MapView`). See [`docs/LIVEMAP.md`](docs/LIVEMAP.md).
+**Live map feed.** `web/livemap.js` draws the live bus on a 3D terrain map with labels and a key (pod at height, its hearing radius, where beacons were heard, tracks, pins, coverage). It's the map inside the dashboard. It only draws; the dashboard keeps the buttons. See [`docs/LIVEMAP.md`](docs/LIVEMAP.md).
 
 **No Mosquitto** (e.g. Windows): `tools/local_stack.py` runs a source, the real tracker, locate and geofence, and the dashboard in one process:
 ```

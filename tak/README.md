@@ -27,11 +27,11 @@ pip install -r code/requirements-laptop.txt -r tak/requirements.txt
 python tak/tak_stack.py --config code/park.toml --port 8090 --start-paused
 ```
 
-Open **http://localhost:8090/tv.html**. The drone waits on the pad: the TV shows *Ready to launch* and no
+Open **http://localhost:8090**. The drone waits on the pad: the TV shows *Ready to launch* and no
 pings. Connect the phones (below), then press **▶ Start the search**. **Reset** on the TV takes the pins and
 routes off the phones too, and waits for Start again.
 
-To show the TV on another screen on the same network, add `--host 0.0.0.0` (then `http://<laptop-ip>:8090/tv.html`).
+To show the TV on another screen on the same network, add `--host 0.0.0.0` (then `http://<laptop-ip>:8090`).
 
 ## Connect the phones
 

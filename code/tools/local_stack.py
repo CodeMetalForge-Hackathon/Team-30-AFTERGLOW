@@ -8,8 +8,7 @@ and locate -> the dashboard. For laptops without Mosquitto (Windows), and as a d
 
 The fake pod waits at [sim] base_xy (on the ground, scanners off) until "Send out" on the TV, then
 flies its lanes; "Return to base" brings it back. Both are POST /api/sim {"flight": "out" | "home"}.
-    then open http://localhost:<[http] port>/tv.html (operator TV; park.toml 8081, afterglow.toml 8080),
-    /livemap.html (live map feed) or / (dashboard)
+    then open http://localhost:<[http] port> (the operator TV; park.toml 8081, afterglow.toml 8080)
 
 Sources:
     fake (default)  tools/fake_bus.py's FakePod, publishing pose, ble and its stand-in thermal and camera. Its cheating
@@ -343,7 +342,7 @@ def main():
     port = server.server_address[1]
     log.info("%s: %s -> tracker, geofence, locate -> dashboard, no broker", meta["name"],
              f"replay {a.replay}" if a.replay else "fake pod")
-    log.info("operator TV: http://localhost:%d/tv.html   live map: /livemap.html   dashboard: /", port)
+    log.info("dashboard: open http://localhost:%d", port)
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:

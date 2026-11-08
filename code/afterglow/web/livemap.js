@@ -1,16 +1,15 @@
 // AFTERGLOW live map feed: the bus drawn over 3D terrain, with labels on the map and a built-in key.
-// A drop-in for map.js's MapView (same constructor and methods), so a dashboard can use either:
+// The operator TV's map (tv.js):
 //
 //   import { LiveMap } from './livemap.js';
 //   const m = new LiveMap(el, meta, { onPick: (pin) => select(pin) });   // meta = GET /api/map
 //   m.update(store.state, { sel, layers, follow });                       // on every store change
 //
-// Or the whole feed on its own page: /livemap.html (embed it with an <iframe>). docs/LIVEMAP.md
-// explains every symbol. It only draws: no buttons, no commands. The ranger acts on the dashboard.
+// docs/LIVEMAP.md explains every symbol. It only draws: no buttons, no commands. The ranger acts on the TV.
 // Needs window.maplibregl (vendor/maplibre-gl-4.7.1). Terrain and basemaps load from the internet;
 // offline it still draws the trails, pod, tracks and pins on a plain background.
 
-export const PRIO_COLOR = { 1: '#e5484d', 2: '#f76b15', 3: '#f5c13d', 4: '#8b95a3' }; // same as map.js
+export const PRIO_COLOR = { 1: '#e5484d', 2: '#f76b15', 3: '#f5c13d', 4: '#8b95a3' }; // red, orange, yellow, grey
 const STATE_COLOR = { heard: '#8b95a3', localized: '#f5c13d', pinned: '#f76b15', confirmed: '#e5484d' };
 const CLS = { findmy: 'Find My', findhub: 'Find Hub', samsung_off: 'Samsung offline', ref: 'Ref tag', wifi: 'Wi-Fi SOS', apple_other: 'Apple (live)', other: 'Other' };
 const POD = '#3db9ff';
@@ -141,7 +140,7 @@ export class LiveMap {
     this.makeOverlays();
   }
 
-  // ---------- public API (same as map.js MapView) ----------
+  // ---------- public API (what tv.js calls) ----------
   destroy() { this.ro?.disconnect(); this.map.remove(); this.el.innerHTML = ''; }
   fit() { this.map.fitBounds([this.sw, this.ne], { padding: 30 }); }
   flyTo(x, y) { this.map.easeTo({ center: this.toLL(x, y), zoom: Math.max(this.map.getZoom(), this.big ? 16 : 20), duration: 900 }); }
