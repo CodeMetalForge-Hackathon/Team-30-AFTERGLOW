@@ -22,8 +22,8 @@ Hour 0 is Saturday 10:00. Hard cutoff is Sunday 12:00.
 | `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl`, `ag/sos`, `ag/pose` | `ag/target` | 1 | Software | ✅ done; see CONTRACTS.md, "How geofence fills a pin" |
 | `dashboard.py` | Pi, viewed on the laptop | everything; serves the images on port 8080 | `ag/ctrl`, `ag/mode` (retained) | 1 | Software | ✅ skeleton (I3); see TODO for what's left |
 | `lora_out.py` | Pi | `ag/target`, `ag/pose`, `ag/sys`, `ag/ctrl` | 16-byte alerts on the RFM95W (SPI1) | 1 | Utility | ✅ written by Software, tested without a radio; Utility tests it on the radios (I4, I7) |
-| pluto_rx (`tools/pluto_rx.py`) | Laptop, ADALM-PLUTO on USB | LoRa (gr-lora_sdr) | `rx` lines on stdout | 1 | Software | ⏳ to write (replaces XIAO #3 + `firmware/lora_rx/`: only one RFM95W) |
-| `lora_rx.py` | Laptop | `rx` lines (pluto_rx; needs a stdin mode) | `ag/alert` (laptop broker) | 1 | Software | ✅ done; stdin mode to add |
+| pluto_rx (`tools/pluto_rx.py`) | Laptop, ADALM-PLUTO on USB | LoRa (gr-lora_sdr) | `rx` lines on stdout | 1 | Software | ✅ done; `--selftest` passes and the pod's heartbeat and pins reached `ag/alert` (I4, Sat 7 Nov 19:23) (replaces XIAO #3 + `firmware/lora_rx/`: only one RFM95W) |
+| `lora_rx.py` | Laptop | `rx` lines (`pluto_rx.py` piped to `--stdin`) | `ag/alert` (laptop broker) | 1 | Software | ✅ done |
 | `cot_out.py` | Laptop | `ag/alert` (fallback: `ag/target` over Wi-Fi) | CoT to ATAK | 1 | Software | ✅ done; check on a real ATAK phone |
 | `thermal.py` | Pi | HTI HT-203U (USB video) | `ag/thermal` + `live/thermal.png` | 1 view, 2 flag | Utility | replaced the MLX90640; see TODO for the first test |
 | health | Pi | vcgencmd, ports | `ag/sys` | 1 | Utility | `tools/check_hw.py` has the checks |
@@ -45,8 +45,8 @@ Each checkpoint is a moment two people's work has to meet. Test it together; don
 | I1 | Hour 2 | Pi imaged, `setup_pi.sh` run, `check_hw.py` passes for every connected part | Screenshot of the check output |
 | I2 | Hour 3, first light | A real `findmy` beacon reaches the bus | `mosquitto_sub -v -t 'ag/obs/ble'` shows it |
 | I3 | Hour 3 | The dashboard runs on the fake bus or simulator | Pins and the coverage overlay move |
-| I4 | Hour 3 | A packet from the pod radio reaches the laptop | `check_hw.py --only lora` on the Pi; `python -m afterglow.lora_rx --print` on the laptop shows the heartbeat |
-| I5 | Hour 3 | ~~NMEA from the GPS~~ **Blocked: no GPS receiver.** Waypoint taps move the pod instead | `mosquitto_pub -t ag/ctrl -m '{"cmd":"waypoint","n":3}'` moves `ag/pose` |
+| I4 | Hour 3 | A packet from the pod radio reaches the laptop | `check_hw.py --only lora` on the Pi; `python tools/pluto_rx.py | python -m afterglow.lora_rx --stdin --print` on the laptop shows the heartbeat |
+| I5 | Hour 3 | NMEA from the GPS. ✅ Done: the NEO-F10N sends NMEA at 38400 (no fix indoors). The indoor demo keeps `gps = ""`, so waypoint taps move the pod | `mosquitto_pub -t ag/ctrl -m '{"cmd":"waypoint","n":3}'` moves `ag/pose` |
 | I6 | Hour 7, first pass | Carried along the taped trail, a pin lands within 5 m and shows its off-trail distance | Dashboard screenshot plus the measured error |
 | I7 | Hour 12, core demo | Closed pod on the drone, props off: two passes → pin → Investigate → thermal and camera panel → ATAK marker over LoRa | Backup video recorded |
 | I8 | Hour 16, evidence | Range numbers, 10 blind passes, night-mode false-alarm count, planner homing legs | Evidence slide |

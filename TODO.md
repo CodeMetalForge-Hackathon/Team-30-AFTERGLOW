@@ -49,18 +49,18 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
   - [x] Compiled and flashed both in the Arduino IDE (Sat 7 Nov). Bench check over USB: both counts rise as expected. Both wired to the Pi (~18:05): `check_hw.py --only omni wifi` passes, and `ag/obs/ble` and `ag/obs/wifi` reach the Mac with hashed ids on channels 1, 6 and 11.
   - [x] **SW:** `apple_other` is now in `contracts.CLS_CODES` (alert class code 6), so the bridge keeps those lines with `REPORT_ALL` on instead of dropping them. **Contract change, tell the team.**
 - [x] OMNI streams `ble` lines, and a real `findmy` beacon reaches `ag/obs/ble` through `bridge.py`. **(I2)** Done Sat 7 Nov ~18:15: OMNI on UART0, strangers' `findmy` tags reach `ag/obs/ble` (hashed ids, about one line per tag every 2 s), watched from the Mac via the Pi's broker. Bench counts in a crowded building: `findmy` about 1.5/s vs `apple_other` about 240/s, so the split looks right.
-  - [ ] Still to check before I6: a powered-off iPhone (and our AirTag, if we get one) shows up as `findmy`. Demo step 1 depends on it.
+  - [x] ~~Still to check before I6: a powered-off iPhone shows up as `findmy`.~~ **Dropped Sat 7 Nov:** the team decided not to test it; the crowded-room counts are the evidence for the split.
   - Mac setup note: the venv needs Homebrew's Python 3.12 (macOS's own `python3` is 3.9 and lacks `tomllib`); brew's Mosquitto needed a `mosquitto.conf` created. `check_hw.py` now masks addresses in its sample line (it used to print them raw).
 - [ ] Put the radar's serial number in `pi/99-afterglow.rules` so `/dev/radar` exists.
-- [ ] **LoRa link (I4):**
+- [x] **LoRa link (I4):** done Sat 7 Nov 19:23, pod RFM95W → Pluto → `ag/alert` on the Mac.
   - **Changed Sat 7 Nov:** we have only **one RFM95W**. The laptop receives with an **ADALM-PLUTO SDR** (USB to the Mac, antenna on RX) and gr-lora_sdr; XIAO #3 is now the spare. Docs updated (HARDWARE, CONTRACTS, MODULES, firmware/README). The `rx` line format is unchanged.
   - [x] Wire the pod RFM95W to SPI1 with its spring antenna.
-  - [ ] Pi: `check_hw.py --only lora` passes ("sent a heartbeat"): proves the pod radio without any receiver.
-  - [ ] Mac: install GNU Radio + gr-lora_sdr (`conda install -c tapparelj -c conda-forge gnuradio-lora_sdr gnuradio-iio`); `iio_info -s` lists the Pluto.
-  - [ ] **SW:** write `tools/pluto_rx.py` (Pluto → gr-lora_sdr → `rx` lines on stdout, settings from `[lora]`) and a stdin mode for `lora_rx.py`, so `pluto_rx.py | lora_rx --stdin` publishes `ag/alert`.
-  - [ ] The pod's heartbeat (`"kind":4`) shows up in `ag/alert` on the Mac.
+  - [x] Pi: `check_hw.py --only lora` passes ("sent a heartbeat"): proves the pod radio without any receiver. Done Sat 7 Nov (Blinka's first run installs its Pi 5 deps and fails once; now in `requirements-pi.txt`).
+  - [x] Mac: GNU Radio + gr-lora_sdr in conda env `sdr` (`brew install miniforge`, then `conda create -n sdr -c tapparelj -c conda-forge gnuradio-lora_sdr gnuradio-iio libiio`); `iio_info -s` lists the Pluto at `usb:0.1.5`.
+  - [x] **SW:** `tools/pluto_rx.py` (Pluto → gr-lora_sdr → `rx` lines, settings from `[lora]`) and `lora_rx --stdin`. `pluto_rx.py --selftest` (fake heartbeat, noise, 10 kHz offset, no Pluto) decodes into a valid `ag/alert`.
+  - [x] The pod's heartbeat (`"kind":4`) shows up in `ag/alert` on the Mac. Done Sat 7 Nov 19:19: `check_hw --only lora` on the Pi → Pluto (AGC, about 1 m) → `pluto_rx | lora_rx --stdin`. 6 other teams' packets heard and dropped as `not_ours`.
   - Fallback if the SDR decode isn't working by I7: `cot_out --wifi <pi-ip>` gets the pins to ATAK over the hotspot; show the LoRa bursts on a Pluto waterfall.
-- [ ] ~~GPS NMEA by a window (I5).~~ **Blocked:** we have only the ANN-MB5 antenna, no receiver. Ask the hardware desk for any u-blox board with a UART; if one turns up, wire it to the reserved pins, set `gps = "/dev/ttyAMA2"` and run `check_hw.py --only gps`. Until then, position comes from waypoint taps.
+- [x] **GPS NMEA by a window (I5).** Done Sat 7 Nov ~19:40: NEO-F10N on UART2 sends NMEA at 38400 (the config's `gps_baud`); indoors it sees 4 GPS satellites at 6–21 dB-Hz, no fix yet. Still to do: a fix at a window or outside. **Unblocked Sat 7 Nov:** we have a SparkFun NEO-F10N (L1/L5) breakout for the ANN-MB5 antenna. Wire its TX → Pi pin 29, RX → pin 7, GND → pin 30, power per its labels (5V/VIN → pin 4, else 3V3 shared from pin 1 or 17). Test NMEA on `/dev/ttyAMA2` (38400, else 9600). **Keep `gps = ""` for the indoor demo:** a fix near a window would place the pod relative to the Acadia origin. Set it only for an outdoor test or after moving the origin to the venue.
 - [x] (Not needed: the user is `pi` and the clone is at `/home/pi/afterglow`.) If the Pi user isn't `pi` or the clone isn't at `/home/pi/afterglow`, fix `User=` and the paths in `pi/systemd/afterglow@.service`.
 
 **Software (SW), on the fake bus: done** (reviewed and pushed Sat 7 Nov)
@@ -143,7 +143,8 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - sends one packet per loop, so a `lora_off` gets in between even at SF10; a missing radio is retried every 10 s, and each open first frees the SPI1 bus and pins the last one claimed;
   - tested with a stub radio, and the whole path with no hardware: `fake_bus --print | lora_out --dry-run | lora_rx --dry-run | cot_out --dry-run` (120 s: 104 packets, all decoded, 3 pins and the pod on ATAK).
   - **Contract change, tell the team (Utility):** new `[lora]` keys `repeat_s`, `alert_version` (1 indoors, 2 in `park.toml`) and `off_file`. lora_out owns the radio while it runs: stop it before `check_hw.py --only lora`, and health must not open the radio for `ag/sys` `lora`.
-  - [ ] **UT, on the Pi:** `python -m afterglow.lora_out` with the Pluto receiver on the laptop: pins and the heartbeat reach `ag/alert`; `lora_off` silences it; then `sudo systemctl enable --now afterglow@lora_out`.
+  - [x] **UT, on the Pi:** `python -m afterglow.lora_out` with the Pluto receiver on the laptop: pins and the heartbeat reach `ag/alert`; `lora_off` silences it. Done 19:23 with `fake_bus --speed 5`: heartbeat every 5 s with the pod moving, P1–P3 heard → localized → pinned, `lora_on` resends every pin at once. No drops seen at about 1 m.
+  - [x] `sudo systemctl enable --now afterglow@lora_out` (stop it before `check_hw.py --only lora`). Done 19:25; the unit file had to be copied to `/etc/systemd/system/` first (`setup_pi.sh` now does that).
 - [x] **`lora_rx.py` (SW, laptop):** receiver lines (was XIAO #3, now the Pluto via `pluto_rx.py`) → `ag/alert` on the laptop's broker. It drops other teams' packets and checks the radio settings at start-up. Tested on fake lines; I4 proves it on the radios.
 - [x] **`cot_out.py` (SW, laptop)** reads `ag/alert` and sends CoT XML over UDP to `[atak] send_to` (default `239.2.3.1:6969`). It needs no pytak, which is now dropped from `requirements-laptop.txt`:
   - spot markers named by pin number as on the dashboard (`P3`), coloured by priority, with a remarks line and the 95% circle;

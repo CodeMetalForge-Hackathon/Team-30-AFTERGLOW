@@ -27,8 +27,8 @@ port = 1883
 [serial]
 omni = "/dev/ttyAMA0"      # UART0, Pi pins 8 (TX) and 10 (RX) <-> OMNI D9 (RX) and D10 (TX)
 wifi = "/dev/ttyAMA3"      # UART3, Pi pins 24 (TX) and 21 (RX) <-> WIFI D9 (RX) and D10 (TX)
-# GPS: we have only an antenna (u-blox ANN-MB5), no receiver, so "" = taped waypoints only.
-# Once a receiver is wired to UART2 (Pi pins 7 TX, 29 RX), set "/dev/ttyAMA2".
+# GPS: NEO-F10N on UART2 (Pi pins 7 TX, 29 RX) works, but keep "" (taped waypoints) for the
+# indoor demo: a fix would place the pod relative to the Acadia origin. "/dev/ttyAMA2" outdoors.
 gps = ""
 esp_baud = 921600
 gps_baud = 38400           # most u-blox M10 modules; check_hw.py finds the real one

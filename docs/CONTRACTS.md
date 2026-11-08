@@ -222,8 +222,8 @@ Pi → WIFI  {"cmd":"sos_on"}   {"cmd":"sos_off"}
 ### Laptop LoRa receiver (ADALM-PLUTO → laptop)
 
 **Changed (Sat 7 Nov):** we have only one RFM95W, so the laptop receives with an ADALM-PLUTO SDR, not RFM95W + XIAO #3. The line format below is unchanged and stays the boundary:
-- `tools/pluto_rx.py` (to be written) runs gr-lora_sdr on the Pluto's samples, using the config's `[lora]` table, and prints one `rx` line per decoded packet with a good CRC, on stdout. It may print `rssi` and `snr` as `null` (an SDR has no calibrated RSSI), and `ag/alert` allows that.
-- `lora_rx.py` reads those lines from stdin and publishes `ag/alert`, exactly as it did from XIAO #3's USB port. It doesn't filter: `lora_rx.py` drops other teams' packets.
+- `tools/pluto_rx.py` runs gr-lora_sdr on the Pluto's samples, using the config's `[lora]` table, and prints one `rx` line per decoded packet with a good CRC, on stdout. It may print `rssi` and `snr` as `null` (an SDR has no calibrated RSSI), and `ag/alert` allows that.
+- `lora_rx.py --stdin` reads those lines and publishes `ag/alert`, exactly as it did from XIAO #3's USB port. It doesn't filter: `lora_rx.py` drops other teams' packets.
 - The old path (XIAO #3 + a second RFM95W, `firmware/lora_rx/`, read at 115200 from `/dev/cu.usbmodem*`) still works if a second RFM95W turns up.
 
 ```
