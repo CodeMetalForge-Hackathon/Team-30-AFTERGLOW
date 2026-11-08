@@ -1,8 +1,10 @@
 """dashboard.py: the state it keeps, the commands it publishes, and its HTTP endpoints."""
 import json
+import os
 import threading
 import urllib.error
 import urllib.request
+from email.utils import parsedate_to_datetime
 from http.server import ThreadingHTTPServer
 
 import pytest
@@ -198,6 +200,29 @@ def test_http_page_and_map(server):
     meta = json.loads(body)
     assert meta["profile"] == "afterglow" and meta["map"]["zones"] and meta["waypoints"]["0"] == [0.0, 0.0]
     assert get(base + "/vendor/leaflet-1.9.4/leaflet.js")[0] == 200
+
+
+def test_http_live_picture_has_its_age(server, tmp_path):
+    # The TV compares Last-Modified with Date (both the server's clock) to spot a frozen feed.
+    (tmp_path / "thermal.png").write_bytes(b"png")
+    os.utime(tmp_path / "thermal.png", (1_700_000_000, 1_700_000_000))
+    base, _, _ = server
+    with urllib.request.urlopen(base + "/live/thermal.png", timeout=5) as r:
+        assert r.read() == b"png" and r.headers.get("Cache-Control") == "no-store"
+        lm, date = parsedate_to_datetime(r.headers["Last-Modified"]), parsedate_to_datetime(r.headers["Date"])
+    assert lm.timestamp() == 1_700_000_000 and date > lm
+    with pytest.raises(urllib.error.HTTPError):
+        urllib.request.urlopen(base + "/live/camera.jpg", timeout=5)
+
+
+def test_meta_has_the_building_and_the_check_in_time():
+    cfg = config.load()
+    meta = make_meta(cfg, ParkMap.load(cfg))
+    assert meta["building"]["name"] == "60 State Street" and len(meta["building"]["ring"]) >= 4
+    assert meta["search"]["checkin_s"] == cfg["search"]["checkin_s"] == 300.0
+    assert meta["thermal"]["hot_min_c"] < meta["thermal"]["hot_max_c"]
+    park = config.load(config.DEFAULT.parent / "park.toml")
+    assert make_meta(park, ParkMap.load(park))["building"] is None
 
 
 def test_http_ctrl(server):

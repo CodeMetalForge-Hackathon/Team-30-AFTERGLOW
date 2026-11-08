@@ -4,6 +4,7 @@ and locate -> the dashboard. For laptops without Mosquitto (Windows), and as a d
 
     python tools/local_stack.py --config park.toml --speed 5          # fake pod (fake_bus.py's [sim])
     python tools/local_stack.py --config park.toml --replay runs/1432.log --loop   # a recorded real run
+    python tools/local_stack.py --config park.toml --feeds            # plus fake camera and thermal pictures
     then open http://localhost:8080/tv.html (operator TV), /livemap.html (live map feed) or / (dashboard)
 
 Sources:
@@ -212,6 +213,38 @@ def run_replay(path, bus, speed, loop, stop):
             return
 
 
+class _NoBus:
+    """thermal.py's --feeds stand-in bus: the picture only (the source's own ag/thermal stays the reading)."""
+
+    def publish(self, topic, msg, retain=False):
+        pass
+
+
+def run_feeds(cfg, live_dir, stop):
+    """--feeds: camera.py --fake and thermal.py --fake pictures in live/, for the TV's camera and heat
+    panels. They aren't tied to the source: the drone and phones they show are made up."""
+    from afterglow import camera, thermal
+    cam = camera.Camera(cfg, live_dir)
+    th = thermal.Thermal(cfg, _NoBus(), live_dir)
+
+    def loop(name, frames, handle, fps):
+        period, due = 1.0 / fps, time.monotonic()
+        try:
+            for f in frames:
+                handle(f)
+                due = max(due + period, time.monotonic() - period)
+                if stop.wait(max(0.0, due - time.monotonic())):
+                    return
+        except Exception:  # noqa: BLE001 - a broken fake picture must not stop the stack
+            log.exception("feeds: %s stopped", name)
+
+    threading.Thread(target=loop, args=("camera", camera.fake_frames(cfg), lambda f: cam.handle_frame(*f),
+                                        float(cfg["camera"]["fps"])), daemon=True, name="feed-camera").start()
+    threading.Thread(target=loop, args=("thermal", thermal.fake_frames(), lambda f: th.handle_frame(*f),
+                                        float(cfg["thermal"]["fps"])), daemon=True, name="feed-thermal").start()
+    log.info("feeds: fake camera and thermal pictures in %s", live_dir)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", help="profile: afterglow.toml (default) or park.toml")
@@ -221,6 +254,7 @@ def main():
     ap.add_argument("--loop", action="store_true", help="with --replay: start again at the end")
     ap.add_argument("--host", default="127.0.0.1", help="address to serve on (0.0.0.0 = every interface)")
     ap.add_argument("--port", type=int, help="HTTP port (default: [http] port)")
+    ap.add_argument("--feeds", action="store_true", help="also write fake camera and thermal pictures to live/ (the TV's panels)")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
@@ -235,6 +269,9 @@ def main():
     stop = threading.Event()
     clock = None
     run = {}
+    if a.feeds:
+        dirs["live"].mkdir(parents=True, exist_ok=True)
+        run_feeds(cfg, dirs["live"], stop)
     if a.replay:
         threading.Thread(target=lambda: run_replay(a.replay, holder["bus"], a.speed, a.loop, stop), daemon=True, name="source").start()
     else:

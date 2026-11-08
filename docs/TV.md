@@ -9,6 +9,7 @@ ranger's click: nothing auto-confirms a ping or accepts a leg.
 ```
 cd code
 .venv/bin/python tools/local_stack.py --config park.toml             # no broker needed; pause and speed on the TV
+.venv/bin/python tools/local_stack.py --config park.toml --feeds     # plus fake camera and heat pictures
 .venv/bin/python -m afterglow.dashboard --config park.toml            # or with Mosquitto + fake_bus.py
 ```
 
@@ -76,15 +77,41 @@ A thin bar under the top bar shows where the search is: **1 Search · 2 Signal �
      opens Emergency, with the **rescue route** for the ground team drawn on the map (white dots):
      from the car park, along the trail that was searched, then off the trail by compass
      direction, with a walking time. Then **"Team on the way · back to scanning"** records that a
-     ground team is sent and goes back to the sweep that was running before the case. The drone
-     drops by the person every `[sim] checkin_s` (2 min) for `checkin_dwell_s` (30 s); the
-     "Rescue under way" card shows when it last checked in. "Person safe · close case" ends it.
+     ground team is sent and goes back to the sweep that was running before the case.
+   - **Check-ins:** every `[search] checkin_s` (5 min) the drone should fly back over the person.
+     The "Rescue under way" card counts down to the next one; when it's late, an amber
+     **Check-in due** banner gives the pilot a heading and distance (the drone never decides: the
+     pilot flies it). A pass within the check distance resets the timer. The fake pod flies the
+     check-ins by itself and circles for `[sim] checkin_dwell_s`. "Person safe · close case" ends it.
+   - **Show the rescue route** (on that card, or "Show route" on the banner) opens the route
+     **without changing the mode**: the drone keeps sweeping. **← Back to the sweep** (or Esc)
+     leaves it. In Emergency, once the team is sent, the same button switches back to the sweep.
    - **4b, no one here** (nothing warm and nobody seen after about 12 s over it): "Not a person ·
      continue search" clears the ping, and the drone goes back to its path.
 
 In the simulation, phones with `person = true` in `[sim] phones` read warm and show a person
 when the drone is close (stand-ins for thermal.py and person.py). The park's missing iPhone has
 one; the decoy doesn't. The weather and wind in the top bar are simulated too.
+
+## Camera and heat pictures
+
+The pod's live pictures, `live/camera.jpg` (camera.py) and `live/thermal.png` (thermal.py), served
+by the dashboard. Each reloads once a second and only swaps in a frame that has finished
+loading, so it never flickers. Pictures are scaled to fit, so a 90° `rotate` in config still fits.
+
+- **Emergency:** the "Camera check" card shows both, the camera above the heat picture, with the
+  warmest spot's temperature on the heat picture (`ag/thermal`; "picture only" when `max_c` is null).
+  A person detector's snapshot (`ag/vision` `snap`, stretch) replaces the camera for a minute.
+- **The other modes:** the **Pictures** switch on the map (Auto / On / Off, remembered per browser)
+  puts them in the map's bottom-right corner. Auto shows both while the drone checks a ping
+  (Investigate), the heat picture alone in a night sweep, and nothing otherwise.
+- **Old pictures:** the server sends `Last-Modified` with each picture. Over 5 s old, the picture
+  is dimmed with "Feed frozen" (the camera program stopped); if the server can't be reached it
+  says "Feed lost". Neither changes anything else on the TV.
+
+With no pod, `tools/local_stack.py --feeds` writes `camera.py --fake` and `thermal.py --fake`
+pictures. They aren't tied to the simulation: the heat picture's blob comes and goes on its own
+40 s loop, while the temperature shown comes from the fake pod's `ag/thermal`.
 
 ## The case
 
@@ -105,6 +132,31 @@ the score yet.
 While the mode is `search` and a case is open, `fake_bus.py` / `local_stack.py` fly the case's
 trail (to the nearest point, then back and forth along it) instead of the lanes. That's a
 stand-in for planner.py, which doesn't exist yet. The real pod flies what the pilot flies.
+
+## The Live tab
+
+The **Live** button in the top bar (Esc leaves it) swaps the panels for everything the pod sends,
+live. It's a view only; the mode and the pings carry on, and the banners stay on top.
+
+- **Camera** (`live/camera.jpg`, reloaded twice a second) and **Heat** (`live/thermal.png`, four
+  times a second, the HT-203U's rate).
+- **The thermal overlay:** `ag/thermal` drawn over the heat picture in the frame's own pixels:
+  a crosshair on the warmest spot and its temperature, amber when it's person-warm (`hot`).
+  It hides when the picture is frozen, so it never marks an old frame. (The fake pod's stand-in
+  `ag/thermal` has no spot position, so the simulation shows the reading but no crosshair.)
+- **The map:** the building, north up, drawn from `[rules] building_geojson` (no map tiles, so
+  it works offline): outline, the taped park, waypoints, the pod's path and the pings.
+  **Building / Demo area** zooms between the whole building and the taped area.
+- **Live readings:** thermal (warmest °C, the last 2 minutes as a line with the person-warm band,
+  spot, confidence, frames a second, source), the pod (position and where it comes from, height,
+  CPU, LoRa, GPS, disk, battery from `ag/sys`) and Bluetooth (scans a second, lost devices heard,
+  strongest, open pings, SOS answers, last LoRa alert, link).
+
+**60 State Street:** the demo profile (`afterglow.toml`) now puts its origin (waypoint 0) at
+60 State Street, Boston (42.35889, −71.05667), where GPS gets no fix, so the taped park, the TV
+map and the ATAK markers land on the building. `data/building.geojson` is an **approximate**
+outline drawn by hand (no map data was reachable when it was made); swap in the real one
+(trace it on geojson.io, or an OSM export) and keep `"approximate": true` out of it.
 
 ## Known gaps
 

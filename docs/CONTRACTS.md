@@ -187,6 +187,7 @@ dashboard.py serves everything on one port (`[http] port`, 8080), so there are n
 - Write each live frame to a temporary file and rename it over the old one, so a reader never gets half a frame.
 - **Dashboard: scale each picture to fit its panel** (CSS `object-fit: contain`), never a fixed size. `[camera] rotate` or `[thermal] rotate` of 90 or 270 turns the picture on its side (the camera's becomes 720×1280).
 - The folders are `[http] live_dir` and `snaps_dir`, relative to `code/`. Neither is committed.
+- Each file comes with `Last-Modified` (the file's time) and `Date`, both from the server's clock, so a page can tell a frozen feed without trusting its own clock. The operator TV calls a picture over 5 s old frozen.
 - `python -m afterglow.dashboard` serves these URLs. Without it, `python -m http.server 8080` run from `code/` serves the same paths.
 
 ## Dashboard HTTP

@@ -43,3 +43,14 @@ def test_zones_have_a_closed_campground():
     for f in doc["features"]:
         ring = f["geometry"]["coordinates"][0]
         assert f["geometry"]["type"] == "Polygon" and ring[0] == ring[-1] and len(ring) >= 4
+
+
+def test_building_holds_the_taped_park():
+    # The TV's Live tab draws this outline (60 State Street, approximate) around the waypoints.
+    doc = load("building_geojson")
+    f = doc["features"][0]
+    ring = [to_xy(p) for p in f["geometry"]["coordinates"][0]]
+    assert f["geometry"]["type"] == "Polygon" and ring[0] == ring[-1] and len(ring) >= 4
+    xs, ys = [x for x, _ in ring], [y for _, y in ring]
+    for wx, wy in CFG["waypoints"].values():
+        assert min(xs) < wx < max(xs) and min(ys) < wy < max(ys)

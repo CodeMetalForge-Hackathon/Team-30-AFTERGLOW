@@ -23,6 +23,9 @@ const ALERT_FRESH_MS = 20000;  // a LoRa alert this recent: LoRa is still gettin
 const BLE_SILENT_MS = 15000;
 const BIN_M = 10;              // trail progress is counted in 10 m pieces
 const CHECK_MS = 12000;        // over a ping this long (bus time) with nobody seen: "no one here"
+const FEED_EVERY_MS = 1000;    // the live camera and heat pictures reload this often (MJPEG is tier 2)
+const FEED_OLD_S = 5;          // a picture older than this: the feed is frozen or lost
+const THERMAL_FRESH_MS = 15000;
 const WALK_TRAIL = 1.1, WALK_OFF = 0.4; // ground team, m/s on a trail and off it
 const FORCE = new URLSearchParams(location.search).get('force');
 const NO_CASE = { case: null, ranking: [], route: [], start: null, trail: null };
@@ -56,6 +59,12 @@ function fmtAgo(ms) {
   if (s < 60) return `${Math.round(s)} s ago`;
   if (s < 3600) return `${Math.floor(s / 60)} min ago`;
   return `${Math.floor(s / 3600)} h ago`;
+}
+const fmtC = (c) => (typeof c === 'number' && isFinite(c) ? `${c.toFixed(1)}°C` : null); // max_c can be null (picture only)
+function heatText(th, bt) { // the latest ag/thermal in words, or null if there's none
+  if (!th || bt - th.t > THERMAL_FRESH_MS) return null;
+  const c = fmtC(th.max_c);
+  return c ? `${c} max${th.hot ? ' · warm' : ''}` : th.hot ? 'warm spot' : 'picture only';
 }
 const fmtM = (v) => (v == null || !isFinite(v) ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)} km` : v >= 100 ? `${Math.round(v)} m` : `${Math.round(v * 10) / 10} m`);
 const pinNum = (p) => Number(String(p).replace(/\D/g, '')) || 0;
@@ -182,6 +191,7 @@ function makeMemory() {
     ready: false, known: new Map(), sosSeen: new Set(), firstSeen: {}, events: [], mode: null, modeSince: null,
     alerts: {}, lastAlert: null, lastAlertWall: 0, poseRef: null, lastPoseWall: 0, bleCount: 0, lastBleWall: 0,
     cov: [], covT: null, bins: [], binsHit: null, binsRoute: null, binsPose: null, chimedAt: 0, checks: loadChecks(),
+    thLast: null, thHist: [], // the last 2 minutes of ag/thermal [t, max_c, hot], for the Live tab
   };
 }
 
@@ -204,6 +214,15 @@ function track(mem, st, view) {
     mem.covT = cov.t;
     mem.cov.push([bt || cov.t, cov.pct]);
     if (mem.cov.length > 120) mem.cov.shift();
+  }
+  // thermal history (Live tab)
+  const th = s.latest['ag/thermal'];
+  if (th && th !== mem.thLast) {
+    mem.thLast = th;
+    if (typeof th.max_c === 'number' && typeof th.t === 'number') {
+      mem.thHist.push([th.t, th.max_c, !!th.hot]);
+      while (mem.thHist.length > 1 && (th.t - mem.thHist[0][0] > 120000 || mem.thHist.length > 600)) mem.thHist.shift();
+    }
   }
   // mode changes
   const mode = s.latest['ag/mode']?.mode || 'patrol';
@@ -228,7 +247,7 @@ function track(mem, st, view) {
     if (c.dist > st.checkM) continue;
     if (c.closeSince == null) c.closeSince = bt;
     const th = s.latest['ag/thermal'], v = s.latest['ag/vision'];
-    if (th && bt - th.t < 5000) { c.maxC = Math.max(c.maxC ?? -99, th.max_c); if (th.hot) c.warm = true; }
+    if (th && bt - th.t < 5000) { if (typeof th.max_c === 'number') c.maxC = Math.max(c.maxC ?? -99, th.max_c); if (th.hot) c.warm = true; }
     if (v && v.kind === 'person' && bt - v.t < 5000) c.person = Math.max(c.person ?? 0, v.conf);
   }
   for (const p of Object.values(s.pins)) {
@@ -283,6 +302,8 @@ function App() {
   const [busy, setBusy] = useState({}); // pin or key -> true while a click is in flight
   const [chimeOn, setChimeOn] = useState(Sound.on);
   const [sim, setSim] = useState(null); // {paused, speed} when the fake pod runs (local_stack.py)
+  const [routePin, setRoutePin] = useState(null); // looking at a found person's rescue route while the drone sweeps (TV only)
+  const [live, setLive] = useState(() => loadPref('live', false)); // the Live tab (TV only)
 
   useEffect(() => {
     fetch('/api/map').then((r) => r.json()).then((m) => {
@@ -307,6 +328,12 @@ function App() {
     return () => { clearInterval(id); window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
   }, []);
   useEffect(() => savePref('follow', follow), [follow]);
+  useEffect(() => savePref('live', live), [live]);
+  useEffect(() => { // Esc leaves the rescue route view or the Live tab
+    const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.overlay')) { setRoutePin(null); setLive(false); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const toast = (text, kind = 'info') => {
     const id = Math.random();
@@ -359,8 +386,14 @@ function App() {
   const linked = kase?.ping && s.pins[kase.ping] ? s.pins[kase.ping] : null;
   const confirmed = pins.filter((p) => p.status === 'confirmed' && !m.donePins?.[p.pin]).sort((a, b) => b.t - a.t)[0] || null; // a closed case's person is done
   const focus = selPin || alertPin || (mode !== 'investigate' ? investigating : null);
-  const target = mode === 'investigate' ? (selPin || (linked && linked.status !== 'cleared' ? linked : null) || investigating || sosPin || confirmed) : null;
-  const rescue = target && mode === 'investigate' ? rescuePlan(meta, cv, target) : null;
+  // the rescue route view: a look at a found person's route while the drone keeps sweeping. It changes
+  // nothing on the bus (the mode stays a sweep) and Back (or Esc) returns to the sweep.
+  const routeP = routePin && mode !== 'investigate' && s.pins[routePin]?.status === 'confirmed' ? s.pins[routePin] : null;
+  const target = routeP || (mode === 'investigate' ? (selPin || (linked && linked.status !== 'cleared' ? linked : null) || investigating || sosPin || confirmed) : null);
+  const rescue = target && (mode === 'investigate' || routeP) ? rescuePlan(meta, cv, target) : null;
+  const viewMode = routeP ? 'investigate' : mode; // what the map frames and keys
+  const every = (meta.search?.checkin_s ?? 300) * 1000;
+  const checkin = confirmed ? checkinState(confirmed, m, kase, bt, every) : null;
   const stage = mode === 'investigate' || confirmed ? 4 : investigating ? 3 : fresh.length ? 2 : 1;
 
   // clicks
@@ -430,25 +463,31 @@ function App() {
     mem.current.teamPins = { ...(mem.current.teamPins || {}), [pin]: mem.current.teamPins?.[pin] || s.bus_t };
     setSel(null);
     await setMode(caseRef.current?.case?.prior_mode || 'patrol');
-    toast(`Team on the way to ${pin}. The drone will check in on them.`);
+    toast(`Team on the way to ${pin}. Check in on them every ${fmtDur(every)}.`);
+  };
+  const backToSweep = async () => { // leave the rescue route (or Emergency, once the team is sent)
+    setRoutePin(null); setSel(null);
+    if (mode === 'investigate') await setMode(caseRef.current?.case?.prior_mode || 'patrol');
   };
   const toggleChime = () => { Sound.unlock(); Sound.on = !Sound.on; savePref('chime', Sound.on); setChimeOn(Sound.on); if (Sound.on) Sound.play(false); };
 
-  const ctx = { meta, st, s, m, bt, mode, pose, cv, kase, locked, busy, pick, pinCmd, sendCtrl, setMode, setForm, closeCase, pickTrail, setSel, sel, open, focus, target, linked, linkPing, confirmRescue, notPerson, rescue, confirmed, teamOnWay };
-  const wide = !!focus && mode !== 'investigate';
+  const ctx = { meta, st, s, m, bt, mode, pose, cv, kase, locked, busy, pick, pinCmd, sendCtrl, setMode, setForm, closeCase, pickTrail, setSel, sel, open, focus, target, linked, linkPing, confirmRescue, notPerson, rescue, confirmed, teamOnWay, routeP, setRoutePin, backToSweep, checkin, every };
+  const wide = viewMode === 'investigate' ? !!target : !!focus; // room for the ping card, or the camera check
 
   return html`
     <div class="tv">
-      <${TopBar} ...${ctx} problems=${problems} chimeOn=${chimeOn} toggleChime=${toggleChime} sim=${sim} setSimState=${setSimState} />
+      <${TopBar} ...${ctx} problems=${problems} chimeOn=${chimeOn} toggleChime=${toggleChime} sim=${sim} setSimState=${setSimState} live=${live} setLive=${setLive} />
       <div class="banners">
         <${Steps} stage=${stage} mode=${mode} cv=${cv} />
         ${podStale && html`<${LoraBanner} m=${m} loraFresh=${loraFresh} />`}
         ${sosPin && html`<${SosBanner} p=${sosPin} mode=${mode} setMode=${setMode} locked=${locked} pick=${pick} />`}
         ${alertPin && html`<${PingBanner} p=${alertPin} m=${m} bt=${bt} kase=${kase} pick=${pick} />`}
+        ${checkin?.due && mode !== 'investigate' && !routeP && html`<${CheckinBanner} p=${confirmed} c=${checkin} pose=${pose} kase=${kase} show=${() => { setLive(false); setRoutePin(confirmed.pin); }} />`}
       </div>
-      <div class=${`grid ${wide ? 'wide-right' : ''}`}>
+      ${live && html`<${LiveView} ...${ctx} podStale=${podStale} />`}
+      <div class=${`grid ${wide ? 'wide-right' : ''}`} style=${live ? 'display:none' : ''}>
         <div class="col">${left(ctx)}</div>
-        <${MapPane} meta=${meta} s=${s} sel=${sel} follow=${follow} setFollow=${setFollow} night=${night} cv=${cv} podStale=${podStale} m=${m} setSel=${setSel} mode=${mode} target=${target} rescue=${rescue} />
+        <${MapPane} meta=${meta} s=${s} sel=${sel} follow=${follow} setFollow=${setFollow} night=${night} cv=${cv} podStale=${podStale} m=${m} setSel=${setSel} mode=${viewMode} target=${target} rescue=${rescue} checking=${!!investigating && mode !== 'investigate'} bt=${bt} live=${live} />
         <div class="col">${right(ctx, podStale)}</div>
       </div>
       ${form && html`<${CaseForm} meta=${meta} init=${form} editing=${!!kase} save=${saveCase} cancel=${() => setForm(null)} />`}
@@ -458,7 +497,7 @@ function App() {
 }
 
 // ---------- top bar and banners ----------
-function TopBar({ meta, s, bt, mode, pose, kase, locked, setMode, problems, chimeOn, toggleChime, sim, setSimState }) {
+function TopBar({ meta, s, bt, mode, pose, kase, locked, setMode, problems, chimeOn, toggleChime, sim, setSimState, live, setLive, setRoutePin }) {
   const src = !pose ? null : pose.src === 'sim' ? ['b-sim', 'SIMULATED'] : pose.src === 'replay' ? ['b-replay', 'REPLAY'] : LIVE_SRC.has(pose.src) ? null : ['b-none', pose.src];
   const showCase = kase && (mode === 'search' || mode === 'investigate');
   return html`
@@ -469,8 +508,10 @@ function TopBar({ meta, s, bt, mode, pose, kase, locked, setMode, problems, chim
       <div class="spacer"></div>
       <div class="modes" role="group" aria-label="Mode">
         ${MODES.map(([k, label]) => html`<button class=${`${mode === k ? 'on' : ''} ${k === 'investigate' ? 'emerg' : ''}`} aria-pressed=${mode === k}
-          disabled=${locked} onClick=${() => mode !== k && setMode(k)}>${label}</button>`)}
+          disabled=${locked} onClick=${() => { setLive(false); setRoutePin(null); if (mode !== k) setMode(k); }}>${label}</button>`)}
       </div>
+      <button class=${`livebtn ${live ? 'on' : ''}`} aria-pressed=${live} title="Live: camera, heat and every reading from the pod (Esc to leave)"
+        onClick=${() => setLive(!live)}><i></i>Live</button>
       ${src && html`<span class=${`badge ${src[0]}`}>${src[1]}</span>`}
       ${sim && html`<span class="simctl" role="group" aria-label="Simulation">
         <button class=${sim.paused ? 'paused' : ''} onClick=${() => setSimState({ paused: !sim.paused })} aria-label=${sim.paused ? 'Resume the simulation' : 'Pause the simulation'}>
@@ -548,8 +589,35 @@ function PingBanner({ p, m, bt, kase, pick }) {
   </div>`;
 }
 
+// A found person, once the team is on the way: when the drone last checked in on them and when
+// the next check-in is due. Times are bus time; the team's send time falls back to the wall clock
+// (kase.team_t) after a reload. The TV only asks: the pilot flies the check-in.
+function checkinState(p, m, kase, bt, every) {
+  const teamBus = m.teamPins?.[p.pin];
+  const teamWall = kase?.ping === p.pin ? kase?.team_t : null;
+  if (teamBus == null && teamWall == null) return { sent: false };
+  const last = m.checkins?.[p.pin] ?? null;
+  const near = last != null && bt - last < 5000;
+  const since = last != null ? bt - last : teamBus != null ? bt - teamBus : Date.now() - teamWall;
+  const left = every - since;
+  return { sent: true, last, near, left, due: !near && left <= 0 };
+}
+
+function CheckinBanner({ p, c, pose, kase, show }) {
+  const hdg = pose ? heading(p.x - pose.x, p.y - pose.y) : null, dist = pose ? Math.hypot(p.x - pose.x, p.y - pose.y) : null;
+  return html`<div class="banner ban-checkin" role="alert">
+    <span class="chipbig">${p.pin}</span>
+    <div><div class="big">Check-in due${kase?.ping === p.pin ? ` on ${kase.name}` : ''}: fly over the person</div>
+      <div class="sub">${hdg != null ? `Heading ${Math.round(hdg)}°, ${fmtM(dist)} from the drone. ` : ''}Look at the heat and camera, then back to the sweep.</div></div>
+    <div class="spacer"></div>
+    <span class="sub">Late</span><span class="timer">${fmtDur(-c.left)}</span>
+    <button onClick=${show}>Show route</button>
+  </div>`;
+}
+
 // ---------- columns ----------
 function left(c) {
+  if (c.routeP) return html`<${PilotCard} ...${c} /><${RescueWatch} ...${c} p=${c.routeP} />`;
   if (c.mode === 'investigate') return html`<${PilotCard} ...${c} /><${SosCard} ...${c} />`;
   if (c.mode === 'search') return c.kase ? html`<${CaseCard} ...${c} /><${TrailProgress} ...${c} /><${TrailsCard} ...${c} />` : html`<${CaseEntry} ...${c} big=${true} />`;
   return html`<${SweepCard} ...${c} /><${RuleCard} mode=${c.mode} meta=${c.meta} />${c.confirmed ? html`<${RescueWatch} ...${c} p=${c.confirmed} />` : html`<${CaseEntry} ...${c} />`}`;
@@ -557,6 +625,7 @@ function left(c) {
 
 function right(c, podStale) {
   const loraList = podStale && Object.keys(c.m.alerts).length ? html`<${LoraPings} m=${c.m} />` : null;
+  if (c.routeP) return html`${loraList}<${RescueCard} ...${c} p=${c.routeP} />`;
   if (c.mode === 'investigate') {
     return html`${loraList}${c.target ? html`<${CameraCard} ...${c} /><${RescueCard} ...${c} p=${c.target} />` : html`<div class="p calm"><div class="t">Nothing to investigate</div><div class="lbl">Pick a ping, then press Investigate.</div></div><${PingsCard} ...${c} />`}`;
   }
@@ -585,7 +654,7 @@ function SweepCard({ s, m, bt, mode }) {
     <div class="bar"><i style=${`width:${Math.round((pct || 0) * 100)}%`}></i></div>
     <div class="row"><span class="lbl">In this mode</span><span class="num">${fmtDur(m.modeSince ? bt - m.modeSince : null)}</span></div>
     <div class="row"><span class="lbl">Est. to finish</span><span class="num">${eta != null ? '~' + fmtDur(eta) : '—'}</span></div>
-    ${mode === 'night' && html`<div class="row"><span class="lbl">Thermal</span><span>${th && bt - th.t < 15000 ? `On · ${Math.round(th.max_c * 10) / 10}°C max` : 'No thermal data'}</span></div>`}
+    ${mode === 'night' && html`<div class="row"><span class="lbl">Thermal</span><span>${heatText(th, bt) ? `On · ${heatText(th, bt)}` : 'No thermal data'}</span></div>`}
   </section>`;
 }
 
@@ -709,18 +778,21 @@ function OtherPings({ open, focus, bt, pick }) { // the rest, small, so the rang
   </section>`;
 }
 
-function RescueWatch({ p, kase, m, bt, s, setMode, closeCase, locked }) { // back on the sweep, a person found: keep an eye on them
-  const last = m.checkins?.[p.pin];
+function RescueWatch({ p, kase, m, bt, s, closeCase, checkin, every, routeP, setRoutePin }) { // back on the sweep, a person found: keep an eye on them
   const th = s.latest['ag/thermal'], v = s.latest['ag/vision'];
-  const near = last != null && bt - last < 5000;
+  const c = checkin;
+  const near = !!c?.near;
   const [sure, setSure] = useState(false);
   return html`<section class="p" style="border-color:var(--p1)">
     <h2 class="h">Rescue under way · ${p.pin}${kase?.ping === p.pin ? ` · ${kase.name}` : ''}</h2>
     <div class="row"><span class="lbl">Team</span><span>${kase?.team_t ? `on the way · ${fmtDur(Date.now() - kase.team_t)}` : m.teamPins?.[p.pin] ? 'on the way' : 'not sent yet'}</span></div>
-    <div class="row"><span class="lbl">Drone check-in</span><span>${near ? 'over them now' : last != null ? fmtAgo(bt - last) : 'soon'}</span></div>
-    ${near && html`<div class="row"><span class="lbl">Seen</span><span class="warmtxt">${th?.hot ? `${th.max_c.toFixed(1)}°C warm` : 'cool'}${v && bt - v.t < 5000 ? ' · person on camera' : ''}</span></div>`}
+    <div class="row"><span class="lbl">Last check-in</span><span>${near ? 'over them now' : c?.last != null ? fmtAgo(bt - c.last) : 'none yet'}</span></div>
+    ${c?.sent && !near && html`<div class="row"><span class="lbl">Next check-in</span>
+      <span class=${`num ${c.due ? 'duetxt' : ''}`} style="font-size:1.4rem">${c.due ? `due · ${fmtDur(-c.left)} late` : `in ${fmtDur(c.left)}`}</span></div>`}
+    ${c?.sent && html`<div class="lbl small">Every ${fmtDur(every)}: fly over them, look at the heat and camera, then back to the sweep.</div>`}
+    ${near && html`<div class="row"><span class="lbl">Seen</span><span class="warmtxt">${th?.hot ? `${fmtC(th.max_c) || ''} warm`.trim() : 'cool'}${v && bt - v.t < 5000 ? ' · person on camera' : ''}</span></div>`}
     <div style="display:flex;gap:1rem">
-      <button class="link" disabled=${locked} onClick=${() => setMode('investigate')}>Show the rescue route</button>
+      ${!routeP && html`<button class="link" onClick=${() => setRoutePin(p.pin)}>Show the rescue route</button>`}
       ${kase && (sure ? html`<button class="link" style="color:#ff8f93" onClick=${() => { setSure(false); closeCase(); }}>Sure? Close the case</button>`
                       : html`<button class="link" onClick=${() => setSure(true)}>Person safe · close case</button>`)}
     </div>
@@ -759,7 +831,7 @@ function PingCard({ p, meta, s, m, bt, cv, kase, locked, busy, pinCmd, setSel, s
       <div class="fact"><b>${p.off_trail_m != null ? `${p.off_trail_m} m` : '—'}</b><span class="lbl">off trail</span></div>
       <div class="fact"><b>${camp === 0 ? 'inside' : fmtM(camp)}</b><span class="lbl">${camp === 0 ? 'the campground' : 'from campground'}</span></div>
       ${fromStart != null && html`<div class="fact"><b>${fmtM(fromStart)}</b><span class="lbl">from ${start.label === 'Park entrance' ? 'the entrance' : 'the car'} (straight line)</span></div>`}
-      ${warm && html`<div class="fact warm"><b>${th ? `${Math.round(th.max_c * 10) / 10}°C` : 'warm'}</b><span>thermal: warm spot</span></div>`}
+      ${warm && html`<div class="fact warm"><b>${fmtC(th?.max_c) || 'warm'}</b><span>thermal: warm spot</span></div>`}
     </div>
     <div style="flex:1"></div>
     ${p.status === 'new' || p.status === 'acknowledged' ? html`
@@ -838,25 +910,235 @@ function SosCard({ target, locked, busy, sendCtrl }) {
   </section>`;
 }
 
-function CameraCard({ s, bt, m, target }) {
-  const [broken, setBroken] = useState(false);
+function CameraCard({ s, bt, m, target }) { // Emergency: the live camera and heat pictures, for the ranger's own check
   const v = s.latest['ag/vision'], th = s.latest['ag/thermal'];
-  const src = v?.snap ? `/${v.snap}` : `/live/camera.jpg?t=${Math.floor(Date.now() / 2000)}`;
-  return html`<section class="p grow">
-    <h2 class="h">Camera check${v ? ` · ${v.kind} ${Math.round(v.conf * 100)}%` : ''}</h2>
-    <div class="snap">${broken && !v?.snap ? html`<span>${v && bt - v.t < 10000 ? `Person seen · ${Math.round(v.conf * 100)}% (no picture in the sim)` : 'No camera feed'}</span>` : html`<img src=${src} alt=${v ? `Camera snapshot: ${v.kind}` : 'Live camera'} onError=${() => setBroken(true)} onLoad=${() => setBroken(false)} />`}</div>
-    ${(() => {
-      const c = target && m.checks[target.pin];
-      if (c?.warm) return html`<div class="row"><span class="lbl">Thermal</span><span class="num warmtxt" style="font-size:1.4rem">${c.maxC.toFixed(1)}°C · warm</span></div>`;
-      return html`<div class="row"><span class="lbl">Thermal</span><span class="num" style="font-size:1.4rem">${th && bt - th.t < 15000 ? `${Math.round(th.max_c * 10) / 10}°C` : '—'}</span></div>`;
-    })()}
+  const c = target && m.checks[target.pin];
+  const seen = v && bt - v.t < 10000 ? v : null;
+  const snap = v?.snap && bt - v.t < 60000 ? v.snap : null; // stretch: the person detector's picture
+  const heat = c?.warm ? `${fmtC(c.maxC) || 'warm spot'} · warm` : heatText(th, bt);
+  return html`<section class="p grow feedcard">
+    <h2 class="h">Camera check${seen ? ` · ${seen.kind} ${Math.round(seen.conf * 100)}%` : ''}</h2>
+    ${snap ? html`<div class="feed"><img src=${`/${snap}`} alt=${`Camera snapshot: ${v.kind}`} /><span class="feed-name">Snapshot</span></div>`
+           : html`<${LiveFeed} file="camera.jpg" name="Camera" />`}
+    <${LiveFeed} file="thermal.png" name="Heat" tag=${heat} warm=${!!(c?.warm || (th?.hot && heat))} />
+    ${seen && html`<div class="row"><span class="lbl">Camera</span><span>person seen · ${Math.round(seen.conf * 100)}%</span></div>`}
   </section>`;
 }
 
-function RescueCard({ p, rescue, kase, locked, busy, pinCmd, confirmRescue, notPerson, m, bt, teamOnWay }) {
+// ---------- live pictures (live/camera.jpg from camera.py, live/thermal.png from thermal.py) ----------
+// Each feed fetches its picture once a second and swaps it in only once it has decoded, so it never
+// flickers. The server's Last-Modified and Date headers give the picture's age: an old picture is
+// dimmed and marked "frozen" (the camera stopped), and failed fetches mark it "lost".
+function LiveFeed({ file, name, tag, warm, every = FEED_EVERY_MS, children }) {
+  const [f, setF] = useState({ url: null, age: null, err: false, wall: 0 });
+  useEffect(() => {
+    let alive = true, busy = false, url = null;
+    const pull = async () => {
+      if (busy || document.hidden) return;
+      busy = true;
+      try {
+        const r = await fetch(`/live/${file}`, { cache: 'no-store' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const lm = Date.parse(r.headers.get('Last-Modified') || ''), now = Date.parse(r.headers.get('Date') || '');
+        const age = isFinite(lm) && isFinite(now) ? Math.max(0, (now - lm) / 1000) : null;
+        const next = URL.createObjectURL(await r.blob());
+        const img = new Image();
+        img.src = next;
+        try { await img.decode(); } catch (e) { URL.revokeObjectURL(next); throw e; }
+        if (!alive) { URL.revokeObjectURL(next); return; }
+        const old = url;
+        url = next;
+        setF({ url: next, age, err: false, wall: Date.now() });
+        if (old) setTimeout(() => URL.revokeObjectURL(old), 2000); // after the <img> has moved on
+      } catch {
+        if (alive) setF((p) => ({ ...p, err: true }));
+      } finally { busy = false; }
+    };
+    pull();
+    const id = setInterval(pull, every);
+    return () => { alive = false; clearInterval(id); if (url) setTimeout(() => URL.revokeObjectURL(url), 2000); };
+  }, [file, every]);
+  const lost = f.err && Date.now() - f.wall > FEED_OLD_S * 1000;
+  const frozen = !lost && f.age != null && f.age > FEED_OLD_S;
+  const since = lost ? Date.now() - f.wall + (f.age || 0) * 1000 : (f.age || 0) * 1000;
+  return html`<div class=${`feed ${warm ? 'warm' : ''}`}>
+    ${f.url ? html`<img src=${f.url} alt=${`Live ${name.toLowerCase()} picture`} class=${lost || frozen ? 'old' : ''} />`
+            : html`<span class="feed-none">${f.err ? `No ${name.toLowerCase()} feed` : 'Connecting…'}</span>`}
+    ${f.url && !lost && !frozen && children}
+    <span class="feed-name">${name}</span>
+    ${tag && html`<span class="feed-tag">${tag}</span>`}
+    ${f.url && (lost || frozen) && html`<span class="feed-old">${lost ? 'Feed lost' : 'Feed frozen'} · picture from ${fmtAgo(since)}</span>`}
+  </div>`;
+}
+
+// ---------- the Live tab: everything the pod is sending, live ----------
+// Camera, the heat picture with the thermal readings drawn over it, the building map with the pod
+// on it, and the raw numbers. Only looks: nothing here sends a command.
+function LiveView({ meta, s, st, m, bt, pose, podStale }) {
+  const th = s.latest['ag/thermal'];
+  const fresh = th && bt - th.t < THERMAL_FRESH_MS ? th : null;
+  return html`<div class="live">
+    <section class="p livecell">
+      <h2 class="h">Camera · Camera Module 3</h2>
+      <${LiveFeed} file="camera.jpg" name="Camera" every=${500} />
+    </section>
+    <section class="p livecell">
+      <h2 class="h">Heat · HT-203U thermal${fresh?.src ? ` · ${fresh.src === 'ht203u' ? 'live sensor' : fresh.src}` : ''}</h2>
+      <${LiveFeed} file="thermal.png" name="Heat" every=${250} tag=${heatText(th, bt)} warm=${!!fresh?.hot}>
+        ${fresh && html`<${ThermalOverlay} th=${fresh} />`}
+      </${LiveFeed}>
+    </section>
+    <section class="p livecell">
+      <h2 class="h">${meta.building ? meta.building.name : meta.name}${meta.building?.approximate ? ' · approximate outline' : ''}${pose ? ` · pod by ${pose.src === 'waypoint' ? 'taped waypoint' : pose.src}` : ''}</h2>
+      <${BuildingMap} meta=${meta} s=${s} pose=${pose} podStale=${podStale} />
+    </section>
+    <section class="p livecell livedata">
+      <h2 class="h">Live readings</h2>
+      <${LiveData} meta=${meta} s=${s} st=${st} m=${m} bt=${bt} pose=${pose} th=${th} fresh=${fresh} />
+    </section>
+  </div>`;
+}
+
+// Drawn over the heat picture in the frame's own pixels (viewBox w x h, scaled like the picture's
+// object-fit: contain), so the marks sit on the warmest spot thermal.py found.
+function ThermalOverlay({ th }) {
+  const { w, h } = th;
+  if (!(w > 0 && h > 0) || typeof th.col !== 'number' || typeof th.row !== 'number') return null;
+  const x = th.col + 0.5, y = th.row + 0.5, r = Math.max(w, h) / 22;
+  const c = fmtC(th.max_c);
+  const right = x < w * 0.7; // keep the label inside the frame
+  return html`<svg class=${`thover ${th.hot ? 'hot' : ''}`} viewBox=${`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    <circle cx=${x} cy=${y} r=${r}></circle>
+    <line x1=${x - r * 1.8} y1=${y} x2=${x - r * 0.6} y2=${y}></line><line x1=${x + r * 0.6} y1=${y} x2=${x + r * 1.8} y2=${y}></line>
+    <line x1=${x} y1=${y - r * 1.8} x2=${x} y2=${y - r * 0.6}></line><line x1=${x} y1=${y + r * 0.6} x2=${x} y2=${y + r * 1.8}></line>
+    <text x=${right ? x + r * 2.1 : x - r * 2.1} y=${y - r * 0.4} text-anchor=${right ? 'start' : 'end'} font-size=${r * 1.5}>${c || 'warmest'}${th.hot ? ' · warm' : ''}</text>
+  </svg>`;
+}
+
+function Sparkline({ hist, lo, hi, band }) { // max_c over the last 2 minutes; band: the person-warm range
+  if (hist.length < 2) return html`<div class="lbl small">Waiting for readings…</div>`;
+  const t0 = hist[0][0], t1 = hist[hist.length - 1][0], span = Math.max(1, t1 - t0);
+  const vs = hist.map((p) => p[1]);
+  const a = Math.min(lo ?? Infinity, ...vs) - 1, b = Math.max(hi ?? -Infinity, ...vs) + 1;
+  const X = (t) => ((t - t0) / span) * 100, Y = (v) => 40 - ((v - a) / (b - a)) * 40;
+  const pts = hist.map(([t, v]) => `${X(t).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+  return html`<svg class="spark" viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Warmest spot over the last 2 minutes">
+    ${band && html`<rect x="0" width="100" y=${Y(Math.min(band[1], b))} height=${Math.max(0, Y(Math.max(band[0], a)) - Y(Math.min(band[1], b)))} class="band"></rect>`}
+    <polyline points=${pts}></polyline>
+  </svg>`;
+}
+
+function LiveData({ meta, s, st, m, bt, pose, th, fresh }) {
+  const rate = (t) => st.rates?.[t] ?? 0;
+  const sys = s.latest['ag/sys'];
+  const recent = Object.values(s.obs).filter((o) => bt - o.t < 30000);
+  const beacons = recent.filter((o) => o.kind === 'ble' && o.cls !== 'apple_other' && o.cls !== 'other');
+  const strongest = beacons.sort((a, b) => b.rssi - a.rssi)[0];
+  const pins = Object.values(s.pins).filter(isOpen);
+  const al = s.latest['ag/alert'];
+  const band = meta.thermal ? [meta.thermal.hot_min_c, meta.thermal.hot_max_c] : null;
+  const Row = (k, v, cls = '') => html`<div class="row"><span class="lbl">${k}</span><span class=${`num ${cls}`}>${v}</span></div>`;
+  return html`
+    <div class="livegrid">
+      <div>
+        <div class="livehead">Thermal</div>
+        <div class=${`num livebig ${fresh?.hot ? 'warmtxt' : ''}`}>${fresh ? fmtC(fresh.max_c) || 'no °C' : '—'}</div>
+        <div class=${fresh?.hot ? 'warmtxt' : 'lbl'}>${!fresh ? 'No thermal data' : fresh.hot ? 'Warm spot: person-warm' : 'Warmest spot: nothing person-warm'}</div>
+        <${Sparkline} hist=${m.thHist} lo=${band?.[0] - 4} hi=${band?.[0] + 4} band=${band} />
+        ${Row('Spot', typeof fresh?.col === 'number' ? `${fresh.col}, ${fresh.row} in ${fresh.w}×${fresh.h}` : '—')}
+        ${Row('Confidence', fresh ? `${Math.round((fresh.conf ?? 0) * 100)}%` : '—')}
+        ${Row('Frames', `${rate('ag/thermal').toFixed(1)} /s${th ? ` · ${fmtAgo(bt - th.t)}` : ''}`)}
+        ${Row('Source', fresh ? ({ ht203u: 'HT-203U sensor', fake: 'fake frames' }[fresh.src] || fresh.src || 'simulation') : '—')}
+        ${Row('Person-warm', band ? `${band[0]}–${band[1]} °C` : '—')}
+      </div>
+      <div>
+        <div class="livehead">Pod</div>
+        ${Row('Position', pose ? `${pose.x.toFixed(1)} E, ${pose.y.toFixed(1)} N m` : '—')}
+        ${Row('Height', pose?.z != null ? `${pose.z.toFixed(1)} m` : '—')}
+        ${Row('Position from', pose ? `${pose.src}${pose.wp != null ? ` ${pose.wp}` : ''} · ${rate('ag/pose').toFixed(1)} /s` : '—')}
+        ${Row('CPU', sys ? `${Math.round(sys.cpu_c)} °C${sys.throttled && sys.throttled !== '0x0' ? ' · throttling' : ''}` : '—', sys?.cpu_c >= 80 ? 'duetxt' : '')}
+        ${Row('LoRa radio', sys ? (sys.lora ? 'on' : 'down') : '—', sys && !sys.lora ? 'duetxt' : '')}
+        ${Row('GPS', sys ? (sys.gps_fix ? 'fix' : 'no fix (indoors: waypoints)') : '—')}
+        ${Row('Disk free', typeof sys?.disk_free_gb === 'number' ? `${sys.disk_free_gb.toFixed(1)} GB` : '—')}
+        ${Row('Battery', typeof sys?.batt_pct === 'number' ? `${sys.batt_pct}%` : 'not measured')}
+      </div>
+      <div>
+        <div class="livehead">Bluetooth and pings</div>
+        ${Row('Scans', `${rate('ag/obs/ble').toFixed(1)} /s`)}
+        ${Row('Lost devices', `${beacons.length} of ${recent.length} · 30 s`)}
+        ${Row('Strongest', strongest ? `${CLS_SHORT[strongest.cls] || strongest.cls} · ${strongest.rssi} dBm` : '—')}
+        ${Row('Open pings', pins.length ? pins.map((p) => p.pin).join(' ') : 'none')}
+        ${Row('SOS Wi-Fi', s.latest['ag/sos'] ? `answer ${fmtAgo(bt - s.latest['ag/sos'].t)}` : 'no answers')}
+        ${Row('LoRa heard', al ? `${fmtAgo(Date.now() - m.lastAlertWall)} · ${al.rssi} dBm` : '—')}
+        ${Row('Link', st.link !== 'live' ? 'server unreachable' : !s.broker ? 'broker down' : 'live', st.link !== 'live' || !s.broker ? 'duetxt' : '')}
+      </div>
+    </div>`;
+}
+
+// The building, north up, in local metres: outline, the taped park, waypoints, the pod and the pings.
+function BuildingMap({ meta, s, pose, podStale }) {
+  const ring = meta.building?.ring;
+  const zones = meta.map?.zones || [], lines = meta.map?.lines || [];
+  const [zoom, setZoom] = useState(() => loadPref('bzoom', 'building'));
+  useEffect(() => savePref('bzoom', zoom), [zoom]);
+  const near = zoom === 'area' || !ring; // the demo area: the taped park, waypoints, pod and pings
+  const pts = near ? [...zones.flatMap((z) => z.ring), ...Object.values(meta.waypoints || {}),
+                      ...(pose ? [[pose.x, pose.y]] : [])]
+                   : [...ring, ...zones.flatMap((z) => z.ring), ...Object.values(meta.waypoints || {})];
+  if (!pts.length) for (const v of [meta.map?.bounds]) if (v) pts.push([v[0], v[1]], [v[2], v[3]]);
+  if (!pts.length) return html`<div class="lbl">No map for this profile.</div>`;
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  let [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const pad = Math.max(x1 - x0, y1 - y0) * 0.06;
+  x0 -= pad; x1 += pad; y0 -= pad; y1 += pad;
+  const W = x1 - x0, H = y1 - y0, u = Math.max(W, H) / 60; // u: a "unit" for marks and text, in metres
+  const P = ([x, y]) => `${x.toFixed(2)},${(-y).toFixed(2)}`; // north up: SVG y grows down
+  const poly = (r) => r.map(P).join(' ');
+  const trail = (s.trails.pod || []).slice(-300);
+  const pins = Object.values(s.pins).filter((p) => p.status !== 'cleared');
+  const scale = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000].find((v) => v >= W / 6) || 1000;
+  return html`<div class="bmapbox">
+  ${ring && html`<span class="seg bzoom" role="group" aria-label="Map zoom">
+    <button class=${!near ? 'on' : ''} aria-pressed=${!near} onClick=${() => setZoom('building')}>Building</button>
+    <button class=${near ? 'on' : ''} aria-pressed=${near} onClick=${() => setZoom('area')}>Demo area</button></span>`}
+  <svg class="bmap" viewBox=${`${x0} ${-y1} ${W} ${H}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Building map with the pod">
+    ${ring && html`<polygon class="b-bldg" points=${poly(ring)}></polygon>`}
+    ${zones.map((z) => html`<polygon key=${z.id} class=${`b-zone b-${z.kind}`} points=${poly(z.ring)}></polygon>`)}
+    ${lines.map((l) => html`<polyline key=${l.id} class="b-trail" points=${poly(l.pts)}></polyline>`)}
+    ${Object.entries(meta.waypoints || {}).map(([n, [x, y]]) => html`<g key=${`w${n}`} class="b-wp">
+      <circle cx=${x} cy=${-y} r=${u * 1.2}></circle><text x=${x} y=${-y + u * 0.55} font-size=${u * 1.5} text-anchor="middle">${n}</text></g>`)}
+    ${trail.length > 1 && html`<polyline class="b-path" points=${trail.map(P).join(' ')}></polyline>`}
+    ${pins.map((p) => html`<g key=${p.pin}>
+      <circle cx=${p.x} cy=${-p.y} r=${Math.max(p.r95 || 0, u)} class="b-pinr" style=${`stroke:${prioColor(p.prio)}`}></circle>
+      <circle cx=${p.x} cy=${-p.y} r=${u * 0.8} style=${`fill:${prioColor(p.prio)}`}></circle>
+      <text x=${p.x + u * 1.2} y=${-p.y - u * 0.8} font-size=${u * 1.5} class="b-lbl">${p.pin}</text></g>`)}
+    ${pose && html`<g class=${`b-pod ${podStale ? 'stale' : ''}`}><circle cx=${pose.x} cy=${-pose.y} r=${u * 2.2} class="halo"></circle><circle cx=${pose.x} cy=${-pose.y} r=${u * 1.1}></circle></g>`}
+    ${ring && !near && meta.building?.name && html`<text x=${x0 + u} y=${-y1 + u * 2.2} font-size=${u * 1.7} class="b-lbl">${meta.building.name}</text>`}
+    <g class="b-scale"><line x1=${x1 - u - scale} y1=${-y0 - u} x2=${x1 - u} y2=${-y0 - u}></line>
+      <text x=${x1 - u - scale / 2} y=${-y0 - u * 1.6} font-size=${u * 1.3} text-anchor="middle">${scale} m</text></g>
+    <g class="b-north"><path d=${`M${x1 - u * 2} ${-y1 + u * 1} l${u} ${u * 2.6} l${-u} ${-u * 0.8} l${-u} ${u * 0.8} z`}></path>
+      <text x=${x1 - u * 2} y=${-y1 + u * 5} font-size=${u * 1.3} text-anchor="middle">N</text></g>
+  </svg></div>`;
+}
+
+// On the map, outside Emergency (which has its own Camera check card). "Auto": both pictures while
+// the drone checks a ping, the heat picture alone in a night sweep, nothing otherwise.
+const FEED_CHOICES = [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']];
+function MapFeeds({ s, bt, which }) {
+  const th = s.latest['ag/thermal'];
+  return html`<div class="mapfeeds" aria-label="Live pictures from the drone">
+    ${which.includes('camera') && html`<${LiveFeed} key="camera" file="camera.jpg" name="Camera" />`}
+    ${which.includes('heat') && html`<${LiveFeed} key="heat" file="thermal.png" name="Heat" tag=${heatText(th, bt)} warm=${!!th?.hot && !!heatText(th, bt)} />`}
+  </div>`;
+}
+
+function RescueCard({ p, rescue, kase, locked, busy, pinCmd, confirmRescue, notPerson, m, bt, teamOnWay, routeP, backToSweep }) {
   const b = busy[p.pin];
   const r = rescue;
+  const sent = !!(kase?.team_t || m.teamPins?.[p.pin]);
   return html`<section class="p" style="border-color:#f2f2f2">
+    ${routeP && html`<button class="btn primary big" onClick=${backToSweep}>← Back to the sweep</button>
+      <div class="lbl small" style="text-align:center">The drone is still sweeping. This view changes nothing (Esc also leaves it).</div>`}
     <h2 class="h">Rescue route · ${p.pin}${kase?.ping === p.pin ? ` · ${kase.name}` : ''}</h2>
     <div class="num" style="font-size:1.45rem">${p.lat != null ? `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` : `${Math.round(p.x)} E, ${Math.round(p.y)} N (local m)`}</div>
     ${r && html`<ol class="route">
@@ -866,8 +1148,9 @@ function RescueCard({ p, rescue, kase, locked, busy, pinCmd, confirmRescue, notP
     </ol>
     <div class="row"><span class="lbl">On foot</span><span class="num" style="font-size:1.3rem">~${fmtDur(r.secs * 1000)}</span></div>`}
     ${p.status === 'investigating' ? html`<${CheckPanel} p=${p} c=${m.checks[p.pin]} bt=${bt} locked=${locked} b=${b} confirmRescue=${confirmRescue} notPerson=${notPerson} />`
-    : p.status === 'confirmed' ? (kase?.team_t || m.teamPins?.[p.pin]
-      ? html`<div style="color:var(--moss);font-weight:700;text-align:center">Team on the way · sent ${fmtAgo(Date.now() - (kase?.team_t || Date.now()))}</div>`
+    : p.status === 'confirmed' ? (sent
+      ? html`<div style="color:var(--moss);font-weight:700;text-align:center">Team on the way · sent ${fmtAgo(Date.now() - (kase?.team_t || Date.now()))}</div>
+        ${!routeP && html`<button class="btn big" disabled=${locked} onClick=${backToSweep}>← Back to the sweep</button>`}`
       : html`<div style="color:var(--moss);font-weight:700;text-align:center">Person confirmed · the drone stays over them</div>
         <button class="btn primary big" disabled=${locked} onClick=${() => teamOnWay(p.pin)}>Team on the way · back to scanning</button>`)
     : p.status === 'cleared' ? html`<div class="lbl" style="text-align:center">Cleared</div>`
@@ -893,13 +1176,17 @@ function LoraPings({ m }) {
 const MAP_LAYERS = { probability: false, trail: false, tracks: false, heard: false, roads: true, labels: false };
 const SWEEP = new Set(['patrol', 'night']);
 
-function MapPane({ meta, s, sel, follow, setFollow, night, cv, podStale, m, setSel, mode, target, rescue }) {
+function MapPane({ meta, s, sel, follow, setFollow, night, cv, podStale, m, setSel, mode, target, rescue, checking, bt, live }) {
   const host = useRef(null);
   const lm = useRef(null);
   const ex = useRef({ car: null, pod: null, hits: -1, fitKey: null });
   const [ready, setReady] = useState(false);
   const [base, setBase] = useState(() => loadPref('base', 'sat'));
   const [mapErr, setMapErr] = useState(null);
+  const [feeds, setFeeds] = useState(() => loadPref('feeds', 'auto'));
+  useEffect(() => savePref('feeds', feeds), [feeds]);
+  const feedWhich = live || mode === 'investigate' || feeds === 'off' ? []
+    : feeds === 'on' || checking ? ['camera', 'heat'] : night ? ['heat'] : [];
 
   useEffect(() => {
     try {
@@ -951,9 +1238,14 @@ function MapPane({ meta, s, sel, follow, setFollow, night, cv, podStale, m, setS
       </span>
       <button class=${follow ? 'on' : ''} aria-pressed=${follow} onClick=${() => setFollow(!follow)}>Follow drone</button>
       <button onClick=${() => lm.current && frame(lm.current, meta, mode, cv, target, s, rescue)}>Fit</button>
+      ${mode !== 'investigate' && html`<span class="seg" role="group" aria-label="Camera and heat pictures">
+        <span class="seglbl">Pictures</span>
+        ${FEED_CHOICES.map(([k, label]) => html`<button key=${k} class=${feeds === k ? 'on' : ''} aria-pressed=${feeds === k} onClick=${() => setFeeds(k)}>${label}</button>`)}
+      </span>`}
       ${podStale && m.lastPoseWall > 0 && html`<span class="stale">Drone last seen ${fmtAgo(Date.now() - m.lastPoseWall)}</span>`}
     </div>
     <${MapKey} mode=${mode} kase=${cv.case} rescue=${!!rescue} />
+    ${feedWhich.length > 0 && html`<${MapFeeds} s=${s} bt=${bt} which=${feedWhich} />`}
   </div>`;
 }
 
