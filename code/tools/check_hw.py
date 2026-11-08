@@ -20,6 +20,8 @@ import socket
 import subprocess
 import sys
 import time
+
+import numpy as np
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -191,6 +193,27 @@ def c_i2c(a):
     if imu not in found:
         return "FAIL", f"IMU (BNO086) not at 0x{imu} (found {sorted(found) or 'nothing'}): 3.3 V, SDA/SCL, ADR jumper?"
     return "PASS", f"IMU at 0x{imu}"  # the thermal camera is USB now (HT-203U), not I2C
+
+
+@check("thermal")
+def c_thermal(a):
+    """Grab one raw frame from the HT-203U and report the scene's temperature range."""
+    from afterglow import thermal
+    th = a.cfg["thermal"]
+    try:
+        dev = thermal.find_device(th)
+    except SystemExit as e:
+        return "FAIL", str(e)
+    run(["v4l2-ctl", "-d", dev, f"--set-fmt-video=width={thermal.RAW_W},height={thermal.RAW_H},pixelformat=YUYV"])
+    if shutil.which("v4l2-ctl") is None:
+        return "SKIP", "v4l2-ctl not installed (sudo apt install v4l-utils)"
+    try:
+        p = subprocess.run(["v4l2-ctl", "-d", dev, "--stream-mmap", "--stream-skip=3", "--stream-count=1", "--stream-to=-"],
+                           capture_output=True, timeout=15)
+        c, sensor_c = thermal.parse_raw(p.stdout, *thermal.calibration(th))
+    except (subprocess.TimeoutExpired, ValueError) as e:
+        return "FAIL", f"{dev}: {e} (another program using it? thermal.py running?)"
+    return "PASS", f"{dev}: scene {c.min():.1f} to {c.max():.1f} C, median {float(np.median(c)):.1f} C; sensor {sensor_c:.1f} C"
 
 
 @check("camera")

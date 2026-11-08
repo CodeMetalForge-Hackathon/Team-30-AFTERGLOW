@@ -42,7 +42,7 @@ imu_addr = 0x4B            # SparkFun BNO086, ADR jumper open (0x4A only if ADR 
 [thermal]
 # thermal.py: the HTI HT-203U, a USB video device. Never /dev/videoN: the Camera Module 3
 # makes /dev/video* nodes too, so the numbers shift between boots.
-device = "/dev/thermal"    # udev symlink (pi/99-afterglow.rules) or /dev/v4l/by-id/...; set after the Pi format test
+device = "/dev/thermal"    # udev symlink (pi/99-afterglow.rules); falls back to /dev/v4l/by-id/*HikCamera*
 fps = 4                    # live/thermal.png and ag/thermal this often
 rotate = 0                 # 0, 90, 180 or 270 degrees clockwise, so the picture is upright as mounted
 flip = false               # mirror left-right
@@ -52,6 +52,19 @@ hot_max_c = 45.0           # warmer is an engine or a sun-baked rock, not a pers
 hot_rise_c = 5.0           # degrees above the frame's median
 # hot, when it gives only a picture (no temperatures): how far the spot stands out, in spreads of the frame
 hot_z = 6.0
+# HT-203U raw heat -> degrees C = (raw + drift) / raw_per_c - raw_offset_c (check Sat 7 Nov:
+# a wall read 5101, a palm 5303). The offset is set so the wall reads 22 C; redo it against a known temperature.
+raw_per_c = 16.0
+raw_offset_c = 296.8
+# The raw values sag as the camera warms (a wall: 5101 at sensor 22.5 C, 4998 at 24.7 C): add
+# raw_sensor_k counts per degree of sensor temperature above raw_sensor_ref_c (header word 0).
+raw_sensor_k = 47.7
+raw_sensor_ref_c = 22.5
+# Even so the HT-203U's absolute reading drifts (a wall read 16 C after warm-up). false: shift each frame
+# so its median (the background) reads ambient_c; a person still stands out by the same degrees, so
+# the hot band above keeps working and max_c is approximate. true: trust the calibration above.
+absolute = false
+ambient_c = 22.0           # indoors; set to the air temperature outdoors
 
 [camera]
 # camera.py: the Camera Module 3 -> live/camera.jpg, a live view for the dashboard's camera panel.

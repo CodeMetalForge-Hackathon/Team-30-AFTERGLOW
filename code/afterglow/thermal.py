@@ -2,7 +2,7 @@
 
     python -m afterglow.thermal --fake                        # made-up frames, to the broker
     python -m afterglow.thermal --fake --dry-run --frames 8   # no broker: print ag/thermal (still writes the PNG)
-    python -m afterglow.thermal                               # on the Pi: the real camera (after the format test)
+    python -m afterglow.thermal                               # on the Pi: the real camera (needs v4l2-ctl)
 
 Every frame goes through Thermal.handle_frame(): find the warm spot, decide `hot`, write the
 picture for the dashboard (temp file, then rename) and publish ag/thermal (CONTRACTS.md).
@@ -12,8 +12,8 @@ A frame is a 2-D array, in one of two kinds:
   means body-warm (the [thermal] band) and well above the rest of the frame;
 - 0-255 brightness, if it gives only a picture with automatic contrast: `max_c` is null, and
   `hot` means the spot stands far out from the rest of the frame.
-Which one the HT-203U sends on Linux is still unknown (TODO.md, "thermal.py"), so the real
-camera reader isn't written yet. --fake feeds made-up frames in degrees C.
+The HT-203U gives temperatures: its 256x392 mode carries raw heat values above the picture
+(parse_raw; format test Sat 7 Nov). --fake feeds made-up frames in degrees C.
 """
 import argparse
 import logging
@@ -182,11 +182,104 @@ def fake_frames(seed: int = 0):
         i += 1
 
 
+RAW_W, RAW_H = 256, 392  # the HT-203U's double-height YUYV mode (format test, Sat 7 Nov)
+TEMP_ROWS, HEADER_ROWS = 192, 4  # rows 0-191: 16-bit raw heat; 192-195: header; 196-387: the 8-bit picture
+FRAME_BYTES = RAW_W * RAW_H * 2
+
+
+def parse_raw(buf: bytes, per_c: float, offset_c: float, sensor_k: float = 0.0, sensor_ref_c: float = 0.0):
+    """One 256x392 YUYV buffer from the HT-203U -> (degrees C, 192 x 256; the sensor's own temperature in C).
+
+    The top 192 rows aren't a picture: each 2-byte pixel is a little-endian raw heat value, linear in
+    temperature. Header row 0, word 0 is the sensor's own temperature in hundredths of a degree.
+    The raw values sag as the camera warms up (a wall: 5101 at sensor 22.5 C, 4998 at 24.7 C), so:
+        degrees C = (raw + sensor_k * (sensor - sensor_ref_c)) / per_c - offset_c
+    ([thermal] raw_per_c, raw_offset_c, raw_sensor_k, raw_sensor_ref_c; from a wall at about 22 C and
+    a palm, Sat 7 Nov, so a degree or two out)."""
+    if len(buf) != FRAME_BYTES:
+        raise ValueError(f"frame is {len(buf)} bytes, not {FRAME_BYTES} (256x392 YUYV)")
+    words = np.frombuffer(buf, "<u2").reshape(RAW_H, RAW_W)
+    sensor = words[TEMP_ROWS, 0] / 100.0
+    raw = words[:TEMP_ROWS].astype(np.float32) + sensor_k * (sensor - sensor_ref_c)
+    return raw / per_c - offset_c, sensor
+
+
+def calibration(th: dict) -> tuple:
+    """[thermal] -> parse_raw's calibration arguments."""
+    return (float(th["raw_per_c"]), float(th["raw_offset_c"]), float(th["raw_sensor_k"]), float(th["raw_sensor_ref_c"]))
+
+
+def find_device(th: dict) -> str:
+    dev = th["device"]
+    if os.path.exists(dev):
+        return dev
+    import glob
+    found = sorted(glob.glob("/dev/v4l/by-id/*HikCamera*index0"))
+    if found:
+        log.warning("%s missing (udev rule not installed?): using %s", dev, found[0])
+        return found[0]
+    raise SystemExit(f"no thermal camera: {dev} missing and no /dev/v4l/by-id/*HikCamera* (plugged in?)")
+
+
 def camera_frames(cfg: dict):
-    """The real HT-203U through OpenCV. Written after the format test on the Pi (TODO.md)."""
-    raise NotImplementedError(
-        "the real camera reader comes after the 10-minute format test on the Pi (TODO.md, thermal.py); "
-        "use --fake until then")
+    """The real HT-203U: v4l2-ctl streams raw 256x392 YUYV frames (25 fps) into a pipe; a thread keeps
+    only the newest, so run() always gets a fresh frame at [thermal] fps. Restarts the stream if it dies."""
+    import subprocess
+    import threading
+
+    th = cfg["thermal"]
+    cal = calibration(th)
+    anchor = None if th["absolute"] else float(th["ambient_c"])
+    latest = {"buf": None, "n": 0}
+    cond = threading.Condition()
+
+    find_device(th)  # no camera: stop now with a clear message, not in the thread
+
+    def reader():
+        while True:
+            try:
+                dev = find_device(th)
+            except SystemExit as e:  # unplugged: keep trying
+                log.error("%s; retrying in 2 s", e)
+                time.sleep(2)
+                continue
+            # Setting the format can fail with "Input/output error" when it's already set: harmless.
+            subprocess.run(["v4l2-ctl", "-d", dev, f"--set-fmt-video=width={RAW_W},height={RAW_H},pixelformat=YUYV"],
+                           capture_output=True)
+            p = subprocess.Popen(["v4l2-ctl", "-d", dev, "--stream-mmap", "--stream-count=0", "--stream-to=-"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            log.info("thermal camera streaming from %s", dev)
+            try:
+                while True:
+                    buf = p.stdout.read(FRAME_BYTES)
+                    if len(buf) < FRAME_BYTES:
+                        break
+                    with cond:
+                        latest["buf"], latest["n"] = buf, latest["n"] + 1
+                        cond.notify_all()
+            finally:
+                p.kill()
+            log.error("thermal stream from %s stopped; restarting in 2 s", dev)
+            time.sleep(2)
+
+    threading.Thread(target=reader, daemon=True).start()
+    seen = 0
+    while True:
+        with cond:
+            if not cond.wait_for(lambda: latest["n"] > seen, timeout=10):
+                log.warning("no thermal frame for 10 s")
+                continue
+            buf, seen = latest["buf"], latest["n"]
+        try:
+            celsius, sensor_c = parse_raw(buf, *cal)
+        except ValueError as e:
+            log.error("%s: is the camera in another mode? Check v4l2-ctl --list-formats-ext", e)
+            continue
+        if anchor is not None:
+            # The raw offset drifts by many degrees as the camera warms; shift the frame so its
+            # background reads ambient_c. A person still stands out by the same number of degrees.
+            celsius = celsius + (anchor - float(np.median(celsius)))
+        yield celsius, True, "ht203u"
 
 
 def run(th: Thermal, frames, fps: float, limit: int = 0, sleep: bool = True):
@@ -214,11 +307,15 @@ def main():
     cfg = cfgmod.load(a.config)
     live = cfgmod.resolve(cfg, cfg["http"]["live_dir"])
 
-    try:
-        frames = fake_frames(a.seed) if a.fake else camera_frames(cfg)
-    except NotImplementedError as e:
-        log.error("%s", e)
-        sys.exit(2)
+    if a.fake:
+        frames = fake_frames(a.seed)
+    else:
+        try:
+            find_device(cfg["thermal"])
+        except SystemExit as e:
+            log.error("%s; use --fake for made-up frames", e)
+            sys.exit(2)
+        frames = camera_frames(cfg)
 
     bus = PrintBus() if a.dry_run else Bus(cfg["mqtt"]["host"], cfg["mqtt"]["port"], "thermal")
     th = Thermal(cfg, bus, live)
