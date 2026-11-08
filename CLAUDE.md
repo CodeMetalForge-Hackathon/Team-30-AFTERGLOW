@@ -51,7 +51,7 @@ code/
     dashboard.py        web server on [http] port: SSE state stream, /api/ctrl, /api/mode, /api/case, live/ and snaps/
     web/                dashboard front end: app.js (Preact+htm panels), map.js (Leaflet, metres), store.js (SSE reducer);
                         tv.html/tv.js/tv.css (operator TV around livemap.js, docs/TV.md); livemap.js (3D map, docs/LIVEMAP.md);
-                        nearby.html (close-range view, north up: rings = heard, RSSI distance only; dots = located by tracker.py; ?demo=1 for fake data)
+                        nearby.html (close-range view of alert beacons only, north up: rings = heard, RSSI distance only; dots = located by tracker.py; ?demo=1 for fake data)
   afterglow.toml        DEMO profile (taped indoor park at 60 State Street, Boston); must be identical on the pod and the laptop
   park.toml             PARK profile (realistic view, real Acadia trails), laptop only; same keys as afterglow.toml
   data/                 trails/zones/building.geojson (indoor; building is approximate) and park_trails/park_zones.geojson (OSM); all lon/lat
