@@ -5,21 +5,19 @@
   this puts the teams in /api/state too, so a TV that opens late sees them.
 - TakCommands: the dashboard Commands, plus rescue(): the ground team's route goes on the bus as
   ag/rescue, and tak_link.py draws it on the phones. Geometry only, never case details.
-- make_tak_handler: the dashboard's HTTP handler, plus POST /api/rescue, and the TV files from
-  tak/web/ (tv.js, store.js, tv.css: the TV with the field teams in it) in place of code/afterglow/web's.
-  Every other page and file is served exactly as before.
+- make_tak_handler: the dashboard's HTTP handler, plus POST /api/rescue, and meta.tak = true so the TV
+  (code/afterglow/web/tv.js, which has the field-team panels built in) sends the rescue route.
+  Every page and file is served exactly as before.
 """
 import json
 import math
-from pathlib import Path
 from urllib.parse import urlsplit
 
 import tak_contracts  # noqa: F401  (puts code/ on sys.path)
 from afterglow.contracts import now_ms
-from afterglow.dashboard import Commands, State, make_handler, safe_file
+from afterglow.dashboard import Commands, State, make_handler
 from tak_contracts import RESCUE, TEAM, validate
 
-TAK_WEB = Path(__file__).resolve().parent / "web"
 TEAM_LOG = 40  # recent chat and reports from the TAK phones kept
 MAX_PTS = 500
 MAX_BODY = 32768  # a route of MAX_PTS points; the dashboard's own POSTs keep their 4 KB limit
@@ -68,16 +66,9 @@ class TakCommands(Commands):
 
 
 def make_tak_handler(state, cmds: TakCommands, meta, dirs, cases=None, sim=None):
-    Base = make_handler(state, cmds, meta, dirs, cases, sim)
-    overrides = {f"/{p.name}" for p in TAK_WEB.iterdir() if p.is_file()}
+    Base = make_handler(state, cmds, {**meta, "tak": True}, dirs, cases, sim)  # tak: the TV may POST /api/rescue
 
     class TakHandler(Base):
-        def do_GET(self):
-            path = urlsplit(self.path).path
-            if path in overrides:
-                return self.send_file(safe_file(TAK_WEB, path), cache=False)
-            return super().do_GET()
-
         def do_POST(self):
             if urlsplit(self.path).path != "/api/rescue":
                 return super().do_POST()

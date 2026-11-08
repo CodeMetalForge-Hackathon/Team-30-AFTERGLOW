@@ -26,9 +26,10 @@ Two ways, so the TV (tv.html) and the phones work as one:
   (ag/rescue) as a white line. A phone that connects gets the map cleaned of old markers and a
   catch-up message. --no-chat leaves the messages out.
 - From the phones: each phone's position (ag/team kind pos) and chat (kind chat) go to the TV.
-  Chat "ack P3" or "check P3" acts like the ranger's button (ag/ctrl, with "by"); "found P3" or
-  "nobody P3" is a field report (kind report) that the TV offers the ranger to Confirm or Clear.
-  The drone never decides, and neither does a chat: confirming a person is still the ranger's click.
+  A chat that starts with "ack P3", "check P3", "found P3" or "nobody P3" is also a field report
+  (kind report). The TV shows it to the ranger with the matching button. A phone never publishes
+  ag/ctrl: the drone never decides, neither does a chat, and only the ranger sends the drone or
+  confirms a person.
 Phones also see each other: positions and chat are passed on to the other phones, as a TAK server does.
 """
 import argparse
@@ -57,7 +58,7 @@ from afterglow import config as cfgmod  # noqa: E402
 from afterglow import geo  # noqa: E402
 from afterglow.alert import TYPE_CONFIRMED, TYPE_HEARTBEAT, TYPE_SOS  # noqa: E402
 from afterglow.bus import Bus  # noqa: E402
-from afterglow.contracts import ALERT, CTRL, MODE, POSE, TARGET, now_ms  # noqa: E402
+from afterglow.contracts import ALERT, MODE, POSE, TARGET, now_ms  # noqa: E402
 from tak_contracts import RESCUE, TEAM, validate  # noqa: E402  (validate: the TAK topics, then contracts.py's)
 
 log = logging.getLogger("tak_link")
@@ -67,8 +68,10 @@ CHAT_ROOM = "All Chat Rooms"  # TAK's room for everyone on the network
 CHAT_SENDER = "afterglow.pod"  # the pod's marker uid, so the message links to the drone
 ROUTE = "u-d-f"  # a drawn line: the ground team's rescue route
 MODE_TEXT = {"patrol": "Day sweep", "night": "Night sweep", "search": "Trail pathing", "investigate": "Emergency"}
-PIN_RE = re.compile(r"\bP\s?(\d{1,3})\b", re.I)
-VERB_RE = re.compile(r"\b(ack|acknowledge|check|investigate|found|here|person|nobody|no one|empty|clear)\b", re.I)
+# A field report must start the message: "found P3, he's conscious" is one; "P3 is not a person" and
+# "don't check P3 yet" are only chat. Anywhere else in a message the words are too easy to misread.
+COMMAND_RE = re.compile(r"^\s*(ack|check|found|nobody)\s+(?:at\s+)?P\s?(\d{1,3})\b", re.I)
+LOOSE_RE = re.compile(r"\b(ack|check|found|nobody)\b.*\bP\s?\d{1,3}\b|\bP\s?\d{1,3}\b.*\b(ack|check|found|nobody)\b", re.I)
 POS_EVERY_S = 2.0  # a phone's position goes on the bus at most this often
 UNKNOWN = "9999999.0"  # CoT for "no height" and "no error estimate"
 COLOURS = {1: 0xFFE5484D, 2: 0xFFF76B15, 3: 0xFFF5C13D, 4: 0xFF8B95A3}  # prio -> ARGB: the TV's ping colours (livemap.js PRIO_COLOR)
@@ -454,22 +457,22 @@ class CotOut:
             self.stats["phone_pos"] += 1
 
     def command(self, who, uid, text):
-        """Chat commands from the field. ack / check act like the ranger's buttons (geofence still checks the
-        step is allowed); found / nobody are reports the ranger confirms or clears on the TV."""
-        pm, vm = PIN_RE.search(text), VERB_RE.search(text)
-        if not pm or not vm:
+        """A field report from the chat: "ack P3" (the team has seen it), "check P3" (asks for the drone),
+        "found P3" or "nobody P3". Each goes to the TV as a report; the ranger's click is what acts on it.
+        Never ag/ctrl: a phone can't send the drone or change a pin (CLAUDE.md, the one rule)."""
+        cm = COMMAND_RE.match(text)
+        if not cm:
+            if self.chat and LOOSE_RE.search(text):  # looks like a command, but not one we act on: say how
+                self.send_chat(f"{who}: to report, start the message with the command, e.g. "
+                               "'found P3', 'nobody P3', 'check P3' or 'ack P3'.", *self.origin)
             return
-        pin, verb = f"P{int(pm.group(1))}", vm.group(1).lower()
-        if verb in ("ack", "acknowledge", "check", "investigate"):
-            cmd = "ack" if verb.startswith("ack") else "investigate"
-            self.publish(CTRL, {"t": now_ms(), "cmd": cmd, "pin": pin, "by": who})
-            reply = f"Got it, {who}: " + (f"{pin} acknowledged." if cmd == "ack" else f"drone sent to check {pin}.")
-        else:
-            verdict = "found" if verb in ("found", "here", "person") else "nobody"
-            self.publish(TEAM, {"t": now_ms(), "uid": uid, "callsign": who, "kind": "report", "pin": pin,
-                                "verdict": verdict, "text": text[:300]})
-            reply = (f"{who} reports a person at {pin}. Waiting for the ranger to confirm." if verdict == "found"
-                     else f"{who} reports no one at {pin}. Waiting for the ranger to clear it.")
+        verdict, pin = cm.group(1).lower(), f"P{int(cm.group(2))}"
+        self.publish(TEAM, {"t": now_ms(), "uid": uid, "callsign": who, "kind": "report", "pin": pin,
+                            "verdict": verdict, "text": text[:300]})
+        reply = {"ack": f"Got it, {who}: told the ranger you have seen {pin}.",
+                 "check": f"{who} asks for the drone to check {pin}. Waiting for the ranger to send it.",
+                 "found": f"{who} reports a person at {pin}. Waiting for the ranger to confirm.",
+                 "nobody": f"{who} reports no one at {pin}. Waiting for the ranger to clear it."}[verdict]
         self.stats["phone_cmd"] += 1
         if self.chat:
             self.send_chat(reply, *self.origin)

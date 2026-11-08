@@ -237,6 +237,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   It took one developer a full weekend, so try it only with a GPU and spare time.
 - [ ] **Radar pole mount.**
 - [ ] **Pod battery reading (UT):** a voltage divider from the LiPo into a XIAO analog pin, so `ag/sys` `batt_pct` stops being `null`.
+- [ ] **TAK server login (SW):** today anyone on our hotspot can join `tak_link.py` (plain TCP 8087 has no login; TLS 8089 doesn't require a client certificate), and post chat, field reports or positions to the TV. Phones can't move the drone or change a pin, so this matters only off our own hotspot. Fix: `ssl.CERT_REQUIRED` in `tak_link.tls_context()` (the iTAK package from `tak_certs.py` already holds a client certificate), and drop or firewall plain TCP. Test on a real iPhone first.
 
 ### Beyond the hackathon
 

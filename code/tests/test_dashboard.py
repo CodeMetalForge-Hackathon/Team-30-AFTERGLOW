@@ -199,6 +199,7 @@ def test_http_page_and_map(server):
     _, _, body = get(base + "/api/map")
     meta = json.loads(body)
     assert meta["profile"] == "afterglow" and meta["map"]["zones"] and meta["waypoints"]["0"] == [0.0, 0.0]
+    assert "tak" not in meta  # no TAK server here: the TV must not post rescue routes (tv.js checks meta.tak)
     assert get(base + "/vendor/leaflet-1.9.4/leaflet.js")[0] == 200
 
 

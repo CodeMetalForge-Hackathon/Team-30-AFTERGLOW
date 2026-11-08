@@ -1,5 +1,9 @@
 """tak_stack.py's clock: with --start-paused the drone waits at time zero for the TV's Start, and again after Reset."""
-from tak_stack import HoldClock
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tak"))  # the TAK add-on lives in tak/, beside code/
+from tak_stack import HoldClock  # noqa: E402
 
 
 def test_start_paused_waits_at_time_zero_and_reset_waits_again():

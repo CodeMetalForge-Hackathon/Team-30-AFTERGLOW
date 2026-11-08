@@ -1,15 +1,21 @@
 """The dashboard's half of the TAK link, added from outside dashboard.py: ag/team kept in the state,
-POST /api/rescue -> ag/rescue, and the TAK copies of the TV files served in place of the originals."""
+POST /api/rescue -> ag/rescue, and meta.tak so the one TV (code/afterglow/web) sends the rescue route."""
 import json
+import sys
 import threading
 import urllib.request
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 from afterglow import config
 from afterglow.dashboard import make_meta
 from afterglow.parkmap import ParkMap
-from tak_contracts import RESCUE, TEAM, validate
-from tak_dashboard import TakCommands, TakState, make_tak_handler
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tak"))  # the TAK add-on lives in tak/, beside code/
+from tak_contracts import RESCUE, TEAM, validate  # noqa: E402
+from tak_dashboard import TakCommands, TakState, make_tak_handler  # noqa: E402
+
+WEB = Path(__file__).resolve().parents[1] / "afterglow" / "web"
 
 
 class StubBus:
@@ -59,8 +65,9 @@ def test_http_serves_the_tak_tv_and_takes_rescue_routes():
     base = f"http://127.0.0.1:{server.server_address[1]}"
     try:
         tv = urllib.request.urlopen(base + "/tv.js").read().decode()
-        assert tv.startswith("// TAK add-on copy") and "FieldBanner" in tv
-        assert b"<html" in urllib.request.urlopen(base + "/tv.html").read().lower()  # the original page, unchanged
+        assert tv == (WEB / "tv.js").read_text() and "FieldBanner" in tv  # the one TV, with the TAK parts built in
+        assert b"<html" in urllib.request.urlopen(base + "/tv.html").read().lower()
+        assert json.load(urllib.request.urlopen(base + "/api/map"))["tak"] is True  # the TV may send rescue routes
         assert "teams" in json.load(urllib.request.urlopen(base + "/api/state"))
         req = urllib.request.Request(base + "/api/rescue", method="POST", headers={"Content-Type": "application/json"},
                                      data=json.dumps({"pin": "P2", "pts": [[0, 0], [5, 5]]}).encode())

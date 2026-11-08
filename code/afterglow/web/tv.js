@@ -2,6 +2,11 @@
 // Modes: Day sweep (patrol), Night sweep (night), Trail pathing (search), Emergency (investigate).
 // Every command here comes from a click. Nothing auto-confirms a ping or accepts a leg: the drone
 // never decides. "Ping" is the screen word for a pin (an ag/target record).
+// TAK (tak_link.py) is the other half of the same system: the field teams' phones show every ping, the
+// drone and the rescue route, and send back their positions (drawn here), chat and reports ("found P3"),
+// which this screen offers to the ranger as the same buttons. A report never acts by itself.
+// The TAK parts stay idle without TAK: no ag/team means no field-team panels, and the rescue route is only
+// posted when the server has /api/rescue (meta.tak, set by tak/tak_dashboard.py).
 import { html, render, useState, useEffect, useRef } from './vendor/htm-3.1.1/standalone.module.js';
 import { connect } from './store.js';
 import { LiveMap, PRIO_COLOR } from './livemap.js';
@@ -395,6 +400,11 @@ function App() {
   const every = (meta.search?.checkin_s ?? 300) * 1000;
   const checkin = confirmed ? checkinState(confirmed, m, kase, bt, every) : null;
   const stage = mode === 'investigate' || confirmed ? 4 : investigating ? 3 : fresh.length ? 2 : 1;
+  // a field team's report from TAK ("check P3", "found P3", "nobody P3"), newest first, until the ranger acts or
+  // dismisses it. "ack P3" (the team has seen it) only goes in the field log. A "check" is moot once the drone is on it.
+  const report = (s.team_log || []).find((r) => r.kind === 'report' && r.verdict !== 'ack' && !m.handledReports?.[`${r.uid}|${r.t}`]
+    && s.pins[r.pin] && isOpen(s.pins[r.pin]) && !(r.verdict === 'check' && s.pins[r.pin].status === 'investigating')) || null;
+  const dismissReport = (r) => { (m.handledReports ||= {})[`${r.uid}|${r.t}`] = true; setTick((t) => t + 1); };
 
   // clicks
   const pick = (pin) => setSel(pin); // the map flies to it (MapPane)
@@ -420,7 +430,15 @@ function App() {
       if (caseRef.current?.case && caseRef.current.case.ping !== pin) linkPing(pin);
       setSel(pin);
       await setMode('investigate');
+      sendRescue(pin);
     }
+  };
+  const sendRescue = (pin) => { // the ground team's route, to the TAK phones as a white line (ag/rescue)
+    const p = store.current.state.pins[pin];
+    if (!p || !meta.tak) return; // no TAK server behind this dashboard: nothing to send the route to
+    const plan = rescuePlan(meta, caseRef.current || NO_CASE, p);
+    post('/api/rescue', { pin, pts: plan.pts, secs: Math.round(plan.secs), label: plan.start?.label || '' })
+      .then((r) => { if (!r.ok) toast(`Rescue route to TAK failed: ${r.problems.join('; ')}`, 'bad'); });
   };
   const notPerson = async (pin) => { // 4b: clear it; the drone goes back to its path
     if (await pinCmd(pin, 'clear', 'Not a person:')) {
@@ -443,6 +461,7 @@ function App() {
     return null;
   };
   const closeCase = async () => {
+    if (meta.tak) for (const p of Object.values(store.current.state.pins)) if (p.status === 'confirmed') post('/api/rescue', { pin: p.pin, pts: [] }); // routes off the phones
     const r = await post('/api/case/close', {});
     if (r.ok) for (const p of Object.values(store.current.state.pins)) if (p.status === 'confirmed') (mem.current.donePins ||= {})[p.pin] = true;
     if (r.ok) { caseRef.current = r.data; setCaseView(r.data); toast('Case closed'); } else toast(`Close failed: ${r.problems.join('; ')}`, 'bad');
@@ -453,7 +472,7 @@ function App() {
   };
   const setSimState = async (body) => {
     const r = await post('/api/sim', body);
-    if (r.ok) setSim({ paused: r.data.paused, speed: r.data.speed }); else toast(`Simulation: ${r.problems.join('; ')}`, 'bad');
+    if (r.ok) setSim({ paused: r.data.paused, speed: r.data.speed, started: r.data.started }); else toast(`Simulation: ${r.problems.join('; ')}`, 'bad');
   };
   const teamOnWay = async (pin) => { // after a person is confirmed: the team is sent, the drone goes back to its sweep
     if (caseRef.current?.case) {
@@ -461,6 +480,7 @@ function App() {
       if (r.ok) { caseRef.current = r.data; setCaseView(r.data); }
     }
     mem.current.teamPins = { ...(mem.current.teamPins || {}), [pin]: mem.current.teamPins?.[pin] || s.bus_t };
+    sendRescue(pin); // in case it wasn't sent at Confirm (an older page); TAK only announces it once
     setSel(null);
     await setMode(caseRef.current?.case?.prior_mode || 'patrol');
     toast(`Team on the way to ${pin}. Check in on them every ${fmtDur(every)}.`);
@@ -479,8 +499,10 @@ function App() {
       <${TopBar} ...${ctx} problems=${problems} chimeOn=${chimeOn} toggleChime=${toggleChime} sim=${sim} setSimState=${setSimState} live=${live} setLive=${setLive} />
       <div class="banners">
         <${Steps} stage=${stage} mode=${mode} cv=${cv} />
+        ${sim && sim.paused && sim.started === false && html`<${ReadyBanner} mode=${mode} teams=${Object.keys(s.teams || {}).length} start=${() => setSimState({ paused: false })} />`}
         ${podStale && html`<${LoraBanner} m=${m} loraFresh=${loraFresh} />`}
         ${sosPin && html`<${SosBanner} p=${sosPin} mode=${mode} setMode=${setMode} locked=${locked} pick=${pick} />`}
+        ${report && html`<${FieldBanner} r=${report} p=${s.pins[report.pin]} locked=${locked} pinCmd=${pinCmd} confirmRescue=${confirmRescue} notPerson=${notPerson} pick=${pick} dismiss=${() => dismissReport(report)} />`}
         ${alertPin && html`<${PingBanner} p=${alertPin} m=${m} bt=${bt} kase=${kase} pick=${pick} />`}
         ${checkin?.due && mode !== 'investigate' && !routeP && html`<${CheckinBanner} p=${confirmed} c=${checkin} pose=${pose} kase=${kase} show=${() => { setLive(false); setRoutePin(confirmed.pin); }} />`}
       </div>
@@ -578,6 +600,44 @@ function SosBanner({ p, mode, setMode, locked, pick }) {
   </div>`;
 }
 
+function ReadyBanner({ mode, teams, start }) { // local_stack.py --start-paused: time zero, drone on the pad
+  return html`<div class="banner ban-ready" role="status">
+    <div><div class="big">Ready to launch · ${(MODES.find(([k]) => k === mode) || MODES[0])[1]}</div>
+      <div class="sub">Drone on the pad, no pings yet. ${teams ? `${teams} field team${teams > 1 ? 's' : ''} on TAK.` : 'TAK phones can join now; they get the same map.'}</div></div>
+    <div class="spacer"></div>
+    <button class="go" onClick=${start}>▶ Start the search</button>
+  </div>`;
+}
+
+const REPORT_WORDS = { ack: 'has seen', check: 'asks the drone to check', found: 'reports a person at', nobody: 'reports no one at' };
+
+function FieldBanner({ r, p, locked, pinCmd, confirmRescue, notPerson, pick, dismiss }) { // from a TAK phone
+  const found = r.verdict === 'found', check = r.verdict === 'check';
+  const checking = p.status === 'investigating';
+  return html`<div class="banner ban-field" role="alert">
+    <span class="chipbig">${p.pin}</span>
+    <div><div class="big">${r.callsign} (field team) ${REPORT_WORDS[r.verdict] || 'reports on'} ${p.pin}</div>
+      <div class="sub">From TAK: “${r.text}” · the ranger decides</div></div>
+    <div class="spacer"></div>
+    ${(found || check) && !checking && html`<button disabled=${locked} onClick=${async () => { if (await pinCmd(p.pin, 'investigate', 'Investigate') && check) dismiss(); }}>Check ${p.pin} with the drone</button>`}
+    ${found && checking && html`<button disabled=${locked} onClick=${() => { dismiss(); confirmRescue(p.pin); }}>Confirm person · start rescue</button>`}
+    ${r.verdict === 'nobody' && html`<button disabled=${locked} onClick=${() => { dismiss(); notPerson(p.pin); }}>Not a person · continue search</button>`}
+    <button onClick=${() => pick(p.pin)}>Show</button>
+    <button onClick=${dismiss}>Dismiss</button>
+  </div>`;
+}
+
+function FieldCard({ s }) { // the TAK phones: how many are on the map and what they last said
+  const teams = Object.values(s.teams || {});
+  const log = (s.team_log || []).slice(0, 4);
+  if (!teams.length && !log.length) return null;
+  return html`<section class="p">
+    <h2 class="h">Field teams (TAK) · ${teams.length} on the map</h2>
+    <div class="events">${log.length ? log.map((e) => html`<div key=${`${e.uid}|${e.t}`}><span class="mono">${fmtHM(e.t)}</span><b>${e.callsign}</b>: ${e.kind === 'report' ? `${REPORT_WORDS[e.verdict] || 'reports on'} ${e.pin}` : e.text}</div>`)
+      : html`<div class="dim">No messages yet. Phones can reply “ack P3”, “check P3”, “found P3” or “nobody P3”.</div>`}</div>
+  </section>`;
+}
+
 function PingBanner({ p, m, bt, kase, pick }) {
   const match = kase?.expect_cls && kase.expect_cls === p.cls;
   return html`<div class="banner ban-ping" role="alert" style=${`background:${prioColor(p.prio)}`}>
@@ -627,13 +687,14 @@ function right(c, podStale) {
   const loraList = podStale && Object.keys(c.m.alerts).length ? html`<${LoraPings} m=${c.m} />` : null;
   if (c.routeP) return html`${loraList}<${RescueCard} ...${c} p=${c.routeP} />`;
   if (c.mode === 'investigate') {
-    return html`${loraList}${c.target ? html`<${CameraCard} ...${c} /><${RescueCard} ...${c} p=${c.target} />` : html`<div class="p calm"><div class="t">Nothing to investigate</div><div class="lbl">Pick a ping, then press Investigate.</div></div><${PingsCard} ...${c} />`}`;
+    return html`${loraList}${c.target ? html`<${CameraCard} ...${c} /><${RescueCard} ...${c} p=${c.target} />` : html`<div class="p calm"><div class="t">Nothing to investigate</div><div class="lbl">Pick a ping, then press Investigate.</div></div><${PingsCard} ...${c} />`}<${FieldCard} s=${c.s} />`;
   }
-  if (c.focus) return html`${loraList}<${PingCard} ...${c} p=${c.focus} /><${OtherPings} ...${c} />`;
+  if (c.focus) return html`${loraList}<${PingCard} ...${c} p=${c.focus} /><${OtherPings} ...${c} /><${FieldCard} s=${c.s} />`;
   return html`
     ${loraList}
     <${LegCard} ...${c} />
     <${PingsCard} ...${c} />
+    <${FieldCard} s=${c.s} />
     ${c.mode !== 'search' && html`<${EventsCard} m=${c.m} />`}`;
 }
 
@@ -1221,6 +1282,21 @@ function MapPane({ meta, s, sel, follow, setFollow, night, cv, podStale, m, setS
       ex.current.pod.setLngLat(lm.current.toLL(pose.x, pose.y));
       ex.current.pod.getElement().classList.toggle('stale', podStale);
     }
+    // the field teams' phones (TAK), by callsign; faded after a minute without a position
+    const teams = s.teams || {};
+    ex.current.teams ||= {};
+    for (const [uid, t] of Object.entries(teams)) {
+      let mk = ex.current.teams[uid];
+      if (!mk) {
+        const el = Object.assign(document.createElement('div'), { className: 'teammark', title: 'Field team (TAK)' });
+        el.innerHTML = '<i></i><span></span>';
+        mk = ex.current.teams[uid] = new maplibregl.Marker({ element: el }).setLngLat(lm.current.toLL(t.x, t.y)).addTo(map);
+      }
+      mk.setLngLat(lm.current.toLL(t.x, t.y));
+      mk.getElement().querySelector('span').textContent = t.callsign;
+      mk.getElement().classList.toggle('stale', Date.now() - t.t > 60000);
+    }
+    for (const uid of Object.keys(ex.current.teams)) if (!teams[uid]) { ex.current.teams[uid].remove(); delete ex.current.teams[uid]; }
   }
   // the map gets the same state, but only the pings worth seeing: heard-only and cleared ones stay in the list
   if (!ex.current.view || ex.current.base !== s) { ex.current.base = s; ex.current.view = Object.create(s); }
@@ -1244,16 +1320,17 @@ function MapPane({ meta, s, sel, follow, setFollow, night, cv, podStale, m, setS
       </span>`}
       ${podStale && m.lastPoseWall > 0 && html`<span class="stale">Drone last seen ${fmtAgo(Date.now() - m.lastPoseWall)}</span>`}
     </div>
-    <${MapKey} mode=${mode} kase=${cv.case} rescue=${!!rescue} />
+    <${MapKey} mode=${mode} kase=${cv.case} rescue=${!!rescue} teams=${Object.keys(s.teams || {}).length > 0} />
     ${feedWhich.length > 0 && html`<${MapFeeds} s=${s} bt=${bt} which=${feedWhich} />`}
   </div>`;
 }
 
-function MapKey({ mode, kase, rescue }) {
+function MapKey({ mode, kase, rescue, teams }) {
   const rows = [['pod', 'Drone and what it can hear']];
   if (SWEEP.has(mode)) rows.push(['cov', 'Ground already searched'], ['area', 'Search area']);
   if (mode === 'search' && kase) rows.push(['route', 'Trail stretch to search'], ['flown', 'Searched so far'], ['car', 'Where the car is']);
   if (rescue) rows.push(['rescue', 'Route for the ground team']);
+  if (teams) rows.push(['team', 'Field team (TAK phone)']);
   rows.push(['ping', 'Ping: colour shows how urgent']);
   return html`<div class="mapkey" aria-label="Map key">${rows.map(([k, t]) => html`<div key=${k}><i class=${`k-${k}`}>${k === 'car' ? 'P' : k === 'ping' ? 'P1' : ''}</i>${t}</div>`)}</div>`;
 }

@@ -296,3 +296,13 @@ button { font: inherit; color: inherit; }
 /* the top bar keeps every control whole; only the park name and the case name shrink */
 .top > .modes, .top > .simctl, .top > .badge, .top > .wx, .top > .health, .top > .iconbtn, .top > .clock, .top > .brand { flex-shrink: 0; }
 .top .casechip { max-width: 16rem; }
+
+/* TAK field teams (tak_link.py -> ag/team) */
+.teammark { display: flex; align-items: center; gap: 0.35rem; pointer-events: none; }
+.teammark i { width: 0.95rem; height: 0.95rem; transform: rotate(45deg); background: #4fc3f7; border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(0,0,0,.45); }
+.teammark span { background: rgba(8,12,9,.85); color: #e6eadf; border: 1px solid #4fc3f7; border-radius: 0.35rem; padding: 0 0.4rem; font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
+.teammark.stale { opacity: 0.45; }
+.ban-field { background: #1f5f7a; color: #fff; }
+.mapkey .k-team { width: 0.8rem; height: 0.8rem; transform: rotate(45deg); background: #4fc3f7; border: 2px solid #fff; display: inline-block; }
+.ban-ready { background: #2f5d3a; color: #fff; }
+.ban-ready button.go { font-size: 1.25rem; font-weight: 700; padding: 0.7rem 1.4rem; background: #8fbf7a; color: #0c120d; border: 0; border-radius: 0.55rem; cursor: pointer; }
