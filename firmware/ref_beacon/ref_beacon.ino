@@ -1,4 +1,4 @@
-// AFTERGLOW reference beacon: the spare XIAO ESP32S3 (#3) advertising as our `ref` class.
+// AFTERGLOW reference beacon: any spare ESP32S3 advertising as our `ref` class (no board runs it now).
 //
 // A test target we control, for I6 (a pin within 5 m on the taped trail), the range test and
 // the demo baseline. OMNI's scanner classifies manufacturer data FF FF 'A' 'G' as `ref`

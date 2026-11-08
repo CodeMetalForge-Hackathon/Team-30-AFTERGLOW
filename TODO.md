@@ -203,6 +203,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - a park-scale simulator over Acadia, using a trails GeoJSON (done: the `park.toml` profile and `data/park_*.geojson`);
   - simulated phones using the measured range;
   - runs day patrol, night sweep and active search, and draws the coverage map.
+- **Board swap Sun 8 Nov ~01:40:** the WIFI XIAO (#2) went silent and stopped showing up on USB, even in BOOT mode. XIAO #3 (the ref beacon) is now the WIFI board, flashed with `wifi_listener.ino`: `check_hw.py --only omni wifi` both pass. No spare XIAO and no ref beacon now (I6 would need a powered-off phone instead).
 - [x] **sos_page firmware (UT):** an open `SOS-RESCUE` AP with a captive page that sends `sos` lines and obeys `sos_on` and `sos_off`. **Written Sat 7 Nov ~22:00** in `firmware/wifi_listener/wifi_listener.ino` (compiles with `arduino-cli`); flashed and tested with a phone Sat 7 Nov (join SOS-RESCUE → page pops up → Send). It's a toggle: off at boot, `sos_on`/`sos_off` (the TV dashboard's SOS buttons).
   - Optional, from the hardware reference (contract change first): a custom `msg` on `sos_on`, and a "phone joined the SOS network" event, which is a strong sign someone is there.
 - [ ] **`position.py`:** add IMU roll and pitch from the BNO086 at `[i2c] imu_addr` (`0x4B`), with RST on GPIO23 passed as `reset=`.

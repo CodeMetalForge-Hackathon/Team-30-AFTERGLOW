@@ -49,7 +49,7 @@ Pins and parts come from `docs/HARDWARE.md`. The line formats are in `docs/CONTR
 
 ## Laptop LoRa radio: XIAO #3 + RFM95W (`lora_rx/`): not used now
 
-**We have only one RFM95W**, so the laptop receives with an ADALM-PLUTO SDR and gr-lora_sdr (`code/tools/pluto_rx.py`, see `docs/HARDWARE.md`). XIAO #3 is the spare. Keep this sketch: it's the receiver again if a second RFM95W turns up.
+**We have only one RFM95W**, so the laptop receives with an ADALM-PLUTO SDR and gr-lora_sdr (`code/tools/pluto_rx.py`, see `docs/HARDWARE.md`). XIAO #3 is now the WIFI board, so there is no board for it either. Keep this sketch: it's the receiver again if a second RFM95W turns up.
 
 
 - `lora_rx/lora_rx.ino` is a listen-only modem. It prints every packet as a JSON line on USB, and `code/afterglow/lora_rx.py` does the filtering and decoding.
@@ -61,7 +61,9 @@ Pins and parts come from `docs/HARDWARE.md`. The line formats are in `docs/CONTR
 - **Radio settings** are `#define`s at the top of the sketch. They must match `[lora]` in `code/afterglow.toml`; `tests/test_lora_rx.py` checks.
 - Solder the 915 MHz spring antenna to ANT before powering it. This is the last XIAO; there's no spare.
 
-## Reference beacon: spare XIAO #3 (`ref_beacon/`)
+## Reference beacon (`ref_beacon/`): no board for it now
+
+XIAO #3 became the WIFI board on Sun 8 Nov (the original WIFI board died), so nothing runs this sketch at the moment. Flash it on any spare ESP32 if one turns up.
 
 - A test target we control: it advertises manufacturer data `FF FF 'A' 'G'`, which OMNI reports as `ref`. Tracker and geofence pin it in patrol and night, not in search.
 - Used for I6 (a pin within 5 m), the range test and the demo baseline. No wiring: USB-C power and the U.FL antenna.
