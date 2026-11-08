@@ -127,5 +127,5 @@ Licensed under Apache 2.0 ([`LICENSE`](LICENSE)). Map data © OpenStreetMap cont
 - [`docs/CONTRACTS.md`](docs/CONTRACTS.md) is the source of truth for anything that crosses a module boundary.
 - [`docs/MODULES.md`](docs/MODULES.md) lists owners and checkpoints, and [`docs/TV.md`](docs/TV.md) covers the operator TV.
 - [`docs/drone_build_plan.md`](docs/drone_build_plan.md) is the original build doc. Its parts list is out of date.
-- [`docs/wiring/`](docs/wiring/): only `pins.csv` is current.
+- [`docs/wiring/`](docs/wiring/): `wiring_diagram.png` and `pins.csv` are current.
 - `CLAUDE.md` holds the instructions for Claude Code.

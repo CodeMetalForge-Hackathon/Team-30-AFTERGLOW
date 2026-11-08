@@ -2,7 +2,7 @@
 
 **Source:** Rohan's "AFTERGLOW Pod Hardware Reference for Code" (`docs/AFTERGLOW Hardware.pdf`, Nov 7), which lists the parts we actually have. It replaces the build doc's parts list.
 
-**`docs/wiring/` is out of date** apart from `pins.csv`. The wiring page and diagrams still show Meshtastic, the BNO085, a GPS module and D6/D7 on the XIAOs. Use the pin map below until they're redrawn.
+**`docs/wiring/wiring_diagram.png` (Nov 8) and `pins.csv` are current** and agree pin for pin. The wiring page (`wiring_and_build.html`) and `pod_layout.jpg` are still out of date (Meshtastic, D6/D7 on the XIAOs).
 
 ## The pod in one picture
 

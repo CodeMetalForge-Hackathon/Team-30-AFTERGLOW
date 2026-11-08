@@ -20,7 +20,7 @@ The project is built at a 26-hour hackathon. Hour 0 is Sat 7 Nov 2026 at 10:00 E
   - the hardware reference and HARDWARE.md win for parts and pins;
   - CONTRACTS.md wins for formats;
   - the build doc wins for decisions.
-- The wiring page and diagrams in `docs/wiring/` are out of date (they still show Meshtastic, the BNO085 and a GPS module), so don't use them for pins.
+- In `docs/wiring/`, `wiring_diagram.png` (Nov 8) and `pins.csv` are current; the wiring page and `pod_layout.jpg` are out of date (they still show Meshtastic), so don't use them for pins.
 
 ## Layout
 
@@ -65,7 +65,7 @@ code/
   tools/draw_map.py     draws the map files to docs/maps/indoor_map.png
   tests/                pytest
 docs/                   CONTRACTS.md, HARDWARE.md, MODULES.md, TV.md, LIVEMAP.md, DEMO.md (the demo runbook), drone_build_plan.md, AFTERGLOW Hardware.pdf
-  wiring/               pins.csv (current); diagrams and wiring_and_build.html (out of date)
+  wiring/               wiring_diagram.png and pins.csv (current); pod_layout.jpg and wiring_and_build.html (out of date)
 pi/                     setup_pi.sh, config.txt lines, udev rule (radar), Mosquitto conf, systemd unit
 firmware/               what the ESP32 boards must send; lora_rx/ is the old XIAO #3 receiver sketch (unused: the Pluto replaced it)
 tak/                    TAK add-on: field teams' phones (iTAK/ATAK) <-> the operator TV (tak_link.py, tak_stack.py); tests in code/tests/test_tak_*

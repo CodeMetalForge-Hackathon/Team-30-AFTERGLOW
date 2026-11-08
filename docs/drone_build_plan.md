@@ -110,7 +110,7 @@ The straps carry the pod, but fit all eight lid and top-plate screws anyway so n
 
 Four things are new: the GPS module, flight-battery power, the camera and the AI HAT+. The [wiring page](https://claude.ai/artifact/9dFkxY68jSQ399Thspfx1U) shows every wire, the pin map and the build checklist; the two drawings below come from it.
 
-![Wiring for the drone build](wiring/wiring_diagram.jpg)
+![Wiring for the pod (current, Nov 8)](wiring/wiring_diagram.png)
 
 ![Where each part sits in the pod](wiring/pod_layout.jpg)
 
