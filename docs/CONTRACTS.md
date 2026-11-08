@@ -69,7 +69,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
 | `accept_leg`, `reject_leg` | `id` | planner.py |
 | `waypoint` | `n` (taped waypoint number) | position.py, indoors |
 | `lora_off`, `lora_on` | none | lora_out.py. Turn LoRa off if the pilot's control link drops |
-| `sos_on`, `sos_off` | none | bridge.py forwards to the WIFI board |
+| `sos_on`, `sos_off` | none | bridge.py forwards to the WIFI board. The SOS page is on at boot; `sos_off` closes it and is remembered across reboots |
 
 ### Pin states and priority
 
@@ -130,7 +130,7 @@ How tracker.py fills `ag/track`. Its numbers live in the config's `[track]` tabl
 
 geofence.py listens to `ag/sos`, not lora_out.py, because priority 1 and `flags.sos` live on `ag/target`, and the dashboard and ATAK need them too.
 
-- The SOS page only runs during Investigate, so the answer goes on the pin whose `status` is `investigating` (the one set to investigating last, if there are several).
+- The SOS page is **on by default** (decided Sat 7 Nov; `sos_off` turns it off and the WIFI board remembers that). An answer goes on the pin whose `status` is `investigating` (the one set to investigating last, if there are several).
 - geofence adds `"sos":{"hurt":…,"walk":…,"count":…}`, sets `flags.sos`, and sets `prio` 1 if the person says they're hurt.
 - If no pin is being investigated, geofence opens an SOS-only pin at the pod's position (from `ag/pose`), with `track` `"T0"`, `rule` `"sos"` and `status` `new`. Its other fields:
   - `cls` `"wifi"`, because the answer came over the SOS Wi-Fi page;
