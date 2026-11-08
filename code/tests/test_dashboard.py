@@ -202,7 +202,9 @@ def test_http_page_and_map(server):
     meta = json.loads(body)
     assert meta["profile"] == "afterglow" and meta["map"]["zones"] and meta["waypoints"]["0"] == [0.0, 0.0]
     assert "tak" not in meta  # no TAK server here: the TV must not post rescue routes (tv.js checks meta.tak)
+    assert meta["rssi"] == {"p0": -48.0, "n": 2.4}  # nearby.html's RSSI -> metres
     assert get(base + "/vendor/leaflet-1.9.4/leaflet.js")[0] == 200
+    assert get(base + "/nearby.html")[0] == 200
 
 
 def test_http_live_picture_has_its_age(server, tmp_path):

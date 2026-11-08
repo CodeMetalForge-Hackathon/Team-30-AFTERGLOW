@@ -244,6 +244,8 @@ def make_meta(cfg: dict, pm: ParkMap) -> dict:
         "map": pm.to_json(),
         "building": building(cfg),
         "thermal": {"hot_min_c": cfg["thermal"]["hot_min_c"], "hot_max_c": cfg["thermal"]["hot_max_c"]},
+        # the tracker's RSSI model, so nearby.html turns RSSI into metres the same way
+        "rssi": {"p0": cfg["track"]["rssi_p0"], "n": cfg["track"]["rssi_n"]},
         # the TV's location tabs, and how often health.py reports (its panel goes grey when ag/sys stops)
         "sites": [dict(s) for s in http.get("sites", [])],
         "health": {"period_s": cfg["health"]["period_s"], "stale_s": cfg["health"]["stale_s"]},
