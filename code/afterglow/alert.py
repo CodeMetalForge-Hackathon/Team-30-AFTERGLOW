@@ -4,6 +4,7 @@
     msg = decode(pkt)                  # dict with the same field names
 
 Version 1 = decimetres (indoor demo), version 2 = metres (park scale).
+Byte 10 is reserved: always sent as 0, ignored on decode.
 """
 import struct
 
@@ -55,7 +56,7 @@ def encode(m: dict, version: int = 2, kind: int = TYPE_TRACK) -> bytes:
         sf,
         _clamp(m.get("c", 0) * 255, 0, 255),
         (prio << 4) | cls,
-        _clamp(m.get("br") or 0, 0, 255),
+        0,  # reserved
         sos_byte,
         _clamp(m.get("last_s", 0), 0, 65535),
         255 if batt is None else _clamp(batt, 0, 100),
@@ -66,7 +67,7 @@ def encode(m: dict, version: int = 2, kind: int = TYPE_TRACK) -> bytes:
 def decode(pkt: bytes) -> dict:
     if len(pkt) != SIZE:
         raise ValueError(f"alert must be {SIZE} bytes, got {len(pkt)}")
-    (vt, pin, x, y, r95, sf, conf, pc, br, sos, last_s, batt, off) = struct.unpack(FMT, pkt)
+    (vt, pin, x, y, r95, sf, conf, pc, _reserved, sos, last_s, batt, off) = struct.unpack(FMT, pkt)
     version, kind = vt >> 4, vt & 0x0F
     if version not in SCALE:
         raise ValueError(f"unknown alert version {version}")
@@ -84,7 +85,6 @@ def decode(pkt: bytes) -> dict:
         "c": conf / 255,
         "prio": pc >> 4,
         "cls": CLS_NAMES.get(pc & 0x0F, "other"),
-        "br": br or None,
         "sos": {"hurt": bool(sos & 1), "walk": bool(sos & 2), "count": sos >> 2},
         "last_s": last_s,
         "battery": None if batt == 255 else batt,

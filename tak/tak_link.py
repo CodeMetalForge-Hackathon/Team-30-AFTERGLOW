@@ -152,8 +152,6 @@ def remarks(m: dict, prio: int, sos_pin: bool) -> str:
     seen = [k for k in ("thermal", "camera", "radar") if flags.get(k)]
     if seen:
         parts.append("also " + ", ".join(seen))
-    if m.get("br"):
-        parts.append(f"breathing {m['br']}/min")
     try:  # an absolute time, so a repeated marker never shows a stale "4 s ago"
         heard = m["t"] / 1000 - float(m.get("last_s") or 0)
         parts.append("last heard " + datetime.fromtimestamp(heard).strftime("%H:%M:%S"))
@@ -312,7 +310,7 @@ class CotOut:
         if status == "investigating" and "check" not in done:
             done.add("check")
             texts.append(f"Drone checking {callsign} now: flying over it with thermal and camera. Stand by.")
-        seen = [w for k, w in (("thermal", "heat"), ("camera", "a person on camera"), ("radar", "breathing")) if flags.get(k)]
+        seen = [w for k, w in (("thermal", "heat"), ("camera", "a person on camera"), ("radar", "a person on radar")) if flags.get(k)]
         if seen and not confirmed and "seen" not in done:
             done.add("seen")
             texts.append(f"{callsign} check: the drone sees {' and '.join(seen)}. Waiting for the ranger to confirm.")

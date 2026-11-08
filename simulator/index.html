@@ -817,7 +817,7 @@ function startConfirm(){
  S.wp.push(c);S.conf={t:0,th:0,mm:0,r2};
  setMode('CHECK',`${b.t.sig} localised to ±${Math.round(Math.max(10,T.rms))} m after ${fmtTime(S.sim.t-S.homeStart)}. Descending to 25 m AGL: thermal + mmWave search out to ${Math.round(r2)} m.`,'#f5bd62');
  addEvent(`${b.t.sig} localised ±${Math.round(Math.max(10,T.rms))} m → thermal + mmWave check`);
- alertMsg(`Beacon localised to ±${Math.round(Math.max(10,T.rms))} m. Drone descends to 25 m AGL and orbits: thermal camera + mmWave radar look for a human heat signature and breathing/motion.`,'alert');}
+ alertMsg(`Beacon localised to ±${Math.round(Math.max(10,T.rms))} m. Drone descends to 25 m AGL and orbits: thermal camera + mmWave radar look for a human heat signature and motion.`,'alert');}
 function confirmStep(sp){
  const C=S.conf,d=S.d;C.t++;
  if(S.wp.length&&moveTo(S.wp[0],Math.min(sp,6),25))S.wp.shift();

@@ -490,7 +490,7 @@ class FakePod:
                 "prio": prio({"state": st, "c": c}),
                 "cls": ph.cls, "state": st, "last_s": last_s, "off_trail_m": off, "zone": zone,
                 "rule": rule, "status": "new",
-                "flags": {"sos": False, "thermal": False, "radar": False, "camera": False}, "br": None}
+                "flags": {"sos": False, "thermal": False, "radar": False, "camera": False}}
 
 
 def main():

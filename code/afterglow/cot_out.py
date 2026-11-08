@@ -119,8 +119,6 @@ def remarks(m: dict, prio: int, sos_pin: bool) -> str:
     seen = [k for k in ("thermal", "camera", "radar") if flags.get(k)]
     if seen:
         parts.append("also " + ", ".join(seen))
-    if m.get("br"):
-        parts.append(f"breathing {m['br']}/min")
     try:  # an absolute time, so a repeated marker never shows a stale "4 s ago"
         heard = m["t"] / 1000 - float(m.get("last_s") or 0)
         parts.append("last heard " + datetime.fromtimestamp(heard).strftime("%H:%M:%S"))
