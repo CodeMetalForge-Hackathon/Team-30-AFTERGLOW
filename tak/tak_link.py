@@ -572,7 +572,10 @@ class TcpServer:
         """on_connect(send_one): a phone joined (send_one sends to it alone). on_event(bytes): one complete
         event a phone sent. relay: pass each phone's position and chat on to the other phones."""
         self.ssl_ctx, self.on_connect, self.on_event, self.relay = ssl_ctx, on_connect, on_event, relay
-        self.sock = socket.create_server((host, port))
+        # IPv4 and IPv6 at once: on some phone hotspots the laptop gets an IPv6 address only.
+        dual = not host and socket.has_dualstack_ipv6()
+        self.sock = socket.create_server((host, port), family=socket.AF_INET6 if dual else socket.AF_INET,
+                                         dualstack_ipv6=dual)
         self.port = self.sock.getsockname()[1]
         self.clients = []
         self.lock = threading.Lock()  # one writer at a time, so two events never interleave on a stream
