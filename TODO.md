@@ -123,7 +123,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - on the fake pod through the real tracker (20 seeds, 20 min indoors): patrol pins only the dead iPhone in 19 of 20, night ignores the campground tag in 20 of 20, search pins all three in 19 of 20. The misses are early tracker estimates: one about 9 m out while claiming ±3.6 m, and one team phone marked `with_drone` only after 46 s.
   - **Contract change, tell the team:** `day_offtrail` now skips campgrounds (otherwise the campground tag gets pinned in patrol and demo step 8 can't show night ignoring it). New `[rules]` keys `pin_hold_s`, `pins_file`, `pins_max_age_min` in both profiles. `fake_bus.py` now sends `off_trail_m` `null`, not 9999, when there's no trail.
   - Park sim only: the tracker's key-rotation splits give some phones 2–3 pins, and `airtag_pack` (39 m off trail) is estimated at 20–29 m, under the 30 m threshold, so patrol often misses it. Both are tracker limits (see above).
-  - Tier 2: set `flags.thermal` from `ag/thermal` on the investigating pin. (`flags.camera` from `ag/vision` waits for the stretch person detector.)
+  - Tier 2: set `flags.thermal` from `ag/thermal` on the investigating pin (done, see Phase 3). (`flags.camera` from `ag/vision` waits for the stretch person detector.)
 - [ ] **`dashboard.py` (SW)**. Most of this landed with the Phase 1 skeleton:
   - [x] pins with Acknowledge, Investigate, Clear and Confirm buttons. Confirm needs two clicks and only works while the pin is being investigated. Each button shows "waiting for geofence" until the status changes, and warns if it never does;
   - [x] a mode switch for patrol, night, investigate and search;
@@ -187,19 +187,23 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 
 ## Phase 3: Tier 2 (hours 12–22, until the 08:00 freeze, checkpoint I8 at 02:00)
 
-- [ ] **`planner.py` (SW)** writes `ag/plan`:
+- [x] **`planner.py` (SW, Sat 7 Nov)** writes `ag/plan` (CONTRACTS.md, "Plans"; tests in `test_planner.py`; runs in `local_stack.py`):
   - on `investigate`, homing legs: one crossing pass, then a shrinking orbit;
-  - a search grid spaced by the measured range;
+  - a search grid spaced by the measured range ([plan] `lane_m`, a placeholder);
   - patrol routes along the trails;
   - acts on `accept_leg` and `reject_leg`.
-  The dashboard draws each leg with the heading and distance the observer reads to the pilot.
+  The TV's leg card and Read to pilot card already show each leg's heading and distance.
+  - [ ] **On the Pi:** `sudo systemctl enable --now afterglow@planner`.
+  - [ ] Put ME 2's range numbers into the `[plan]` table (`lane_m`, `cross_m`, orbit sizes) with the others.
+  - [ ] Next: the fake pod flies accepted legs; the main dashboard (`app.js`) draws legs; the live map draws accepted legs too (only proposed now).
 - [ ] **Dashboard live feeds (SW):** MJPEG streams of the camera and thermal views from `dashboard.py`, in place of the once-a-second image reload; then raise `[camera] fps`.
-- [ ] **`thermal.py` flag (UT):** flag hot spots only below `[thermal] max_alt_m`, using the pose's `z`. The old 8 m limit was for the MLX90640's 32×24 pixels; the HT-203U's 256×192 should allow much more, so measure it: the height at which a person still covers a few pixels. Then geofence sets `flags.thermal` on the investigating pin (Phase 2, geofence).
+- [x] **`thermal.py` flag (SW, Sat 7 Nov ~22:20):** `hot` is never true above `[thermal] max_alt_m` (the latest `ag/pose` `z`; any height before the first pose). geofence sets `flags.thermal` once on the pin under investigation when `ag/thermal` is hot with the pod within `[rules] thermal_near_m` of the pin's 95% circle, and the flag stays set. New keys in both profiles; tests in `test_thermal.py` and `test_geofence.py`.
+  - [ ] **UT: measure `max_alt_m`** (30 m now, a placeholder): the height at which a person still covers about 3×3 pixels, since the spot is a 3×3 mean. The old 8 m limit was for the MLX90640's 32×24 pixels. Also set `thermal_near_m` (2 m indoors, 10 m park) to about the thermal view's reach at hover height.
 - [ ] **`sim.py` (SW):**
   - a park-scale simulator over Acadia, using a trails GeoJSON (done: the `park.toml` profile and `data/park_*.geojson`);
   - simulated phones using the measured range;
   - runs day patrol, night sweep and active search, and draws the coverage map.
-- [ ] **sos_page firmware (UT):** an open `SOS-RESCUE` AP with a captive page that sends `sos` lines and obeys `sos_on` and `sos_off`.
+- [x] **sos_page firmware (UT):** an open `SOS-RESCUE` AP with a captive page that sends `sos` lines and obeys `sos_on` and `sos_off`. **Written Sat 7 Nov ~22:00** in `firmware/wifi_listener/wifi_listener.ino` (compiles with `arduino-cli`); flashed and tested with a phone Sat 7 Nov (join SOS-RESCUE → page pops up → Send). It's a toggle: off at boot, `sos_on`/`sos_off` (the TV dashboard's SOS buttons).
   - Optional, from the hardware reference (contract change first): a custom `msg` on `sos_on`, and a "phone joined the SOS network" event, which is a strong sign someone is there.
 - [ ] **`position.py`:** add IMU roll and pitch from the BNO086 at `[i2c] imu_addr` (`0x4B`), with RST on GPIO23 passed as `reset=`.
 - [ ] **(I8, hour 16, 02:00) evidence:**
@@ -212,7 +216,9 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 ## Phase 4: Demo hardening and freeze (hours 16–26)
 
 - [ ] Load the best run's replay and test it, as the backup if the hardware fails.
-- [ ] **Fix the simulator's wording before anyone shows it (`simulator/`, PR #4).** It breaks the one rule on screen. When it finds heat or motion it shows "PERSON CONFIRMED" and "MISSING PERSON FOUND", and it says it "sends the GPS fix to incident command". Make it propose and leave the decision to the ranger: e.g. "LIKELY PERSON · RANGER CONFIRM" and "proposes the pin to the ranger", in `simulator/index.html` and `simulator/README.md`. The no-heat case ("ranger review") is already right. Also decide whether it stays "TrailSAR" or becomes AFTERGLOW.
+- [x] **Fix the simulator's wording (`simulator/`, PR #4).** Done Sat 7 Nov ~23:30: "LIKELY PERSON · RANGER CONFIRM" in place of "PERSON CONFIRMED" and "MISSING PERSON FOUND"; "pin proposed to the ranger" in place of "GPS fix sent to incident command"; the drone's `CONFIRM` mode is now `CHECK`; a supply drop is proposed, never done.
+  - [ ] Still to decide: does it stay "TrailSAR" or become AFTERGLOW?
+  - Not fixed: the simulated drone still flies its own legs without a ranger's OK. Fine for a what-if, but say so if a judge asks.
 - [ ] Demo setup:
   - a 10-minute baseline at the demo spot, with any team trackers on the pod, so they show grey instead of relying on `with_drone`;
   - a team iPhone switched off at least 20 minutes early and hidden;
@@ -241,6 +247,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   It took one developer a full weekend, so try it only with a GPU and spare time.
 - [ ] **Radar pole mount.**
 - [ ] **Pod battery reading (UT):** a voltage divider from the LiPo into a XIAO analog pin, so `ag/sys` `batt_pct` stops being `null`.
+- [ ] **TAK server login (SW):** today anyone on our hotspot can join `tak_link.py` (plain TCP 8087 has no login; TLS 8089 doesn't require a client certificate), and post chat, field reports or positions to the TV. Phones can't move the drone or change a pin, so this matters only off our own hotspot. Fix: `ssl.CERT_REQUIRED` in `tak_link.tls_context()` (the iTAK package from `tak_certs.py` already holds a client certificate), and drop or firewall plain TCP. Test on a real iPhone first.
 
 ### Beyond the hackathon
 

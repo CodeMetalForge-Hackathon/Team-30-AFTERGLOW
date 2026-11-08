@@ -4,7 +4,7 @@ contracts.py and add the two rows below to docs/CONTRACTS.md, in the same PR.
 
 | topic       | who publishes                         | fields                                                    |
 |-------------|---------------------------------------|-----------------------------------------------------------|
-| `ag/team`   | tak_link.py, from the TAK phones      | t, uid, callsign, kind (pos / chat / report); pos: x, y, lat, lon; chat: text; report: pin, verdict (found / nobody), text |
+| `ag/team`   | tak_link.py, from the TAK phones      | t, uid, callsign, kind (pos / chat / report); pos: x, y, lat, lon; chat: text; report: pin, verdict (ack / check / found / nobody), text |
 | `ag/rescue` | tak_dashboard.py, on the ranger's click | t, pin, pts [[x, y], ...] (car park to person, metres); optional secs, label. pts [] takes the route away |
 
 Neither carries case details (name, age, what they carry): the case stays on the laptop, as always.
@@ -25,7 +25,8 @@ REQUIRED = {
     RESCUE: {"t", "pin", "pts"},
 }
 TEAM_KINDS = ["pos", "chat", "report"]
-REPORT_VERDICTS = ["found", "nobody"]  # a field team's word on a pin; only the ranger acts on it
+# a field team's word on a pin: seen it, asks for the drone, a person, no one. Only the ranger acts on it.
+REPORT_VERDICTS = ["ack", "check", "found", "nobody"]
 
 
 def validate(topic: str, msg: dict) -> list[str]:
@@ -38,7 +39,7 @@ def validate(topic: str, msg: dict) -> list[str]:
     if topic == TEAM and msg.get("kind") not in TEAM_KINDS:
         problems.append(f"bad team kind {msg.get('kind')!r}")
     if topic == TEAM and msg.get("kind") == "report" and (msg.get("verdict") not in REPORT_VERDICTS or not msg.get("pin")):
-        problems.append("a team report needs pin and verdict found or nobody")
+        problems.append(f"a team report needs pin and verdict {' / '.join(REPORT_VERDICTS)}")
     if topic == RESCUE and not isinstance(msg.get("pts"), list):
         problems.append("rescue pts must be a list of [x, y]")
     return problems

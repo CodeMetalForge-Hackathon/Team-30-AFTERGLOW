@@ -34,7 +34,11 @@ Pins and parts come from `docs/HARDWARE.md`. The line formats are in `docs/CONTR
 - The advertising address rotates about every 15 minutes near the owner and about once a day when separated.
 - **Fallback:** if the built-in BLE library drops packets in a crowded room, switch to NimBLE-Arduino.
 
-## WIFI: wifi_listener (tier 1), plus sos_page (tier 2)
+## WIFI: wifi_listener (tier 1), plus the SOS page (tier 2), in one sketch
+
+**Built Sat 7 Nov:** the SOS page lives in `wifi_listener/wifi_listener.ino` (one board, one sketch). It's off at boot. `sos_on` opens the open AP `SOS-RESCUE` on channel 6 with a captive page (hurt? can walk? how many?), and each answer prints a `sos` line (`rssi` = the strongest connected phone, or `null`). `sos_off` closes it and resumes hopping. The TV dashboard has SOS On/Off buttons; or `mosquitto_pub -t ag/ctrl -m '{"t":0,"cmd":"sos_on"}'`. Compile-check without the IDE: `arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 firmware/wifi_listener`.
+
+### Original notes
 
 - **wifi_listener:** promiscuous mode, management frames, probe requests (`0x40`). Hop channels 1, 6 and 11 every 250 ms. Print `{"type":"wifi",…}` lines.
 - **sos_page:** an open AP named `SOS-RESCUE` with a captive page (`WiFi.softAP()`, plus `DNSServer` answering every name with the board's IP, plus `WebServer`). Print `{"type":"sos",…}` when someone answers.

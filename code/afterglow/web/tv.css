@@ -432,3 +432,13 @@ a.site:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
   .livecell { min-height: 20rem; } .livegrid { grid-template-columns: 1fr; }
   .status { flex-wrap: wrap; white-space: normal; padding: 0.4rem 1rem; }
 }
+
+/* TAK field teams (tak_link.py -> ag/team), restyled for the console theme */
+.teammark { display: flex; align-items: center; gap: 0.35rem; pointer-events: none; }
+.teammark i { width: 0.85rem; height: 0.85rem; transform: rotate(45deg); background: #4fc3f7; border: 1.5px solid #fff; box-shadow: 0 0 0 2px rgba(0,0,0,.45); }
+.teammark span { background: color-mix(in srgb, var(--surface) 90%, transparent); color: var(--text); border: 1px solid #4fc3f7; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
+.teammark.stale { opacity: 0.45; }
+.ban-field { --c: #4fc3f7; background: color-mix(in srgb, #4fc3f7 9%, var(--surface)); }
+.mapkey .k-team { width: 0.65rem; height: 0.65rem; transform: rotate(45deg); background: #4fc3f7; border: 1.5px solid #fff; }
+.ban-ready { --c: var(--ok); background: color-mix(in srgb, var(--ok) 9%, var(--surface)); }
+.ban-ready button.go { min-height: 2.4rem; padding: 0 1.2rem; font-size: 1rem; background: var(--ok); border-color: var(--ok); color: var(--bg); }

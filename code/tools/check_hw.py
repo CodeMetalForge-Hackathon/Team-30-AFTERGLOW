@@ -204,9 +204,9 @@ def c_thermal(a):
         dev = thermal.find_device(th)
     except SystemExit as e:
         return "FAIL", str(e)
-    run(["v4l2-ctl", "-d", dev, f"--set-fmt-video=width={thermal.RAW_W},height={thermal.RAW_H},pixelformat=YUYV"])
     if shutil.which("v4l2-ctl") is None:
-        return "SKIP", "v4l2-ctl not installed (sudo apt install v4l-utils)"
+        return "FAIL", "v4l2-ctl not installed, so thermal.py can't read the camera (sudo apt install -y v4l-utils)"
+    run(["v4l2-ctl", "-d", dev, f"--set-fmt-video=width={thermal.RAW_W},height={thermal.RAW_H},pixelformat=YUYV"])
     try:
         p = subprocess.run(["v4l2-ctl", "-d", dev, "--stream-mmap", "--stream-skip=3", "--stream-count=1", "--stream-to=-"],
                            capture_output=True, timeout=15)

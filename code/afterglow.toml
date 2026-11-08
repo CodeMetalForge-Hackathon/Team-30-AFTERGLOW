@@ -53,6 +53,9 @@ hot_max_c = 45.0           # warmer is an engine or a sun-baked rock, not a pers
 hot_rise_c = 5.0           # degrees above the frame's median
 # hot, when it gives only a picture (no temperatures): how far the spot stands out, in spreads of the frame
 hot_z = 6.0
+# Never hot above this height (ag/pose z): a person is too few pixels there. Placeholder: measure the height
+# at which a person still covers about 3 x 3 pixels (the spot is a 3 x 3 mean). Indoors the pod is at 3 m.
+max_alt_m = 30.0
 # HT-203U raw heat -> degrees C = (raw + drift) / raw_per_c - raw_offset_c (check Sat 7 Nov:
 # a wall read 5101, a palm 5303). The offset is set so the wall reads 22 C; redo it against a known temperature.
 raw_per_c = 16.0
@@ -138,6 +141,7 @@ offtrail_m = 3             # indoor scale (park.toml: 30). Day patrol: pin a bea
 min_passes = 2             # ...seen on at least this many passes
 pin_hold_s = 15            # a rule must hold this long before a pin: early estimates jump about, with_drone takes a few s
 sos_r95_m = 30.0           # r95 of an SOS-only pin: the SOS page's Wi-Fi range (placeholder)
+thermal_near_m = 2.0       # indoor scale (park.toml: 10). flags.thermal on the investigated pin only with the pod this close to its 95% circle (placeholder)
 night_start = "21:00"
 night_end = "06:00"
 # geofence.py saves its pins here (relative to this file), so a restart doesn't reuse P1. "" = don't save.
@@ -156,6 +160,17 @@ cell_m = 1.0               # coverage and probability grid cell size (ag/coverag
 detect_m = 4.0             # indoor scale (park.toml: 40). A cell counts as covered once the pod passes within this distance
 area_m = []                # [x0, y0, x1, y1] the grids cover; empty = the map's "park" zone. Keep it under 20,000 cells, or the cells grow
 stale_s = 30               # a track not updated this long (the tracker dropped it) leaves the probability grid
+
+[plan]
+# planner.py -> ag/plan. It only proposes: the ranger accepts or rejects each plan, and the pilot flies
+# it by hand. Distances are placeholders until ME 2's range test.
+alt_m = 3.0                # patrol and grid legs fly this high (indoors: the carry height; park.toml: 40)
+homing_alt_m = 3.0         # homing legs, low for the thermal and camera check (park.toml: 25)
+cross_m = 3.0              # homing: the crossing pass runs this far past the pin; the first orbit is at most this wide (park.toml: 30)
+min_orbit_m = 1.0          # homing: no orbit tighter than this (park.toml: 20)
+lane_m = 3.0               # grid: lanes at most this far apart; under 2 x [locate] detect_m, so they overlap (park.toml: 60)
+patrol_m = 0.0             # patrol: fly this much of the trail, from where it passes nearest the pod; 0 = all of it (park.toml: 1200)
+arrive_m = 0.5             # a leg counts as flown with the pod this close to its end; keep it under min_orbit_m (park.toml: 10)
 
 [health]
 # health.py -> ag/sys for the dashboard's Pod panel. It never opens a radio, port or camera.

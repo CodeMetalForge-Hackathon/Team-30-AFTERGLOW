@@ -1,16 +1,19 @@
-"""thermal.py: the warm spot, the hot rule in both kinds of frame, the PNG and --fake."""
+"""thermal.py: the warm spot, the hot rule in both kinds of frame, the PNG, --fake and the camera reader."""
+import itertools
 import json
 import shutil
 import struct
 import subprocess
 import sys
+import threading
+import time
 import zlib
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from afterglow import config
+from afterglow import config, thermal
 from afterglow.contracts import THERMAL, validate
 from afterglow.thermal import Thermal, fake_frame, fake_frames
 
@@ -64,6 +67,19 @@ def test_person_is_hot_and_found(tmp_path):
     assert msg["hot"] and 30 <= msg["max_c"] <= 35 and msg["conf"] == 1.0
     assert abs(msg["col"] - 100) <= 1 and abs(msg["row"] - 60) <= 1
     assert (msg["w"], msg["h"], msg["src"], msg["t"]) == (256, 192, "fake", 5)
+
+
+def test_never_hot_above_max_alt_m(tmp_path):
+    th, bus = make(tmp_path, max_alt_m=20.0)
+    person = add_blob(cool(), 100, 60, 34.0)
+    assert th.handle_frame(person, True, "fake")["hot"]  # no pose yet: any height counts
+    th.handle_pose({"t": 1, "x": 0, "y": 0, "z": 25.0})
+    msg = th.handle_frame(person, True, "fake")
+    assert not msg["hot"] and msg["conf"] == 0.0 and validate(THERMAL, msg) == []
+    th.handle_pose({"t": 2, "x": 0, "y": 0, "z": "high"})  # a bad z keeps the last good one
+    assert not th.handle_frame(person, True, "fake")["hot"]
+    th.handle_pose({"t": 3, "x": 0, "y": 0, "z": 20.0})
+    assert th.handle_frame(person, True, "fake")["hot"]
 
 
 def test_cool_scene_and_lone_hot_pixel_are_not_hot(tmp_path):
@@ -216,3 +232,124 @@ def test_warm_camera_drift_is_corrected():
     cold, _ = thermal.parse_raw(ht203u_buffer(np.full((192, 256), 5101, np.uint16), 2250), *cal)
     warm, _ = thermal.parse_raw(ht203u_buffer(np.full((192, 256), 4998, np.uint16), 2466), *cal)
     assert abs(float(cold.mean()) - 22.0) < 0.3 and abs(float(warm.mean()) - 22.0) < 0.3
+
+
+def test_no_v4l2_ctl_stops_with_the_install_hint(monkeypatch):
+    from afterglow import config, thermal
+    monkeypatch.setattr(thermal, "find_device", lambda th: "/dev/thermal")
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(SystemExit, match="v4l-utils"):
+        thermal.check_camera(config.load()["thermal"])
+
+
+GOOD_FMT = ("Format Video Capture:\n\tWidth/Height      : 256/392\n\tPixel Format      : 'YUYV' (YUYV 4:2:2)\n"
+            "\tField             : None\n\tBytes per Line    : 512\n\tSize Image        : 200704\n")
+WALL = ht203u_buffer(np.full((192, 256), 5101, np.uint16))  # a good frame: a wall at about 22 C
+
+
+class Stream:
+    """A fake v4l2-ctl stream: hands out `frames` (any iterable of buffers), then stays open until killed,
+    as a live stream does. The last one in a test parks the daemon reader thread for good."""
+
+    def __init__(self, frames=(), pace_s=0.0):
+        self.stdout, self.frames, self.pace_s, self.killed = self, iter(frames), pace_s, threading.Event()
+
+    def read(self, n):
+        if not self.killed.is_set():
+            buf = next(self.frames, None)
+            if buf is not None:
+                time.sleep(self.pace_s)
+                return buf
+            self.killed.wait()
+        return b""
+
+    def kill(self):
+        self.killed.set()
+
+    def wait(self):
+        pass
+
+
+def fake_v4l2(monkeypatch, streams, fmts=()):
+    """Stand in for v4l2-ctl: each stream start takes the next of `streams` (an exception there is raised
+    instead); --get-fmt-video answers the next of `fmts`, then GOOD_FMT. Returns the stream commands."""
+    streams, fmts, started = list(streams), list(fmts), []
+
+    def popen(cmd, **kw):
+        started.append(cmd)
+        s = streams.pop(0)
+        if isinstance(s, Exception):
+            raise s
+        return s
+
+    def run(cmd, **kw):
+        out = (fmts.pop(0) if fmts else GOOD_FMT) if "--get-fmt-video" in cmd else ""
+        return subprocess.CompletedProcess(cmd, 0, out, "")
+
+    monkeypatch.setattr(thermal, "find_device", lambda th: "/dev/thermal")
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/v4l2-ctl")
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    return started
+
+
+def first_frame(**kw):
+    """The first frame camera_frames yields (in a thread, so a hang fails the test instead of stalling it)."""
+    got = []
+    t = threading.Thread(target=lambda: got.append(next(thermal.camera_frames(config.load(), retry_s=0.01, **kw))),
+                         daemon=True)
+    t.start()
+    t.join(timeout=5)
+    assert got, "no frame from the camera reader"
+    celsius, is_c, src = got[0]
+    assert is_c and src == "ht203u" and abs(float(np.median(celsius)) - 22.0) < 0.2
+    return celsius
+
+
+def test_camera_reader_survives_a_failure_and_retries(monkeypatch):
+    """v4l2-ctl failing (here: missing) once must not kill the reader thread: it retries and frames arrive."""
+    started = fake_v4l2(monkeypatch, [FileNotFoundError("v4l2-ctl"), Stream([WALL])])
+    first_frame()
+    assert len(started) == 2
+
+
+def test_camera_in_the_wrong_mode_is_not_streamed(monkeypatch, caplog):
+    wrong = GOOD_FMT.replace("256/392", "256/192")
+    started = fake_v4l2(monkeypatch, [Stream([WALL])], fmts=[wrong])
+    first_frame()
+    assert len(started) == 1  # not streamed while in 256x192: the retry found the right mode
+    assert "256x192 YUYV mode" in caplog.text
+
+
+def test_format_problem():
+    assert thermal.format_problem(GOOD_FMT) is None
+    assert "256x192" in thermal.format_problem(GOOD_FMT.replace("256/392", "256/192"))
+    assert "MJPG" in thermal.format_problem(GOOD_FMT.replace("'YUYV' (YUYV 4:2:2)", "'MJPG' (Motion-JPEG)"))
+    assert thermal.format_problem("") is None  # can't read it: parse_raw's checks still catch a wrong mode
+
+
+def test_parse_raw_rejects_frames_out_of_step():
+    cal = thermal.calibration(config.load()["thermal"])
+    row = thermal.RAW_W * 2
+    for buf in (WALL[1:] + b"\x80",                     # one byte out: every word is garbage
+                WALL[-100 * row:] + WALL[:-100 * row],   # 100 rows out: the picture where raw heat should be
+                ht203u_buffer(np.full((192, 256), 5101, np.uint16), 0xFFFF)):  # sensor at 655 C
+        with pytest.raises(ValueError, match="out of step"):
+            thermal.parse_raw(buf, *cal)
+    hot_pixels = np.full((192, 256), 5101, np.uint16)
+    hot_pixels[0, :5] = 0xFFFF  # a few dead pixels are not a bad frame
+    thermal.parse_raw(ht203u_buffer(hot_pixels), *cal)
+
+
+def test_stream_out_of_step_is_restarted(monkeypatch):
+    shifted = Stream(itertools.repeat(WALL[1:] + b"\x80"), pace_s=0.01)  # out of step for good
+    started = fake_v4l2(monkeypatch, [shifted, Stream([WALL])])
+    first_frame()
+    assert shifted.killed.is_set() and len(started) == 2
+
+
+def test_stalled_stream_is_restarted(monkeypatch):
+    stuck = Stream()  # v4l2-ctl still running, but no frames
+    started = fake_v4l2(monkeypatch, [stuck, Stream([WALL])])
+    first_frame(stall_s=0.2)
+    assert stuck.killed.is_set() and len(started) == 2

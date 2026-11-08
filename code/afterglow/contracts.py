@@ -35,6 +35,10 @@ POSE_SRC = ["gps", "waypoint", "replay", "sim", "imu"]  # gps/waypoint/imu = the
 THERMAL_SRC = ["ht203u", "fake"]  # optional ag/thermal src; the panel marks fake heat
 PIN_STATUS = ["new", "acknowledged", "investigating", "confirmed", "cleared"]
 RULES = ["day_offtrail", "night_outside_camp", "search", "sos"]
+PLAN_KINDS = ["patrol", "grid", "homing"]
+# Only the ranger's accept_leg makes a plan "accepted"; reject_leg makes it "rejected" (docs/CONTRACTS.md, "Plans")
+PLAN_STATUS = ["proposed", "accepted", "rejected", "done", "dropped"]
+LEG_KEYS = {"to_x", "to_y", "heading_deg", "dist_m", "alt_m"}
 CTRL_CMDS = {
     "new_search", "baseline_start", "baseline_stop",
     "ack", "investigate", "clear", "confirm",
@@ -108,6 +112,18 @@ def validate(topic: str, msg: dict) -> list[str]:
         problems.append(f"bad cmd {msg.get('cmd')!r}")
     if topic == TARGET and msg.get("status") not in PIN_STATUS:
         problems.append(f"bad status {msg.get('status')!r}")
+    if topic == PLAN:
+        if msg.get("kind") not in PLAN_KINDS:
+            problems.append(f"bad plan kind {msg.get('kind')!r}")
+        if msg.get("status") not in PLAN_STATUS:
+            problems.append(f"bad plan status {msg.get('status')!r}")
+        legs = msg.get("legs")
+        if not isinstance(legs, list):
+            problems.append("plan legs must be a list")
+        else:
+            for i, lg in enumerate(legs):
+                if not isinstance(lg, dict) or LEG_KEYS - lg.keys():
+                    problems.append(f"plan leg {i} needs {sorted(LEG_KEYS)}")
     if topic == ALERT and msg.get("kind") not in ALERT_KINDS:
         problems.append(f"bad alert kind {msg.get('kind')!r}")
     return problems

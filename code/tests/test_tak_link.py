@@ -1,11 +1,15 @@
 """tak_link.py both ways with the TAK phones: chat at each step of a pin, the rescue route, a phone that
 connects late, and what the phones send back (positions, chat, ack / check / found / nobody)."""
+import sys
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 from afterglow import config, geo
 from afterglow.contracts import CTRL, MODE, TARGET
-from tak_contracts import RESCUE, TEAM, validate
-from tak_link import CHAT, CHAT_ROOM, DELETE, ROUTE, CotOut, cot_time
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tak"))  # the TAK add-on lives in tak/, beside code/
+from tak_contracts import RESCUE, TEAM, validate  # noqa: E402
+from tak_link import CHAT, CHAT_ROOM, DELETE, ROUTE, CotOut, cot_time  # noqa: E402
 
 CFG = config.load()
 ORIGIN = CFG["mission"]["origin_lat"], CFG["mission"]["origin_lon"]
@@ -130,7 +134,7 @@ def test_phone_position_goes_on_the_bus_in_local_metres():
     assert msg["kind"] == "pos" and msg["callsign"] == "ALPHA" and abs(msg["x"] - 120) < 0.5 and abs(msg["y"] + 30) < 0.5
 
 
-def test_phone_chat_and_commands():
+def test_phone_chat_and_reports():
     co, out, bus = run()
     co.from_phone(phone_chat("on my way to the lot"))
     co.from_phone(phone_chat("ack p3"))
@@ -138,16 +142,33 @@ def test_phone_chat_and_commands():
     co.from_phone(phone_chat("found P3, he's conscious"))
     co.from_phone(phone_chat("nobody at P4"))
     kinds = [(t, m.get("kind") or m.get("cmd")) for t, m in bus]
-    assert kinds == [(TEAM, "chat"), (TEAM, "chat"), (CTRL, "ack"), (TEAM, "chat"), (CTRL, "investigate"),
+    assert kinds == [(TEAM, "chat"), (TEAM, "chat"), (TEAM, "report"), (TEAM, "chat"), (TEAM, "report"),
                      (TEAM, "chat"), (TEAM, "report"), (TEAM, "chat"), (TEAM, "report")]
     assert all(not validate(t, m) for t, m in bus)
-    ctrl = [m for t, m in bus if t == CTRL]
-    assert ctrl[0]["pin"] == "P3" and ctrl[0]["by"] == "ALPHA"
     reports = [m for t, m in bus if t == TEAM and m["kind"] == "report"]
-    assert [(r["pin"], r["verdict"]) for r in reports] == [("P3", "found"), ("P4", "nobody")]
+    assert [(r["pin"], r["verdict"]) for r in reports] == [("P3", "ack"), ("P3", "check"), ("P3", "found"), ("P4", "nobody")]
     replies = chats(out)
+    assert "Waiting for the ranger to send it" in replies[1]
     assert "Waiting for the ranger to confirm" in replies[2] and "Waiting for the ranger to clear" in replies[3]
     assert not any("CONFIRMED" in r for r in replies)  # a report never confirms anyone
+
+
+def test_a_phone_never_sends_the_drone_or_changes_a_pin():
+    """The one rule: only the ranger's click does. Nothing a phone sends becomes ag/ctrl."""
+    co, _, bus = run()
+    for text in ("check P3", "ack P3", "found P3", "nobody P3", "investigate P3", "confirm P3", "clear P3"):
+        co.from_phone(phone_chat(text))
+    assert bus and not any(t == CTRL for t, _ in bus)
+
+
+def test_only_a_message_that_starts_with_the_command_is_a_report():
+    co, out, bus = run()
+    for text in ("P3 is not a person", "is P3 clear?", "don't check P3 yet",
+                 "nothing at P2, will check P4 next", "P3 not here", "we found nothing near P5"):
+        co.from_phone(phone_chat(text))
+    assert [m["kind"] for _, m in bus] == ["chat"] * 6  # chat on the TV, never a report
+    hints = [r for r in chats(out) if "start the message with the command" in r]
+    assert len(hints) == 3  # check, check, found: a command word in the wrong place gets told how to report
 
 
 def test_own_messages_are_ignored():

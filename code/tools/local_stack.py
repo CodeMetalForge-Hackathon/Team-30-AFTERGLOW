@@ -42,13 +42,14 @@ sys.path.insert(0, str(TOOLS.parent))
 sys.path.insert(0, str(TOOLS))
 from afterglow import config as cfgmod  # noqa: E402
 from afterglow.case import CaseStore  # noqa: E402
-from afterglow.contracts import ALL, CTRL, MODE, OBS_BLE, OBS_WIFI, POSE, SOS, TARGET, TRACK, now_ms  # noqa: E402
+from afterglow.contracts import ALL, CTRL, MODE, OBS_BLE, OBS_WIFI, POSE, SOS, TARGET, THERMAL, TRACK, now_ms  # noqa: E402
 from afterglow.dashboard import Commands, State, make_handler, make_meta  # noqa: E402
 from afterglow.geofence import Geofence  # noqa: E402
 from afterglow.locate import MIN_WALL_S as LOCATE_MIN_WALL_S  # noqa: E402
 from afterglow.locate import Locate  # noqa: E402
 from afterglow.locate import guarded as locate_guarded  # noqa: E402
 from afterglow.parkmap import ParkMap  # noqa: E402
+from afterglow.planner import Planner  # noqa: E402
 from afterglow.tracker import Tracker, guarded  # noqa: E402
 
 log = logging.getLogger("local_stack")
@@ -95,14 +96,14 @@ def build(cfg, bus):
 
 
 def wire(cfg, bus, state, pm):
-    """A fresh tracker, geofence and locate on the bus, feeding the dashboard state."""
+    """A fresh tracker, geofence, locate and planner on the bus, feeding the dashboard state."""
     state.broker = True  # there's no broker to lose: the in-process bus is always there
     bus.subscribe(ALL, state.on_msg)
     tr = Tracker(cfg, bus)
     for topic in (POSE, "ag/obs/#", CTRL):
         bus.subscribe(topic, lambda t, m: guarded(tr, tr.feed, t, m))
     g = Geofence(cfg, bus, pm=pm)  # no pins_file: nothing saved, every run starts at P1
-    for topic in (TRACK, POSE, MODE, CTRL, SOS):
+    for topic in (TRACK, POSE, MODE, CTRL, SOS, THERMAL):
         bus.subscribe(topic, g.feed)
     loc = Locate(cfg, bus, pm=pm)
     last = [0.0]
@@ -115,6 +116,9 @@ def wire(cfg, bus, state, pm):
                 last[0] = time.monotonic()
     for topic in (POSE, TRACK, CTRL):
         bus.subscribe(topic, to_locate)
+    pl = Planner(cfg, bus, pm=pm)  # proposes legs only; the fake pod doesn't fly them (yet)
+    for topic in (TARGET, POSE, MODE, CTRL):
+        bus.subscribe(topic, pl.feed)
     return tr, g
 
 
