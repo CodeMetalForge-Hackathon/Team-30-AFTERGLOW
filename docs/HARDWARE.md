@@ -20,7 +20,7 @@ USB-C power bank 5 V 3 A ──USB-C──► Raspberry Pi 5 16 GB + Active Cool
    GPS   SparkFun NEO-F10N + ANN-MB5 antenna ── UART2  /dev/ttyAMA2  38400 (off for the indoor demo: gps = "")
 ```
 
-We have three XIAO ESP32S3 boards: OMNI, WIFI and XIAO #3. There's only **one RFM95W** (the pod's), so the laptop receives LoRa with an **ADALM-PLUTO** SDR instead, and XIAO #3 is now the spare.
+We have three XIAO ESP32S3 boards. There's only **one RFM95W** (the pod's), so the laptop receives LoRa with an **ADALM-PLUTO** SDR instead. **Sat 7 Nov, ~01:40:** the original WIFI board (#2) stopped showing up on USB at all (not even in BOOT mode), so **XIAO #3 is now the WIFI board** (same sketch, same wiring). There's no spare and no ref beacon board now.
 
 ## Device table
 
@@ -72,7 +72,7 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
 | | D10 (GPIO9), `Serial1` TX | Pi UART RX (pin 10 OMNI, 21 WIFI) |
 | | 5V, GND | Pi pin 2; GND pin 9 (OMNI) or 14 (WIFI) |
 | | D6, D7 | unused |
-| XIAO #3 | — | **Spare, not wired.** It was the laptop radio's host; the Pluto replaced that. `firmware/lora_rx/` still works if a second RFM95W turns up |
+| XIAO #3 | — | **Now the WIFI board** (replaced #2, which died Sat 7 Nov). Wired like WIFI above |
 
 ## Pi setup (once)
 
