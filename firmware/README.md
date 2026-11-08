@@ -36,7 +36,7 @@ Pins and parts come from `docs/HARDWARE.md`. The line formats are in `docs/CONTR
 
 ## WIFI: wifi_listener (tier 1), plus the SOS page (tier 2), in one sketch
 
-**Built Sat 7 Nov:** the SOS page lives in `wifi_listener/wifi_listener.ino` (one board, one sketch). **It's on at boot** (decided Sat 7 Nov): the open AP `SOS-RESCUE` on channel 6 with a captive page (hurt? can walk? how many?), and each answer prints a `sos` line (`rssi` = the strongest connected phone, or `null`). `sos_off` closes it and resumes hopping, and is remembered in flash across reboots; `sos_on` reopens it. While it's up, the probe listener hears channel 6 only. Tested with a phone Sat 7 Nov. The TV dashboard has SOS On/Off buttons; or `mosquitto_pub -t ag/ctrl -m '{"t":0,"cmd":"sos_on"}'`. Compile-check without the IDE: `arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 firmware/wifi_listener`.
+**Built Sat 7 Nov:** the SOS page lives in `wifi_listener/wifi_listener.ino` (one board, one sketch). It's off at boot. `sos_on` opens the open AP `SOS-RESCUE` on channel 6 with a captive page (hurt? can walk? how many?), and each answer prints a `sos` line (`rssi` = the strongest connected phone, or `null`). `sos_off` closes it and resumes hopping. The TV dashboard has SOS On/Off buttons; or `mosquitto_pub -t ag/ctrl -m '{"t":0,"cmd":"sos_on"}'`. Compile-check without the IDE: `arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 firmware/wifi_listener`.
 
 ### Original notes
 

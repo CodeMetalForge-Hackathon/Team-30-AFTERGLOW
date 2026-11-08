@@ -1,23 +1,21 @@
 // AFTERGLOW WIFI board (Seeed XIAO ESP32S3 #2): passive Wi-Fi probe listener + the SOS page.
 //
-// With the SOS page off it only listens: it hops channels 1, 6 and 11 every 250 ms and prints one
-// JSON line per probe request to the Pi on Serial1:
+// Normally (SOS off, the default) it only listens: it hops channels 1, 6 and 11 every 250 ms and
+// prints one JSON line per probe request to the Pi on Serial1:
 //   {"type":"wifi","addr":"da:a1:19:00:00:01","rand":true,"rssi":-80,"ch":6}
 // rand = the address is randomized (locally administered bit set).
 //
-// SOS page (tier 2): ON BY DEFAULT (decided Sat 7 Nov): at boot it opens an open access point
-// "SOS-RESCUE" on channel SOS_CH. {"cmd":"sos_off"} from the Pi (bridge.py forwards ag/ctrl sos_off)
-// closes it and {"cmd":"sos_on"} reopens it; the choice is kept in flash (Preferences), so a reboot
-// can't silently turn a sos_off back on. A phone that joins gets a captive page with three
+// SOS page (tier 2): on {"cmd":"sos_on"} from the Pi (bridge.py forwards ag/ctrl sos_on) it opens an
+// open access point "SOS-RESCUE" on channel SOS_CH. A phone that joins gets a captive page with three
 // questions (hurt? can you walk? how many?), and each answer goes to the Pi as:
 //   {"type":"sos","hurt":true,"walk":false,"count":2,"rssi":-55}
-// rssi = the strongest phone connected to the AP. With the AP closed, hopping resumes.
+// rssi = the strongest phone connected to the AP. {"cmd":"sos_off"} closes the AP and resumes hopping.
 // While the AP is up, the radio stays on SOS_CH, so the probe listener hears that channel only
-// (Wi-Fi probe detection drops to about a third; Bluetooth, the main sensor, is unaffected).
+// (fine: the page runs during Investigate, hovering over a pin).
 //
 // Formats: docs/CONTRACTS.md, "Serial lines from the ESP32 boards". Rules: firmware/README.md.
 // Privacy (CLAUDE.md): the listener only receives, and reads only the frame type, the sender
-// address and the RSSI. The SOS AP is the pod's only transmitter and always obeys sos_off.
+// address and the RSSI. The SOS AP is the pod's only transmitter, off unless the Pi turns it on.
 // Raw addresses go ONLY to the Pi's UART; USB debug never shows one, and an SOS line has none.
 //
 // Arduino IDE: board "XIAO_ESP32S3", USB CDC On Boot: Enabled (Serial = USB debug,
@@ -27,7 +25,6 @@
 #include <WiFi.h>
 #include <DNSServer.h>
 #include <WebServer.h>
-#include <Preferences.h>
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -38,7 +35,6 @@
 #define SOS_SSID "SOS-RESCUE"
 #define SOS_CH 6
 #define ANSWER_GAP_MS 2000  // at most one answer line every 2 s (a double tap sends one)
-#define SOS_DEFAULT_ON true  // first boot (nothing stored yet): the SOS page is on
 
 static const uint8_t CHANNELS[] = {1, 6, 11};
 static uint8_t chIdx = 0;
@@ -53,7 +49,6 @@ static volatile uint32_t heard = 0, dropped = 0, randCount = 0;
 
 static bool sosOn = false;
 static uint32_t answers = 0;
-static Preferences prefs;  // "ag"/"sos": the last sos_on/sos_off, kept across reboots
 static DNSServer dns;
 static WebServer web(80);
 static const IPAddress AP_IP(192, 168, 4, 1);
@@ -208,13 +203,8 @@ static void readPi() {
     char c = Serial1.read();
     if (c == '\n') {
       line[n] = 0;
-      if (strstr(line, "\"sos_on\"")) {
-        prefs.putBool("sos", true);
-        sosStart();
-      } else if (strstr(line, "\"sos_off\"")) {
-        prefs.putBool("sos", false);  // remembered: a reboot stays off
-        sosStop();
-      }
+      if (strstr(line, "\"sos_on\"")) sosStart();
+      else if (strstr(line, "\"sos_off\"")) sosStop();
       n = 0;
     } else if (n < sizeof(line) - 1) {
       line[n++] = c;
@@ -234,11 +224,7 @@ void setup() {
   WiFi.disconnect();
   startListening();
   esp_wifi_set_channel(CHANNELS[chIdx], WIFI_SECOND_CHAN_NONE);
-  Serial.println("AFTERGLOW wifi_listener: probe requests, lines to Serial1 (D9/D10) at 921600");
-
-  prefs.begin("ag", false);
-  if (prefs.getBool("sos", SOS_DEFAULT_ON)) sosStart();
-  else Serial.println("SOS page off (sos_off was sent before; sos_on turns it back on)");
+  Serial.println("AFTERGLOW wifi_listener: probe requests on ch 1/6/11, lines to Serial1 (D9/D10) at 921600; SOS page off");
 }
 
 void loop() {

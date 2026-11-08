@@ -195,7 +195,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - a park-scale simulator over Acadia, using a trails GeoJSON (done: the `park.toml` profile and `data/park_*.geojson`);
   - simulated phones using the measured range;
   - runs day patrol, night sweep and active search, and draws the coverage map.
-- [x] **sos_page firmware (UT):** an open `SOS-RESCUE` AP with a captive page that sends `sos` lines and obeys `sos_on` and `sos_off`. **Written Sat 7 Nov ~22:00** in `firmware/wifi_listener/wifi_listener.ino` (compiles with `arduino-cli`); flashed and tested with a phone Sat 7 Nov. **Now on by default**; `sos_off` closes it and is remembered across reboots. While it's up, Wi-Fi probes are heard on channel 6 only. Reflash the WIFI board for the on-by-default version.
+- [ ] **sos_page firmware (UT):** an open `SOS-RESCUE` AP with a captive page that sends `sos` lines and obeys `sos_on` and `sos_off`. **Written Sat 7 Nov ~22:00** in `firmware/wifi_listener/wifi_listener.ino` (compiles with `arduino-cli`); still to do: flash the WIFI board and test with a phone (join SOS-RESCUE → page pops up → Send → `ag/sos` → a pin with the SOS answer).
   - Optional, from the hardware reference (contract change first): a custom `msg` on `sos_on`, and a "phone joined the SOS network" event, which is a strong sign someone is there.
 - [ ] **`position.py`:** add IMU roll and pitch from the BNO086 at `[i2c] imu_addr` (`0x4B`), with RST on GPIO23 passed as `reset=`.
 - [ ] **(I8, hour 16, 02:00) evidence:**
