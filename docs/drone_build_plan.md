@@ -343,6 +343,8 @@ The core demo runs end to end by hour 12 (Saturday 22:00), the freeze is at hour
 
 ## Demo script
 
+> **Out of date (Sun 8 Nov):** the demo we're giving is in [`DEMO.md`](DEMO.md). This one assumed carrying the drone along a taped trail, camera person detection and Meshtastic.
+
 About four minutes, on a tiny park taped to the venue floor. The pod rides on the drone with props off, carried at height.
 
 **Before the judges arrive**

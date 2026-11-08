@@ -160,7 +160,7 @@ geofence.py listens to `ag/sos`, not lora_out.py, because priority 1 and `flags.
 - **The pin's flag** (**new**): geofence sets `flags.thermal` on the pin under investigation (the one set to investigating last) when `ag/thermal` is hot and the pod is within `[rules] thermal_near_m` of that pin's 95% circle. It's set once and stays set: a sign for the ranger, never a confirm. Like a click, it restamps `t` and keeps `t − last_s`.
 - `conf` is 0–1: 0.5 right at the `hot` threshold, 1.0 at twice it.
 - `src` is `ht203u` (the camera) or `fake` (`thermal.py --fake`). The panel should mark fake heat.
-- Whether the HT-203U gives temperatures on Linux is still to check (TODO.md), so readers must handle both kinds. All the thresholds are placeholders in the `[thermal]` table.
+- The HT-203U does give temperatures on Linux (checked Sat 7 Nov: raw 16-bit heat in its 256×392 YUYV frames), but readers must still handle a `null` `max_c`. All the thresholds are placeholders in the `[thermal]` table.
 
 ### Plans
 
@@ -229,7 +229,7 @@ dashboard.py serves everything on one port (`[http] port`, 8080), so there are n
 - The dashboard publishes only when someone clicks. It never sends `ag/ctrl` or `ag/mode` by itself.
 - **The case is laptop-only personal data** (`afterglow/case.py`). It's saved to `[search] case_file` under `runs/` (never committed), sent to browsers as an extra SSE `case` event (on connect and on every change), and **never** published on the bus or sent over LoRa. The sim reads the file to know which trail to fly.
 - `/api/map` also carries `search`: `car_parks`, `entrance_xy` and `corridor_m` from the `[search]` table (SAMPLE values until the published trail-use data is in).
-- **No login:** anyone who can reach port 8080 can click. Keep the pod and the laptop on the team's travel router, never the venue Wi-Fi.
+- **No login:** anyone who can reach port 8080 can click. Keep the pod and the laptop on the team's own hotspot, never the venue Wi-Fi.
 
 ## Serial lines from the ESP32 boards
 
