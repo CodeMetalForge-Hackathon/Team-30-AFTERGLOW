@@ -17,7 +17,7 @@ CFG = config.load()
 
 
 def make(tmp_path, **kw):
-    cfg = {**CFG, "camera": {**CFG["camera"], **kw}}
+    cfg = {**CFG, "camera": {**CFG["camera"], "rotate": 0, "flip": False, **kw}}  # upright, whatever the pod's mounting
     return Camera(cfg, tmp_path), cfg
 
 
@@ -136,4 +136,5 @@ def test_cli_fake_writes_frames(tmp_path):
     r = subprocess.run([sys.executable, "-m", "afterglow.camera", "--config", str(cfg_file), "--fake", "--frames", "2"],
                        cwd=CODE, capture_output=True, text=True, timeout=30)
     assert r.returncode == 0, r.stderr
-    assert Image.open(tmp_path / "camera.jpg").size == (1280, 720)
+    sideways = CFG["camera"]["rotate"] % 180 == 90  # the config's mounting turns the picture
+    assert Image.open(tmp_path / "camera.jpg").size == ((720, 1280) if sideways else (1280, 720))
