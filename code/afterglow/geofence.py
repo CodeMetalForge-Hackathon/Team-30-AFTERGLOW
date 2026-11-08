@@ -16,7 +16,9 @@ It proposes pins and guards the ranger's clicks; it never confirms anything itse
 - changes a pin's status only by the allowed steps (docs/CONTRACTS.md, "Pin states and priority")
   and ignores anything else. A cleared pin freezes and its track never gets another. A pin also
   keeps its place while its track is with_drone (the tracker then reports the pod's position);
-- attaches ag/sos answers to the pin under investigation, or opens an SOS-only T0 pin at the pod.
+- attaches ag/sos answers to the pin under investigation, or opens an SOS-only T0 pin at the pod;
+- sets flags.thermal on the pin under investigation when ag/thermal is hot with the pod within
+  [rules] thermal_near_m of the pin's 95% circle. It stays set: a sign for the ranger, not a confirm.
 
 Pins outlive a restart: they're saved to [rules] pins_file (pins and links only, no addresses), so a
 restarted geofence doesn't hand out P1 again. Its clock is the bus's `t`, so fake, sped-up and
@@ -35,7 +37,7 @@ from collections import Counter
 from . import config as cfgmod
 from . import geo
 from .bus import Bus, PrintBus
-from .contracts import ALWAYS_REPORTED, CTRL, MODE, MODES, POSE, SOS, TARGET, TRACK, validate
+from .contracts import ALWAYS_REPORTED, CTRL, MODE, MODES, POSE, SOS, TARGET, THERMAL, TRACK, validate
 from .parkmap import ParkMap
 
 log = logging.getLogger("geofence")
@@ -73,6 +75,7 @@ class Geofence:
         self.pm = pm or ParkMap.load(cfg)
         r = cfg["rules"]
         self.offtrail_m, self.min_passes, self.sos_r95 = r["offtrail_m"], r["min_passes"], r["sos_r95_m"]
+        self.thermal_near_m = float(r["thermal_near_m"])
         self.max_age_s = r["pins_max_age_min"] * 60
         self.hold_ms = r["pin_hold_s"] * 1000
         self.origin = cfg["mission"]["origin_lat"], cfg["mission"]["origin_lon"]
@@ -103,6 +106,8 @@ class Geofence:
             self.on_ctrl(topic, msg)
         elif topic == SOS:
             self.handle_sos(msg)
+        elif topic == THERMAL:
+            self.handle_thermal(msg)
 
     def advance(self, t):
         if not isinstance(t, int) or isinstance(t, bool):
@@ -256,12 +261,34 @@ class Geofence:
         self.save()
         self.publish(p)
 
+    def investigated(self):
+        """The pin set to investigating last, or None."""
+        inv = [pin for pin, p in self.pins.items() if p["status"] == "investigating"]
+        return self.pins[max(inv, key=lambda pin: self.inv_t.get(pin, 0))] if inv else None
+
+    def handle_thermal(self, msg):
+        """A hot spot with the pod over the pin under investigation: set flags.thermal, once.
+        thermal.py already ignores hot spots above [thermal] max_alt_m."""
+        self.advance(msg.get("t"))
+        if msg.get("hot") is not True or self.pose is None:
+            return
+        p = self.investigated()
+        if p is None or p["flags"]["thermal"] or "x" not in p:
+            return
+        d = math.dist(self.pose, (p["x"], p["y"]))
+        if d > (p.get("r95") or 0) + self.thermal_near_m:
+            return  # on the way there: that heat is somewhere else
+        p["flags"]["thermal"] = True
+        self.touch(p)  # seen by the camera, not heard: when the beacon was last heard stays put
+        log.info("%s: thermal hot spot with the pod %.0f m away", p["pin"], d)
+        self.save()
+        self.publish(p)
+
     def handle_sos(self, msg):
         self.advance(msg.get("t"))
         sos = {"hurt": bool(msg.get("hurt")), "walk": bool(msg.get("walk")), "count": msg.get("count", 0)}
-        inv = [pin for pin, p in self.pins.items() if p["status"] == "investigating"]
-        if inv:
-            p = self.pins[max(inv, key=lambda pin: self.inv_t.get(pin, 0))]
+        p = self.investigated()
+        if p is not None:
             self.touch(p)  # the answer came over Wi-Fi: the beacon itself wasn't heard
         else:
             open_sos = self.pins.get(self.sos_pin)
@@ -364,7 +391,7 @@ def main():
     else:
         g.restore()
     inbox = queue.Queue()  # handlers only queue, so paho's thread stays fast; this loop does the work
-    for topic in (TRACK, POSE, MODE, CTRL, SOS):
+    for topic in (TRACK, POSE, MODE, CTRL, SOS, THERMAL):
         bus.subscribe(topic, lambda topic, msg: inbox.put((topic, msg)))
     last_log = time.monotonic()
     try:

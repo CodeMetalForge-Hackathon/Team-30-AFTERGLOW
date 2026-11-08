@@ -38,7 +38,7 @@ sys.path.insert(0, str(TOOLS.parent))
 sys.path.insert(0, str(TOOLS))
 from afterglow import config as cfgmod  # noqa: E402
 from afterglow.case import CaseStore  # noqa: E402
-from afterglow.contracts import ALL, CTRL, MODE, OBS_BLE, OBS_WIFI, POSE, SOS, TARGET, TRACK, now_ms  # noqa: E402
+from afterglow.contracts import ALL, CTRL, MODE, OBS_BLE, OBS_WIFI, POSE, SOS, TARGET, THERMAL, TRACK, now_ms  # noqa: E402
 from afterglow.dashboard import Commands, State, make_handler, make_meta  # noqa: E402
 from afterglow.geofence import Geofence  # noqa: E402
 from afterglow.locate import MIN_WALL_S as LOCATE_MIN_WALL_S  # noqa: E402
@@ -98,7 +98,7 @@ def wire(cfg, bus, state, pm):
     for topic in (POSE, "ag/obs/#", CTRL):
         bus.subscribe(topic, lambda t, m: guarded(tr, tr.feed, t, m))
     g = Geofence(cfg, bus, pm=pm)  # no pins_file: nothing saved, every run starts at P1
-    for topic in (TRACK, POSE, MODE, CTRL, SOS):
+    for topic in (TRACK, POSE, MODE, CTRL, SOS, THERMAL):
         bus.subscribe(topic, g.feed)
     loc = Locate(cfg, bus, pm=pm)
     last = [0.0]

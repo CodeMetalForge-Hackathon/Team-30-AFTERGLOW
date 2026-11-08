@@ -53,6 +53,9 @@ hot_max_c = 45.0           # warmer is an engine or a sun-baked rock, not a pers
 hot_rise_c = 5.0           # degrees above the frame's median
 # hot, when it gives only a picture (no temperatures): how far the spot stands out, in spreads of the frame
 hot_z = 6.0
+# Never hot above this height (ag/pose z): a person is too few pixels there. Placeholder: measure the height
+# at which a person still covers about 3 x 3 pixels (the spot is a 3 x 3 mean). Indoors the pod is at 3 m.
+max_alt_m = 30.0
 # HT-203U raw heat -> degrees C = (raw + drift) / raw_per_c - raw_offset_c (check Sat 7 Nov:
 # a wall read 5101, a palm 5303). The offset is set so the wall reads 22 C; redo it against a known temperature.
 raw_per_c = 16.0
@@ -126,6 +129,7 @@ offtrail_m = 3             # indoor scale (park.toml: 30). Day patrol: pin a bea
 min_passes = 2             # ...seen on at least this many passes
 pin_hold_s = 15            # a rule must hold this long before a pin: early estimates jump about, with_drone takes a few s
 sos_r95_m = 30.0           # r95 of an SOS-only pin: the SOS page's Wi-Fi range (placeholder)
+thermal_near_m = 2.0       # indoor scale (park.toml: 10). flags.thermal on the investigated pin only with the pod this close to its 95% circle (placeholder)
 night_start = "21:00"
 night_end = "06:00"
 # geofence.py saves its pins here (relative to this file), so a restart doesn't reuse P1. "" = don't save.

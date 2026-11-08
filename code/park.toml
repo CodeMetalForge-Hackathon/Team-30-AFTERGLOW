@@ -40,6 +40,7 @@ hot_min_c = 30.0
 hot_max_c = 45.0
 hot_rise_c = 5.0
 hot_z = 6.0
+max_alt_m = 30.0
 # HT-203U raw heat -> degrees C = (raw + drift) / raw_per_c - raw_offset_c (check Sat 7 Nov:
 # a wall read 5101, a palm 5303). The offset is set so the wall reads 22 C; redo it against a known temperature.
 raw_per_c = 16.0
@@ -105,6 +106,7 @@ offtrail_m = 30
 min_passes = 2
 pin_hold_s = 5             # short for the quick demo (afterglow.toml keeps 15)
 sos_r95_m = 30.0
+thermal_near_m = 10.0
 night_start = "21:00"
 night_end = "06:00"
 pins_file = "runs/pins_park.json"   # its own file, so the two profiles never mix pins

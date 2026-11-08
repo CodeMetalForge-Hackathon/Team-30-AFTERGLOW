@@ -6,6 +6,8 @@
 
 Every frame goes through Thermal.handle_frame(): find the warm spot, decide `hot`, write the
 picture for the dashboard (temp file, then rename) and publish ag/thermal (CONTRACTS.md).
+Above [thermal] max_alt_m (the latest ag/pose `z`) a person is too few pixels to tell from a
+warm rock, so `hot` stays false up there. With no pose yet, any height counts.
 
 A frame is a 2-D array, in one of two kinds:
 - degrees C, if the camera gives temperatures: `max_c` is the spot's temperature, and `hot`
@@ -19,6 +21,7 @@ import argparse
 import logging
 import math
 import os
+import re
 import shutil
 import struct
 import sys
@@ -30,7 +33,7 @@ import numpy as np
 
 from . import config as cfgmod
 from .bus import Bus, PrintBus
-from .contracts import THERMAL, now_ms
+from .contracts import POSE, THERMAL, now_ms
 
 log = logging.getLogger("thermal")
 
@@ -79,6 +82,8 @@ class Thermal:
         self.hot_min_c, self.hot_max_c = float(th["hot_min_c"]), float(th["hot_max_c"])
         self.hot_rise_c = float(th["hot_rise_c"])
         self.hot_z = float(th["hot_z"])
+        self.max_alt_m = float(th["max_alt_m"])
+        self.z = None  # the pod's height from the latest ag/pose
         self.rotate = int(th["rotate"]) % 360
         self.flip = bool(th["flip"])
         if self.rotate % 90:
@@ -91,6 +96,15 @@ class Thermal:
         if self.flip:
             a = a[:, ::-1]
         return np.rot90(a, k=-(self.rotate // 90))  # clockwise
+
+    def handle_pose(self, msg):
+        """ag/pose in: keep its height (runs on paho's thread; one assignment, so no lock)."""
+        z = msg.get("z")
+        if isinstance(z, (int, float)) and not isinstance(z, bool) and math.isfinite(z):
+            self.z = float(z)
+
+    def too_high(self) -> bool:
+        return self.z is not None and self.z > self.max_alt_m
 
     def handle_frame(self, frame, celsius: bool, src: str, t: int | None = None):
         """One frame in; writes the PNG, publishes ag/thermal and returns that message. None for a bad frame."""
@@ -126,8 +140,10 @@ class Thermal:
             spread = max(1.4826 * float(np.median(np.abs(a - med))), 1.0)
             score = (peak - med) / spread / self.hot_z
             max_c = None
-        hot = score >= 1.0
-        conf = round(min(1.0, max(0.0, score / 2)), 2)  # 0.5 at the threshold, 1.0 at twice it
+        high = self.too_high()
+        hot = score >= 1.0 and not high
+        # 0.5 at the threshold, 1.0 at twice it; 0 when too high, so no panel shows confidence without a box
+        conf = 0.0 if high else round(min(1.0, max(0.0, score / 2)), 2)
 
         write_atomic(self.out, png_bytes(self.render(a, celsius, (row, col) if hot else None)))
         msg = {"t": t or now_ms(), "max_c": max_c, "hot": hot, "col": int(col), "row": int(row),
@@ -135,8 +151,11 @@ class Thermal:
         self.bus.publish(THERMAL, msg)
         self.frames += 1
         if hot != self.was_hot:
-            log.info("hot spot at col %d row %d (%s)" if hot else "no hot spot (warmest col %d row %d, %s)",
-                     col, row, f"{max_c} C" if max_c is not None else "no temperatures")
+            if high:
+                log.info("pod at %.0f m, above max_alt_m %.0f m: hot spots ignored", self.z, self.max_alt_m)
+            else:
+                log.info("hot spot at col %d row %d (%s)" if hot else "no hot spot (warmest col %d row %d, %s)",
+                         col, row, f"{max_c} C" if max_c is not None else "no temperatures")
             self.was_hot = hot
         return msg
 
@@ -186,6 +205,18 @@ def fake_frames(seed: int = 0):
 RAW_W, RAW_H = 256, 392  # the HT-203U's double-height YUYV mode (format test, Sat 7 Nov)
 TEMP_ROWS, HEADER_ROWS = 192, 4  # rows 0-191: 16-bit raw heat; 192-195: header; 196-387: the 8-bit picture
 FRAME_BYTES = RAW_W * RAW_H * 2
+# A frame out of step (a short frame shifted the pipe) or in the wrong mode reads garbage, so parse_raw
+# rejects one whose sensor (the camera's own temperature) or more than BAD_PIXELS_MAX of its pixels
+# are outside these ranges. Pixel data where raw heat should be reads well over 1000 C.
+SENSOR_OK_C = (-20.0, 90.0)
+SCENE_OK_C = (-100.0, 1000.0)
+BAD_PIXELS_MAX = 0.01
+BAD_RUN = 3  # this many bad frames in a row restarts the stream (one or two: the shutter click, skipped)
+STALL_S = 10.0  # no frame for this long restarts the stream
+
+
+class CameraError(Exception):
+    """The camera answers but can't give raw heat (wrong mode): log it and retry, no traceback."""
 
 
 def parse_raw(buf: bytes, per_c: float, offset_c: float, sensor_k: float = 0.0, sensor_ref_c: float = 0.0):
@@ -196,13 +227,34 @@ def parse_raw(buf: bytes, per_c: float, offset_c: float, sensor_k: float = 0.0, 
     The raw values sag as the camera warms up (a wall: 5101 at sensor 22.5 C, 4998 at 24.7 C), so:
         degrees C = (raw + sensor_k * (sensor - sensor_ref_c)) / per_c - offset_c
     ([thermal] raw_per_c, raw_offset_c, raw_sensor_k, raw_sensor_ref_c; from a wall at about 22 C and
-    a palm, Sat 7 Nov, so a degree or two out)."""
+    a palm, Sat 7 Nov, so a degree or two out). ValueError for a buffer that can't be a raw heat frame."""
     if len(buf) != FRAME_BYTES:
         raise ValueError(f"frame is {len(buf)} bytes, not {FRAME_BYTES} (256x392 YUYV)")
     words = np.frombuffer(buf, "<u2").reshape(RAW_H, RAW_W)
     sensor = words[TEMP_ROWS, 0] / 100.0
+    if not SENSOR_OK_C[0] <= sensor <= SENSOR_OK_C[1]:
+        raise ValueError(f"header says the sensor is at {sensor:.1f} C: frame out of step or not raw heat")
     raw = words[:TEMP_ROWS].astype(np.float32) + sensor_k * (sensor - sensor_ref_c)
-    return raw / per_c - offset_c, sensor
+    c = raw / per_c - offset_c
+    bad = float(np.mean((c < SCENE_OK_C[0]) | (c > SCENE_OK_C[1])))
+    if bad > BAD_PIXELS_MAX:
+        raise ValueError(f"{bad:.0%} of pixels read outside {SCENE_OK_C[0]:.0f} to {SCENE_OK_C[1]:.0f} C: "
+                         "frame out of step or not raw heat")
+    return c, sensor
+
+
+def format_problem(text: str) -> str | None:
+    """`v4l2-ctl --get-fmt-video` output -> what's wrong with the camera's mode, or None if it's 256x392
+    YUYV. Also None if the output can't be read: parse_raw's checks still catch a wrong mode."""
+    m = re.search(r"Width/Height\s*:\s*(\d+)/(\d+)", text)
+    if m is None:
+        return None
+    pf = re.search(r"Pixel Format\s*:\s*'([^']*)'", text)
+    fourcc = pf[1].strip() if pf else "YUYV"
+    if (int(m[1]), int(m[2])) != (RAW_W, RAW_H) or fourcc != "YUYV":
+        return (f"thermal camera is in {m[1]}x{m[2]} {fourcc} mode, not {RAW_W}x{RAW_H} YUYV, so no raw heat "
+                "(check v4l2-ctl --list-formats-ext)")
+    return None
 
 
 def calibration(th: dict) -> tuple:
@@ -230,28 +282,38 @@ def check_camera(th: dict) -> str:
     return dev
 
 
-def camera_frames(cfg: dict, retry_s: float = 2.0):
+def camera_frames(cfg: dict, retry_s: float = 2.0, stall_s: float = STALL_S):
     """The real HT-203U: v4l2-ctl streams raw 256x392 YUYV frames (25 fps) into a pipe; a thread keeps
-    only the newest, so run() always gets a fresh frame at [thermal] fps. Restarts the stream if it dies,
-    and the reader thread logs and retries on any error rather than dying quietly."""
+    only the newest, so run() always gets a fresh frame at [thermal] fps. The reader thread logs and
+    retries on any error rather than dying quietly, and won't stream a camera in the wrong mode. This
+    loop restarts the stream (kills v4l2-ctl; the reader starts a new one, in step from its first byte)
+    after stall_s with no frame or BAD_RUN bad frames in a row."""
     import subprocess
     import threading
 
     th = cfg["thermal"]
     cal = calibration(th)
     anchor = None if th["absolute"] else float(th["ambient_c"])
-    latest = {"buf": None, "n": 0}
+    # buf: the newest frame; src: the v4l2-ctl that sent it; proc: the one streaming now (None between streams)
+    latest = {"buf": None, "src": None, "n": 0, "proc": None}
     cond = threading.Condition()
 
     check_camera(th)  # no camera or no v4l2-ctl: stop now with a clear message, not in the thread
 
     def stream(dev):
-        """One v4l2-ctl stream, until it ends."""
+        """One v4l2-ctl stream, until it ends (or is killed)."""
         # Setting the format can fail with "Input/output error" when it's already set: harmless.
+        # So read the mode back instead: in any other mode the frames hold no raw heat.
         subprocess.run(["v4l2-ctl", "-d", dev, f"--set-fmt-video=width={RAW_W},height={RAW_H},pixelformat=YUYV"],
                        capture_output=True, timeout=10)
+        fmt = subprocess.run(["v4l2-ctl", "-d", dev, "--get-fmt-video"], capture_output=True, text=True, timeout=10)
+        problem = format_problem(fmt.stdout or "")
+        if problem:
+            raise CameraError(problem)
         p = subprocess.Popen(["v4l2-ctl", "-d", dev, "--stream-mmap", "--stream-count=0", "--stream-to=-"],
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        with cond:
+            latest["proc"] = p
         log.info("thermal camera streaming from %s", dev)
         try:
             while True:
@@ -259,9 +321,11 @@ def camera_frames(cfg: dict, retry_s: float = 2.0):
                 if not buf or len(buf) < FRAME_BYTES:
                     return
                 with cond:
-                    latest["buf"], latest["n"] = buf, latest["n"] + 1
+                    latest["buf"], latest["src"], latest["n"] = buf, p, latest["n"] + 1
                     cond.notify_all()
         finally:
+            with cond:
+                latest["proc"] = None
             p.kill()
             p.wait()  # reap it, so restarts don't leave zombie processes
 
@@ -271,25 +335,40 @@ def camera_frames(cfg: dict, retry_s: float = 2.0):
                 dev = find_device(th)
                 stream(dev)
                 log.error("thermal stream from %s stopped; restarting in %g s", dev, retry_s)
-            except SystemExit as e:  # unplugged: keep trying
+            except (SystemExit, CameraError) as e:  # unplugged or in the wrong mode: keep trying
                 log.error("%s; retrying in %g s", e, retry_s)
             except Exception:  # v4l2-ctl gone, a pipe error: say so and keep trying
                 log.exception("thermal camera reader failed; retrying in %g s", retry_s)
             time.sleep(retry_s)
 
+    def restart(p, why):
+        """Kill one v4l2-ctl stream (if it's still there) so the reader starts afresh."""
+        if p is None:
+            log.warning("%s", why)  # between streams: the reader is already retrying
+        else:
+            log.error("%s; restarting the thermal stream", why)
+            p.kill()
+
     threading.Thread(target=reader, daemon=True, name="thermal-reader").start()
-    seen = 0
+    seen = bad_run = 0
     while True:
         with cond:
-            if not cond.wait_for(lambda: latest["n"] > seen, timeout=10):
-                log.warning("no thermal frame for 10 s")
-                continue
-            buf, seen = latest["buf"], latest["n"]
+            fresh = cond.wait_for(lambda: latest["n"] > seen, timeout=stall_s)
+            buf, src, seen, now = latest["buf"], latest["src"], latest["n"], latest["proc"]
+        if not fresh:
+            restart(now, f"no thermal frame for {stall_s:g} s")
+            continue
         try:
             celsius, sensor_c = parse_raw(buf, *cal)
         except ValueError as e:
-            log.error("%s: is the camera in another mode? Check v4l2-ctl --list-formats-ext", e)
+            bad_run += 1
+            if bad_run == 1:
+                log.warning("skipped a thermal frame: %s", e)
+            if bad_run >= BAD_RUN:
+                restart(src, f"{bad_run} bad thermal frames in a row ({e})")
+                bad_run = 0
             continue
+        bad_run = 0
         if anchor is not None:
             # The raw offset drifts by many degrees as the camera warms; shift the frame so its
             # background reads ambient_c. A person still stands out by the same number of degrees.
@@ -334,6 +413,7 @@ def main():
 
     bus = PrintBus() if a.dry_run else Bus(cfg["mqtt"]["host"], cfg["mqtt"]["port"], "thermal")
     th = Thermal(cfg, bus, live)
+    bus.subscribe(POSE, lambda topic, msg: th.handle_pose(msg))  # the height, for max_alt_m
     log.info("writing %s at %s fps from %s", th.out, cfg["thermal"]["fps"], "fake frames" if a.fake else "the camera")
     try:
         run(th, frames, float(cfg["thermal"]["fps"]), a.frames, sleep=not a.dry_run)

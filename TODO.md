@@ -123,7 +123,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - on the fake pod through the real tracker (20 seeds, 20 min indoors): patrol pins only the dead iPhone in 19 of 20, night ignores the campground tag in 20 of 20, search pins all three in 19 of 20. The misses are early tracker estimates: one about 9 m out while claiming ±3.6 m, and one team phone marked `with_drone` only after 46 s.
   - **Contract change, tell the team:** `day_offtrail` now skips campgrounds (otherwise the campground tag gets pinned in patrol and demo step 8 can't show night ignoring it). New `[rules]` keys `pin_hold_s`, `pins_file`, `pins_max_age_min` in both profiles. `fake_bus.py` now sends `off_trail_m` `null`, not 9999, when there's no trail.
   - Park sim only: the tracker's key-rotation splits give some phones 2–3 pins, and `airtag_pack` (39 m off trail) is estimated at 20–29 m, under the 30 m threshold, so patrol often misses it. Both are tracker limits (see above).
-  - Tier 2: set `flags.thermal` from `ag/thermal` on the investigating pin. (`flags.camera` from `ag/vision` waits for the stretch person detector.)
+  - Tier 2: set `flags.thermal` from `ag/thermal` on the investigating pin (done, see Phase 3). (`flags.camera` from `ag/vision` waits for the stretch person detector.)
 - [ ] **`dashboard.py` (SW)**. Most of this landed with the Phase 1 skeleton:
   - [x] pins with Acknowledge, Investigate, Clear and Confirm buttons. Confirm needs two clicks and only works while the pin is being investigated. Each button shows "waiting for geofence" until the status changes, and warns if it never does;
   - [x] a mode switch for patrol, night, investigate and search;
@@ -190,7 +190,8 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - acts on `accept_leg` and `reject_leg`.
   The dashboard draws each leg with the heading and distance the observer reads to the pilot.
 - [ ] **Dashboard live feeds (SW):** MJPEG streams of the camera and thermal views from `dashboard.py`, in place of the once-a-second image reload; then raise `[camera] fps`.
-- [ ] **`thermal.py` flag (UT):** flag hot spots only below `[thermal] max_alt_m`, using the pose's `z`. The old 8 m limit was for the MLX90640's 32×24 pixels; the HT-203U's 256×192 should allow much more, so measure it: the height at which a person still covers a few pixels. Then geofence sets `flags.thermal` on the investigating pin (Phase 2, geofence).
+- [x] **`thermal.py` flag (SW, Sat 7 Nov ~22:20):** `hot` is never true above `[thermal] max_alt_m` (the latest `ag/pose` `z`; any height before the first pose). geofence sets `flags.thermal` once on the pin under investigation when `ag/thermal` is hot with the pod within `[rules] thermal_near_m` of the pin's 95% circle, and the flag stays set. New keys in both profiles; tests in `test_thermal.py` and `test_geofence.py`.
+  - [ ] **UT: measure `max_alt_m`** (30 m now, a placeholder): the height at which a person still covers about 3×3 pixels, since the spot is a 3×3 mean. The old 8 m limit was for the MLX90640's 32×24 pixels. Also set `thermal_near_m` (2 m indoors, 10 m park) to about the thermal view's reach at hover height.
 - [ ] **`sim.py` (SW):**
   - a park-scale simulator over Acadia, using a trails GeoJSON (done: the `park.toml` profile and `data/park_*.geojson`);
   - simulated phones using the measured range;

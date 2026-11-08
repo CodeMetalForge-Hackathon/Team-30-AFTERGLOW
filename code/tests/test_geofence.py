@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from afterglow import config
-from afterglow.contracts import CTRL, MODE, POSE, SOS, TARGET, TRACK, validate
+from afterglow.contracts import CTRL, MODE, POSE, SOS, TARGET, THERMAL, TRACK, validate
 from afterglow.geofence import STEPS, Geofence, prio
 from afterglow.parkmap import ParkMap
 from afterglow.tracker import Tracker
@@ -351,6 +351,53 @@ def test_a_new_search_leaves_the_old_sos_pin_alone():
     sos(g, hurt=True, t=T0 + 1000)
     pins = latest(bus)
     assert pins["P1"]["sos"]["hurt"] is False and pins["P2"]["rule"] == "sos" and pins["P2"]["prio"] == 1
+
+
+# ---------- thermal flag ----------
+
+def heat(g, hot=True, t=T0):
+    g.feed(THERMAL, {"t": t, "max_c": 34.0 if hot else 18.0, "hot": hot, "conf": 0.8, "src": "ht203u"})
+
+
+def pod(g, xy, t=T0):
+    g.feed(POSE, {"t": t, "x": xy[0], "y": xy[1], "z": 3.0, "src": "waypoint"})
+
+
+def test_thermal_flags_the_investigated_pin_once_the_pod_is_over_it():
+    g, bus = make()
+    g.feed(TRACK, track("T1"))  # P1 at (2, 6), r95 1.5
+    pod(g, (2.0, 6.0))
+    heat(g)
+    assert not latest(bus)["P1"]["flags"]["thermal"]  # not under investigation yet
+    ctrl(g, "investigate", "P1")
+    pod(g, (2.0, 6.0 - 1.5 - CFG["rules"]["thermal_near_m"] - 1), t=T0 + 1000)
+    heat(g, t=T0 + 1000)
+    assert not latest(bus)["P1"]["flags"]["thermal"]  # on the way there: that heat is elsewhere
+    pod(g, (2.0, 5.0), t=T0 + 2000)
+    heat(g, hot=False, t=T0 + 2000)
+    assert not latest(bus)["P1"]["flags"]["thermal"]
+    n = len(bus.msgs)
+    heat(g, t=T0 + 3000)
+    p = latest(bus)["P1"]
+    assert p["flags"]["thermal"] and p["status"] == "investigating" and p["state"] == "pinned"
+    assert (p["t"], p["last_s"]) == (T0 + 3000, 3)  # restamped; when it was last heard stays put
+    heat(g, hot=False, t=T0 + 4000)
+    heat(g, t=T0 + 5000)
+    assert len(bus.msgs) == n + 1 and latest(bus)["P1"]["flags"]["thermal"]  # set once, and it stays
+
+
+def test_thermal_goes_on_the_pin_investigated_last_and_needs_a_pose():
+    g, bus = make()
+    g.feed(TRACK, track("T1"))
+    g.feed(TRACK, track("T2", (3.0, 6.0), state="localized", c=0.6))
+    ctrl(g, "investigate", "P1")
+    heat(g)
+    assert not latest(bus)["P1"]["flags"]["thermal"]  # no pose: can't tell the pod is there
+    pod(g, (2.5, 6.0), t=T0 + 1000)  # near both
+    ctrl(g, "investigate", "P2", t=T0 + 1000)
+    heat(g, t=T0 + 1000)
+    pins = latest(bus)
+    assert pins["P2"]["flags"]["thermal"] and not pins["P1"]["flags"]["thermal"]
 
 
 # ---------- new searches and restarts ----------

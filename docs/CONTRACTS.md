@@ -119,7 +119,7 @@ How tracker.py fills `ag/track`. Its numbers live in the config's `[track]` tabl
 - **A pin stays.** It keeps following its track when the mode changes or the estimate moves back onto the trail. Only the ranger clears it. A cleared pin is published once, then frozen, and its track never gets another pin.
   - While its track is `with_drone` (picked up, or the pod right over it), the pin keeps its last place instead of riding along with the pod. It follows again once the mark clears.
 - `state`, `last_s` and `c` are copied from the latest `ag/track` for that track.
-- A click or an SOS answer restamps `t` and adds the same time to `last_s`, so when it was last heard (`t − last_s`) doesn't move.
+- A click, an SOS answer or the thermal flag restamps `t` and adds the same time to `last_s`, so when it was last heard (`t − last_s`) doesn't move.
 - The one exception: `state` becomes `confirmed` only when the ranger presses Confirm (pin `status` `confirmed`). The tracker never sets it. That keeps the rule that the drone never decides.
 - **`new_search`:** geofence unlinks every track, because the tracker starts new ones. It keeps the old pins for the ranger, and pin numbers keep counting. The next SOS answer opens a new SOS-only pin.
 - **Restarts:**
@@ -156,6 +156,8 @@ geofence.py listens to `ag/sos`, not lora_out.py, because priority 1 and `flags.
 - `col` and `row` are the spot's pixel in a `w` × `h` frame: 256 × 192, or 192 × 256 after a 90° `rotate`. The spot is the warmest 3 × 3 patch, so one noisy pixel can't be it.
 - **With temperatures:** `max_c` is the spot in °C. The spot is the warmest patch inside the body band (`hot_min_c`–`hot_max_c`, 30–45 °C), or the warmest overall if nothing is in the band. `hot` means it's in the band and at least `hot_rise_c` (5 °C) above the frame's median, so an engine or a sun-baked rock never counts. Nor does its rim, which cools through the band: patches within 5 pixels of anything above `hot_max_c` are skipped.
 - **Picture only** (no temperatures): `max_c` is `null`, and `hot` means the spot stands at least `hot_z` spreads (median absolute deviations) above the frame's median.
+- **Height** (**new**): `hot` is always false, and `conf` 0, while the latest `ag/pose` `z` is above `[thermal] max_alt_m`, because a person is then too few pixels to tell apart. Before the first pose, any height counts.
+- **The pin's flag** (**new**): geofence sets `flags.thermal` on the pin under investigation (the one set to investigating last) when `ag/thermal` is hot and the pod is within `[rules] thermal_near_m` of that pin's 95% circle. It's set once and stays set: a sign for the ranger, never a confirm. Like a click, it restamps `t` and keeps `t − last_s`.
 - `conf` is 0–1: 0.5 right at the `hot` threshold, 1.0 at twice it.
 - `src` is `ht203u` (the camera) or `fake` (`thermal.py --fake`). The panel should mark fake heat.
 - Whether the HT-203U gives temperatures on Linux is still to check (TODO.md), so readers must handle both kinds. All the thresholds are placeholders in the `[thermal]` table.
