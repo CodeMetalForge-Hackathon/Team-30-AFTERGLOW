@@ -33,6 +33,7 @@ code/
   tests/             pytest
 pi/                  setup_pi.sh, config.txt.append, udev rules, Mosquitto config, systemd service
 firmware/            README.md: what the ESP32 boards must send (Serial1 on D9/D10); lora_rx/: the laptop radio's sketch
+simulator/           TrailSAR mission simulator: the drone's sweep, beacon homing and thermal check in real parks (browser, all simulated)
 ```
 
 ## Quick start
