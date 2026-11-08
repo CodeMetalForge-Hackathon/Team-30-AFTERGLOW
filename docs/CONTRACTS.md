@@ -219,15 +219,18 @@ Pi → WIFI  {"cmd":"sos_on"}   {"cmd":"sos_off"}
 - A `ble` line carries only the class and the RSSI, never payload bytes. The hardware reference's proposed `key` field (the payload hex) would break the privacy rules, so it isn't used. Its `mac` is our `addr`, and its `t` isn't needed, because the Pi stamps time.
 - The bridge drops lines that aren't valid JSON and counts them in its log.
 
-### Laptop LoRa radio (XIAO #3 → laptop USB)
+### Laptop LoRa receiver (ADALM-PLUTO → laptop)
 
-XIAO #3 (`firmware/lora_rx/`) only listens. It prints every packet it hears, one JSON line each, and doesn't filter. The port is `/dev/cu.usbmodem*` on macOS; read it at 115200 with pyserial. `lora_rx.py` handles all of it.
+**Changed (Sat 7 Nov):** we have only one RFM95W, so the laptop receives with an ADALM-PLUTO SDR, not RFM95W + XIAO #3. The line format below is unchanged and stays the boundary:
+- `tools/pluto_rx.py` (to be written) runs gr-lora_sdr on the Pluto's samples, using the config's `[lora]` table, and prints one `rx` line per decoded packet with a good CRC, on stdout. It may print `rssi` and `snr` as `null` (an SDR has no calibrated RSSI), and `ag/alert` allows that.
+- `lora_rx.py` reads those lines from stdin and publishes `ag/alert`, exactly as it did from XIAO #3's USB port. It doesn't filter: `lora_rx.py` drops other teams' packets.
+- The old path (XIAO #3 + a second RFM95W, `firmware/lora_rx/`, read at 115200 from `/dev/cu.usbmodem*`) still works if a second RFM95W turns up.
 
 ```
-XIAO #3 → laptop  {"type":"rx","rssi":-71,"snr":9.5,"hex":"a2a10700<32 hex chars: the alert>"}
-XIAO #3 → laptop  {"type":"cfg","freq":915.000,"sf":7,"bw":125000,"cr":5,"pre":8}
-XIAO #3 → laptop  {"type":"err","msg":"no RFM95W: …"}
-laptop → XIAO #3  ?        (asks for the cfg line)
+receiver → laptop  {"type":"rx","rssi":-71,"snr":9.5,"hex":"a2a10700<32 hex chars: the alert>"}
+receiver → laptop  {"type":"cfg","freq":915.000,"sf":7,"bw":125000,"cr":5,"pre":8}
+receiver → laptop  {"type":"err","msg":"no radio: …"}
+laptop → XIAO #3  ?        (asks for the cfg line; XIAO #3 only)
 ```
 
 - `hex` is the whole packet: the 4-byte RadioHead header (to, from, id, flags), then the payload.
@@ -272,8 +275,8 @@ lora_out.py stays a plain encoder of `ag/target`. These details:
 
 Changes from the plan doc's layout: version 2 adds a metres scale, because a park-scale pin can be farther than 25.5 m from where it was heard. Bit 7 and byte 15 were the gas-hazard fields; the drone build has no gas sensor, so they now carry the camera flag and the off-trail distance.
 
-**Radio settings:** the config's `[lora]` table: 915.0 MHz, SF7, 125 kHz, coding rate 4/5, preamble 8, CRC on, sync word left at the default. Both radios must match exactly.
-- `firmware/lora_rx/lora_rx.ino` copies the numbers, and `tests/test_lora_rx.py` fails if they drift apart.
+**Radio settings:** the config's `[lora]` table: 915.0 MHz, SF7, 125 kHz, coding rate 4/5, preamble 8, explicit header, CRC on, sync word left at the default (0x12, the private-network word; gr-lora_sdr's default matches). Both ends must match exactly.
+- `tools/pluto_rx.py` reads the numbers from the config itself. `firmware/lora_rx/lora_rx.ino` (the old XIAO #3 path) copies them, and `tests/test_lora_rx.py` fails if they drift apart.
 - SF 9–10 trades speed for range. Change it in both places after ME 2's range test.
 
 **Filtering:** there's no private channel, so `lora_rx.py` keeps a packet only if all of these hold:

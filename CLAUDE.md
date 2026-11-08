@@ -1,6 +1,6 @@
 # AFTERGLOW
 
-A search-assist sensing pod strapped under an FPV drone. It passively hears the Bluetooth beacons that lost, dead or switched-off phones and AirTags keep sending (Apple Find My, Google Find Hub, Samsung lost mode). It pins them on a park map, then sends each pin over LoRa (two bare RFM95W radios) to the ranger's laptop and ATAK phone, with no Wi-Fi or cell. A camera with person detection on the AI HAT+, plus thermal and radar, helps a human confirm. Everything on the pod runs on a Raspberry Pi 5.
+A search-assist sensing pod strapped under an FPV drone. It passively hears the Bluetooth beacons that lost, dead or switched-off phones and AirTags keep sending (Apple Find My, Google Find Hub, Samsung lost mode). It pins them on a park map, then sends each pin over LoRa (the pod's RFM95W, received by an ADALM-PLUTO SDR on the laptop) to the ranger's laptop and ATAK phone, with no Wi-Fi or cell. A camera with person detection on the AI HAT+, plus thermal and radar, helps a human confirm. Everything on the pod runs on a Raspberry Pi 5.
 
 **Payload only (decided at kickoff):** the drones we have are too small to carry the pod, so we build and demo the payload on its own and pitch it as ready to fly on a larger drone. Don't plan work that needs the pod in the air.
 
@@ -41,7 +41,7 @@ code/
     thermal.py          HT-203U frames (or --fake) -> live/thermal.png + ag/thermal (warm spot, hot); camera reader not written yet
     radio.py            opens the pod's RFM95W on SPI1 from the config's [lora] table (lora_out, check_hw)
     lora_out.py         pod: ag/target (+ ag/pose, ag/sys) -> 16-byte alerts on the RFM95W every [lora] repeat_s, plus a heartbeat; obeys lora_off
-    lora_rx.py          laptop: XIAO #3's USB lines -> ag/alert (drops other teams' packets)
+    lora_rx.py          laptop: receiver lines (Pluto SDR via tools/pluto_rx.py) -> ag/alert (drops other teams' packets)
     cot_out.py          laptop: ag/alert (or ag/target + ag/pose with --wifi) -> CoT XML: UDP multicast for ATAK, TCP server for iTAK ([atak] table)
     dashboard.py        web server on [http] port: SSE state stream, /api/ctrl and /api/mode, live/ and snaps/
     web/                dashboard front end: app.js (Preact+htm panels), map.js (Leaflet, metres), store.js (SSE reducer)
@@ -59,7 +59,7 @@ docs/                   CONTRACTS.md, HARDWARE.md, MODULES.md, drone_build_plan.
   maps/                 map pictures
   wiring/               pins.csv (current); diagrams and wiring_and_build.html (out of date)
 pi/                     setup_pi.sh, config.txt lines, udev rule (radar), Mosquitto conf, systemd unit
-firmware/               what the ESP32 boards must send; lora_rx/ is the laptop radio's sketch (XIAO #3)
+firmware/               what the ESP32 boards must send; lora_rx/ is the old XIAO #3 receiver sketch (unused: the Pluto replaced it)
 ```
 
 On the Pi, clone the repo to `/home/pi/afterglow`, because `pi/systemd/afterglow@.service` assumes that path.
@@ -118,7 +118,7 @@ Anything past `--print` or `--dry-run` needs Mosquitto on the laptop (`brew inst
 - **Config.** Load with `afterglow.config.load()`, and open files it names with `config.resolve(cfg, rel)`. Never hard-code ports, thresholds or the origin. The range-dependent numbers (localized and pinned radii, lane spacing, `offtrail_m`) are placeholders until ME 2's range test, so they belong in config.
 - **Python version.** Target Python 3.11, which is what Pi OS Bookworm ships, so no 3.12-only syntax. The laptop runs 3.12. The Pi venv uses `--system-site-packages` because picamera2 and Hailo come from apt.
 - **Bus behaviour.** `Bus` handlers run on paho's network thread, so keep them fast. `Bus.subscribe` keeps one handler per topic pattern: subscribing to the same pattern again replaces the first handler.
-- **USB serial.** Never hard-code `ttyACM0`. On the Pi, use `/dev/radar` or `/dev/serial/by-id/…`. On the laptop, `lora_rx.py` finds XIAO #3 or takes `--port`.
+- **USB serial.** Never hard-code `ttyACM0`. On the Pi, use `/dev/radar` or `/dev/serial/by-id/…`. On the laptop, the LoRa receiver is the Pluto (libiio `usb:`), not a serial port.
 - **LoRa radio settings** live in the config's `[lora]` table and are copied into `firmware/lora_rx/lora_rx.ino`. Change both together; `tests/test_lora_rx.py` checks they match.
 - **Test against fake data first.** Every new module should run against `tools/fake_bus.py` before it touches hardware.
 - **Dashboard.** It only relays clicks: nothing in it publishes `ag/ctrl` or `ag/mode` on its own. `web/store.js` `apply()` mirrors `State.apply()` in `dashboard.py`, so change both. Its clock is the latest pose's `t`, never the browser clock. No CDN and no build step: libraries live in `web/vendor/`.

@@ -22,8 +22,8 @@ Hour 0 is Saturday 10:00. Hard cutoff is Sunday 12:00.
 | `geofence.py` | Pi | `ag/track`, trails and zones GeoJSON, `ag/mode`, `ag/ctrl`, `ag/sos`, `ag/pose` | `ag/target` | 1 | Software | ✅ done; see CONTRACTS.md, "How geofence fills a pin" |
 | `dashboard.py` | Pi, viewed on the laptop | everything; serves the images on port 8080 | `ag/ctrl`, `ag/mode` (retained) | 1 | Software | ✅ skeleton (I3); see TODO for what's left |
 | `lora_out.py` | Pi | `ag/target`, `ag/pose`, `ag/sys`, `ag/ctrl` | 16-byte alerts on the RFM95W (SPI1) | 1 | Utility | ✅ written by Software, tested without a radio; Utility tests it on the radios (I4, I7) |
-| lora_rx (firmware) | XIAO #3 + RFM95W, on the laptop's USB | LoRa radio | USB `rx` lines | 1 | Utility | ✅ `firmware/lora_rx/` |
-| `lora_rx.py` | Laptop | XIAO #3 over USB | `ag/alert` (laptop broker) | 1 | Software | ✅ done |
+| pluto_rx (`tools/pluto_rx.py`) | Laptop, ADALM-PLUTO on USB | LoRa (gr-lora_sdr) | `rx` lines on stdout | 1 | Software | ⏳ to write (replaces XIAO #3 + `firmware/lora_rx/`: only one RFM95W) |
+| `lora_rx.py` | Laptop | `rx` lines (pluto_rx; needs a stdin mode) | `ag/alert` (laptop broker) | 1 | Software | ✅ done; stdin mode to add |
 | `cot_out.py` | Laptop | `ag/alert` (fallback: `ag/target` over Wi-Fi) | CoT to ATAK | 1 | Software | ✅ done; check on a real ATAK phone |
 | `thermal.py` | Pi | HTI HT-203U (USB video) | `ag/thermal` + `live/thermal.png` | 1 view, 2 flag | Utility | replaced the MLX90640; see TODO for the first test |
 | health | Pi | vcgencmd, ports | `ag/sys` | 1 | Utility | `tools/check_hw.py` has the checks |
