@@ -8,6 +8,7 @@ to fly in the simulation.
     cs = CaseStore(cfg, pm)
     cs.open({"name": "...", "age": "34", "details": "red jacket", "carrying": "iphone",
              "car_park": "Gorham Mountain lot"})       # -> (problems, view)
+    cs.open({"ping": "P3"})                            # the ping the ranger linked to the case
     cs.view()      # {"case", "start", "ranking", "route", "trail"}; case None when none is open
     cs.close()
 
@@ -61,7 +62,7 @@ class CaseStore:
         trail = c.get("trail") if c and c.get("trail") in names else (ranking[0]["name"] if ranking else None)
         return {"case": c, "start": {"x": start[0], "y": start[1], "label": label},
                 "ranking": ranking, "trail": trail,
-                "route": trails.route(self.pm, trail, start) if trail else []}
+                "route": trails.route(self.pm, trail, start, self.cfg["search"]["segment_m"]) if trail else []}
 
     # ---------- writes (each one is a click) ----------
     def open(self, body: dict) -> tuple[list[str], dict]:
@@ -109,6 +110,22 @@ class CaseStore:
                 problems.append(f"unknown car park; pick one of {sorted(known)} or none")
             else:
                 clean["car_park"] = body["car_park"] or ""
+        if "team" in body:  # the ranger says a ground team is on its way: stamp the time
+            if body["team"] is not True:
+                problems.append("team must be true")
+            else:
+                clean["team_t"] = now_ms()
+        if "prior_mode" in body:  # the sweep before the case, to go back to once a team is on its way
+            if body["prior_mode"] not in ("patrol", "night"):
+                problems.append("prior_mode must be patrol or night")
+            else:
+                clean["prior_mode"] = body["prior_mode"]
+        if "ping" in body:  # the ping the ranger says is this person's (P3), or "" to unlink
+            v = body["ping"]
+            if v not in ("", None) and not (isinstance(v, str) and len(v) <= 6 and v[:1] == "P" and v[1:].isdigit()):
+                problems.append("ping must look like P3, or be empty")
+            else:
+                clean["ping"] = v or ""
         if "trail" in body:
             names = set(trails.pieces(self.pm))
             if body["trail"] not in names | {"", None}:

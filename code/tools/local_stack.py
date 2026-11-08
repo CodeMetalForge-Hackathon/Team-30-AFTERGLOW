@@ -7,7 +7,7 @@ and locate -> the dashboard. For laptops without Mosquitto (Windows), and as a d
     then open http://localhost:8080/tv.html (operator TV), /livemap.html (live map feed) or / (dashboard)
 
 Sources:
-    fake (default)  tools/fake_bus.py's FakePod, publishing pose and ble only. Its cheating
+    fake (default)  tools/fake_bus.py's FakePod, publishing pose, ble and its stand-in thermal and camera. Its cheating
                     stand-ins stay off: the real tracker.py, geofence.py and locate.py make every
                     track, pin and coverage grid.
     --replay LOG    a `mosquitto_sub -v` recording, through tools/replay.py's parser. Only the raw
@@ -37,7 +37,7 @@ sys.path.insert(0, str(TOOLS.parent))
 sys.path.insert(0, str(TOOLS))
 from afterglow import config as cfgmod  # noqa: E402
 from afterglow.case import CaseStore  # noqa: E402
-from afterglow.contracts import ALL, CTRL, MODE, OBS_BLE, OBS_WIFI, POSE, SOS, TRACK, now_ms  # noqa: E402
+from afterglow.contracts import ALL, CTRL, MODE, OBS_BLE, OBS_WIFI, POSE, SOS, TARGET, TRACK, now_ms  # noqa: E402
 from afterglow.dashboard import Commands, State, make_handler, make_meta  # noqa: E402
 from afterglow.geofence import Geofence  # noqa: E402
 from afterglow.locate import MIN_WALL_S as LOCATE_MIN_WALL_S  # noqa: E402
@@ -85,6 +85,12 @@ def build(cfg, bus):
     pm = ParkMap.load(cfg)
     meta = make_meta(cfg, pm)
     state = State(meta["trail_step_m"])
+    tr, g = wire(cfg, bus, state, pm)
+    return pm, meta, state, tr, g
+
+
+def wire(cfg, bus, state, pm):
+    """A fresh tracker, geofence and locate on the bus, feeding the dashboard state."""
     state.broker = True  # there's no broker to lose: the in-process bus is always there
     bus.subscribe(ALL, state.on_msg)
     tr = Tracker(cfg, bus)
@@ -103,27 +109,87 @@ def build(cfg, bus):
                 last[0] = time.monotonic()
     for topic in (POSE, TRACK, CTRL):
         bus.subscribe(topic, to_locate)
-    return pm, meta, state, tr, g
+    return tr, g
+
+
+class SimClock:
+    """The fake pod's clock: simulated time runs at `speed` times the wall clock, or stops while
+    paused. The TV's pause and speed buttons set it (POST /api/sim). Sim only: the real pod
+    can't be paused."""
+    SPEEDS = (1, 2, 4, 10)
+
+    def __init__(self, speed=1.0):
+        self.lock = threading.Lock()
+        self.speed, self.paused = float(speed), False
+        self.sim_ms, self.last = 0.0, time.monotonic()
+        self.listeners = []
+        self.on_reset = None  # set by main(): back to time zero
+
+    def restart(self):
+        with self.lock:
+            self.sim_ms, self.last, self.paused = 0.0, time.monotonic(), False
+
+    def elapsed_ms(self):
+        with self.lock:
+            now = time.monotonic()
+            if not self.paused:
+                self.sim_ms += (now - self.last) * 1000 * self.speed
+            self.last = now
+            return self.sim_ms
+
+    def view(self):
+        return {"paused": self.paused, "speed": self.speed}
+
+    def set(self, body):
+        if body.get("reset") is True:  # the TV's Reset button: everything back to time zero
+            if self.on_reset:
+                self.on_reset()
+            return []
+        problems = []
+        speed = body.get("speed", self.speed)
+        if not isinstance(speed, (int, float)) or isinstance(speed, bool) or speed not in self.SPEEDS:
+            problems.append(f"speed must be one of {list(self.SPEEDS)}")
+        paused = body.get("paused", self.paused)
+        if not isinstance(paused, bool):
+            problems.append("paused must be true or false")
+        if problems:
+            return problems
+        self.elapsed_ms()  # bank the time run so far at the old speed
+        with self.lock:
+            self.speed, self.paused = float(speed), paused
+        log.info("sim %s at %gx", "paused" if paused else "running", self.speed)
+        for fn in list(self.listeners):
+            fn(self.view())
+        return []
 
 
 def make_pod(cfg, pm, bus, cases, seed):
     """The fake pod, following the ranger's mode and the open case's trail (sim only)."""
     from fake_bus import FakePod
-    pod = FakePod(cfg, pm, random.Random(seed), only={"pose", "ble"})
+    pod = FakePod(cfg, pm, random.Random(seed), only={"pose", "ble", "thermal", "vision"})
     pod.set_route(cases.view()["route"])
-    cases.listeners.append(lambda view: pod.set_route(view["route"] if view["case"] else None))
+
+    def on_case(view):
+        pod.set_route(view["route"] if view["case"] else None)
+        if not view["case"]:
+            pod.stop_watching()  # case closed: no more check-ins on the person
+    cases.listeners.append(on_case)
     bus.subscribe(MODE, lambda t, m: pod.on_mode(m))
+    bus.subscribe(TARGET, lambda t, m: pod.on_target(m))  # where each pin is, for Investigate
+    bus.subscribe(CTRL, lambda t, m: pod.on_ctrl(m))  # Investigate flies there, Clear goes back
     return pod
 
 
-def run_fake(pod, bus, speed, stop):
-    start, t0 = time.monotonic(), now_ms()
+def run_fake(pod, bus, clock, stop):
+    t0 = now_ms()
     for topic, msg, retain in pod.run(t0):
+        while not stop.is_set():  # wait until simulated time reaches the message (forever while paused)
+            ahead = msg["t"] - t0 - clock.elapsed_ms()
+            if ahead <= 0:
+                break
+            stop.wait(min(0.1, ahead / 1000 / max(clock.speed, 0.1)))
         if stop.is_set():
             return
-        wait = start + (msg["t"] - t0) / 1000 / speed - time.monotonic()
-        if wait > 0:
-            stop.wait(wait)
         bus.publish(topic, msg, retain=retain)
 
 
@@ -149,8 +215,8 @@ def run_replay(path, bus, speed, loop, stop):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", help="profile: afterglow.toml (default) or park.toml")
-    ap.add_argument("--speed", type=float, default=1.0, help="time multiplier for the source")
-    ap.add_argument("--seed", type=int, help="fake pod random seed, for a repeatable run")
+    ap.add_argument("--speed", type=float, default=1.0, help="time multiplier for the source (fake pod: 1, 2, 4 or 10; the TV can change it)")
+    ap.add_argument("--seed", type=int, default=2, help="fake pod random seed (default 2: the park demo's false signal at ~1 min, the person ~1 min later)")
     ap.add_argument("--replay", metavar="LOG", help="replay a mosquitto_sub -v log instead of the fake pod")
     ap.add_argument("--loop", action="store_true", help="with --replay: start again at the end")
     ap.add_argument("--host", default="127.0.0.1", help="address to serve on (0.0.0.0 = every interface)")
@@ -159,21 +225,47 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
     cfg = cfgmod.load(a.config)
-    bus = LocalBus()
-    pm, meta, state, _, _ = build(cfg, bus)
-    cmds = Commands(lambda: bus, cfg["waypoints"])
+    holder = {"bus": LocalBus()}  # replaced on a reset
+    pm, meta, state, _, _ = build(cfg, holder["bus"])
+    cmds = Commands(lambda: holder["bus"], cfg["waypoints"])
     dirs = {k: cfgmod.resolve(cfg, cfg["http"][f"{k}_dir"]) for k in ("live", "snaps")}
     cases = CaseStore(cfg, pm)
-    cases.listeners.append(lambda view: state.broadcast("case", view))
+    to_browsers = lambda view: state.broadcast("case", view)  # noqa: E731
+    cases.listeners.append(to_browsers)
     stop = threading.Event()
+    clock = None
+    run = {}
     if a.replay:
-        src = lambda: run_replay(a.replay, bus, a.speed, a.loop, stop)  # noqa: E731
+        threading.Thread(target=lambda: run_replay(a.replay, holder["bus"], a.speed, a.loop, stop), daemon=True, name="source").start()
     else:
-        pod = make_pod(cfg, pm, bus, cases, a.seed)
-        src = lambda: run_fake(pod, bus, a.speed, stop)  # noqa: E731
-    threading.Thread(target=src, daemon=True, name="source").start()
+        clock = SimClock(a.speed if a.speed in SimClock.SPEEDS else 1)
+        clock.listeners.append(lambda view: state.broadcast("sim", view))
 
-    server = ThreadingHTTPServer((a.host, a.port or cfg["http"]["port"]), make_handler(state, cmds, meta, dirs, cases))
+        def start_pod():
+            run["stop"] = threading.Event()
+            pod = make_pod(cfg, pm, holder["bus"], cases, a.seed)
+            run["thread"] = threading.Thread(target=run_fake, args=(pod, holder["bus"], clock, run["stop"]), daemon=True, name="source")
+            run["thread"].start()
+
+        def reset():
+            """Back to time zero: a new fake pod, tracker, geofence and locate on a new bus; no pins,
+            no case, mode back to patrol (nothing retained). The browsers reload."""
+            run["stop"].set()
+            run["thread"].join(timeout=3)
+            holder["bus"] = LocalBus()
+            with state.lock:
+                state.clear()
+            wire(cfg, holder["bus"], state, pm)
+            cases.listeners[:] = [to_browsers]
+            cases.close()
+            clock.restart()
+            start_pod()
+            log.info("reset: back to time zero")
+            state.broadcast("reset", {})
+        clock.on_reset = reset
+        start_pod()
+
+    server = ThreadingHTTPServer((a.host, a.port or cfg["http"]["port"]), make_handler(state, cmds, meta, dirs, cases, clock))
     server.daemon_threads = True
     port = server.server_address[1]
     log.info("%s: %s -> tracker, geofence, locate -> dashboard, no broker", meta["name"],
@@ -185,6 +277,8 @@ def main():
         pass
     finally:
         stop.set()
+        if run.get("stop"):
+            run["stop"].set()
         server.server_close()
 
 

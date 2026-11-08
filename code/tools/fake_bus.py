@@ -13,6 +13,8 @@ What it publishes (pick with --only):
     track     ag/track once a second per heard phone       (stand-in for tracker.py)
     coverage  ag/coverage once a second, retained          (the real locate, fed the fake tracks; wiped on exit)
     target    ag/target once a second per pin               (stand-in for geofence.py)
+    thermal   ag/thermal once a second                      (stand-in for thermal.py)
+    vision    ag/vision when a person is in view            (stand-in for person.py)
 
 The profile's [sim] table sets the path, the hidden phones and the RSSI model. The path is a
 dumb stand-in, a waypoint loop or fixed lanes; real routes come from planner.py.
@@ -20,6 +22,15 @@ dumb stand-in, a waypoint loop or fixed lanes; real routes come from planner.py.
 Trail pathing (sim only): while ag/mode is "search" and a case is open on the laptop (the
 dashboard's case file, afterglow/case.py), the fake pod flies the case's trail instead: to the
 nearest point on it, then back and forth along it. Any other mode goes back to the lanes.
+
+Checking a ping (sim only, a stand-in for planner.py homing): when the ranger presses
+Investigate (ag/ctrl investigate), the fake pod flies to that pin and circles it until the pin
+is cleared (then it goes back to its path) or confirmed (then it stays). Once the ranger marks a
+team on the way and goes back to a sweep (ag/mode patrol or night with the pin confirmed), the
+pod goes back to that sweep and drops by the person every [sim] checkin_s for checkin_dwell_s.
+Its stand-in camera and
+thermal publish ag/vision and ag/thermal: a phone with `person = true` in [sim] phones reads warm
+and shows a person when the pod is close; anything else reads at air temperature.
 
 The stand-in tracker CHEATS: it knows where each phone really is and adds an error that
 shrinks with every strong pass (r95 = 2.5 x localized_r95_m / passes^1.5). It only makes
@@ -41,13 +52,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from afterglow import config, geo  # noqa: E402
-from afterglow.contracts import (ALWAYS_REPORTED, COVERAGE, MODE, OBS_BLE, POSE, TARGET,  # noqa: E402
-                                 TRACK, now_ms)
+from afterglow.contracts import (ALWAYS_REPORTED, COVERAGE, CTRL, MODE, OBS_BLE, POSE, TARGET,  # noqa: E402
+                                 THERMAL, TRACK, VISION, now_ms)
 from afterglow.geofence import prio  # noqa: E402
 from afterglow.locate import Locate, grid_area  # noqa: E402
 from afterglow.parkmap import ParkMap  # noqa: E402
 
-TOPICS = {"pose": POSE, "ble": OBS_BLE, "track": TRACK, "coverage": COVERAGE, "target": TARGET}
+TOPICS = {"pose": POSE, "ble": OBS_BLE, "track": TRACK, "coverage": COVERAGE, "target": TARGET,
+          "thermal": THERMAL, "vision": VISION}
 ADVERT_HZ = 1.0  # adverts a second per phone
 ROTATE_MS = 900_000  # Find My key rotation
 
@@ -58,6 +70,7 @@ class Phone:
     cls: str
     x: float | None  # None = rides on the pod
     y: float | None
+    person: bool = False  # someone is with this phone: warm on thermal, seen by the camera
     ids: list = field(default_factory=list)
     best: dict = field(default_factory=dict)  # pass number -> loudest RSSI on that pass
     loudest: tuple | None = None  # (rssi, x, y) of the loudest advert so far
@@ -109,6 +122,8 @@ def path(cfg, area, dt):
             verts += [(x0, y), (x1, y)] if east else [(x1, y), (x0, y)]
             y += sim["lane_m"]
             east = not east
+        if sim.get("lanes_from") == "north":  # start at the north edge and work south
+            verts = verts[::-1]
         done = 0
         while True:  # sweep up, then back down the same lanes
             for pt, i in walk(verts, step):
@@ -117,10 +132,6 @@ def path(cfg, area, dt):
             verts = verts[::-1]
     else:
         sys.exit(f"[sim] path must be \"waypoints\" or \"lanes\", not {sim['path']!r}")
-
-
-def nearest_index(pts, x, y):
-    return min(range(len(pts)), key=lambda i: math.dist(pts[i], (x, y)))
 
 
 class Pather:
@@ -132,6 +143,14 @@ class Pather:
         self.base = path(cfg, area, dt)
         self.route = None  # [[x, y], ...] or None
         self.active = False  # True while ag/mode is "search"
+        self.home = None  # (x, y) of the ping being checked, or None
+        self.orbit_m = 8.0
+        self.dt = dt
+        self.watch = None  # (x, y) of a found person to drop by now and then, or None
+        self.watch_every = max(1, round(cfg["sim"]["checkin_s"] / dt))  # steps between check-ins
+        self.watch_dwell = max(1, round(cfg["sim"]["checkin_dwell_s"] / dt))  # steps circling each time
+        self.since_visit = 0
+        self.visiting = False
         self.pos = None
         self.src = None  # the generator in use
         self.want = "base"
@@ -146,6 +165,32 @@ class Pather:
             self.active = bool(on)
             self.src = None
 
+    def set_home(self, xy):
+        """Fly to xy and circle it (checking a ping); None goes back to the path."""
+        self.home = tuple(xy) if xy else None
+        self.src = None
+
+    def set_watch(self, xy):
+        """Go back to the path, but drop by xy every watch_every steps (None stops it)."""
+        self.watch = tuple(xy) if xy else None
+        self.since_visit, self.visiting = 0, False
+        self.src = None
+
+    def circle(self, center=None, steps=None):
+        hx, hy = center or self.home
+        r = self.orbit_m
+        yield from self.transit((hx + r, hy))
+        a, da, k = 0.0, self.step / r, 0
+        while steps is None or k < steps:
+            a += da
+            k += 1
+            yield hx + r * math.cos(a), hy + r * math.sin(a), self.n
+
+    def visit(self):
+        self.visiting = True
+        yield from self.circle(self.watch, self.watch_dwell)
+        self.visiting, self.since_visit = False, 0
+
     def transit(self, to):
         if self.pos is not None and math.dist(self.pos, to) > self.step:
             for pt, _ in walk([self.pos, to], self.step):
@@ -153,9 +198,8 @@ class Pather:
 
     def trail(self):
         r = self.route
-        i = nearest_index(r, *(self.pos or r[0]))
-        yield from self.transit(r[i])
-        legs = [r[i::-1], r] if i > 0 else [r]  # to the nearer end first, then the whole trail
+        yield from self.transit(r[0])  # the stretch starts where the trail passes the car
+        legs = [r]
         while True:
             for verts in legs:
                 for pt, _ in walk(verts, self.step):
@@ -175,13 +219,25 @@ class Pather:
         return self
 
     def __next__(self):
-        want = "trail" if self.active and self.route else "base"
-        if self.src is None or want != self.want:
-            self.want = want
-            self.src = self.trail() if want == "trail" else self.base_path()
-        x, y, n = next(self.src)
-        self.pos = (x, y)
-        return x, y, n
+        while True:
+            if self.home:
+                want = "home"
+            elif self.watch and (self.visiting or self.since_visit >= self.watch_every):
+                want = "visit"
+            else:
+                want = "trail" if self.active and self.route else "base"
+                if self.watch:
+                    self.since_visit += 1
+            if self.src is None or want != self.want:
+                self.want = want
+                self.src = {"home": self.circle, "visit": self.visit, "trail": self.trail}.get(want, self.base_path)()
+            try:
+                x, y, n = next(self.src)
+            except StopIteration:  # a check-in finished: back to the sweep
+                self.src = None
+                continue
+            self.pos = (x, y)
+            return x, y, n
 
 
 class FakePod:
@@ -194,16 +250,58 @@ class FakePod:
         self.P = cfg["track"]["pinned_r95_m"]
         area = sim["area_m"] if sim.get("area_m") else grid_area(cfg, pm)
         self.area = tuple(round(v, 2) for v in area)  # the map's lon/lat round trip leaves float dust
-        self.phones = [Phone(p["name"], p["cls"], p.get("x"), p.get("y")) for p in sim["phones"]]
+        self.phones = [Phone(p["name"], p["cls"], p.get("x"), p.get("y"), bool(p.get("person"))) for p in sim["phones"]]
         # A pass counts for a phone once it's heard at least as loud as the model gives at detect_m
         self.strong = self.model_rssi(math.hypot(cfg["locate"]["detect_m"], sim["height_m"]))
         self.loc = Locate(cfg, None, pm) if "coverage" in self.only else None  # publishes nothing itself
         self.n_tracks = self.n_pins = 0
         self.pather = Pather(cfg, self.area, self.dt)
+        detect = cfg["locate"]["detect_m"]
+        self.pather.orbit_m = max(0.5, detect / 5)
+        self.thermal_m, self.camera_m = detect * 0.75, detect / 2  # how close the stand-in sensors need to be
+        self.pins = {}  # pin -> (x, y), from ag/target, so Investigate knows where to fly
+        self.status = {}  # pin -> its status, from ag/target
+        self.checking = None  # the pin being checked
 
     def on_mode(self, msg):
-        """ag/mode: fly the case's trail while the ranger has trail pathing ("search") on."""
-        self.pather.set_active(msg.get("mode") == "search")
+        """ag/mode: fly the case's trail while the ranger has trail pathing ("search") on.
+        Emergency ("investigate") changes nothing: the pod stays on the ping it's checking.
+        Back to a sweep with a confirmed person (team on the way): sweep, and check in on them."""
+        mode = msg.get("mode")
+        if mode in ("patrol", "night", "search"):
+            self.pather.set_active(mode == "search")
+        if mode in ("patrol", "night") and self.checking and self.status.get(self.checking) == "confirmed":
+            self.pather.set_watch(self.pins[self.checking])
+            self.checking = None
+            self.pather.set_home(None)
+
+    def on_target(self, msg):
+        if "pin" in msg and isinstance(msg.get("x"), (int, float)):
+            self.pins[msg["pin"]] = (msg["x"], msg["y"])
+            self.status[msg["pin"]] = msg.get("status")
+            if msg["pin"] == self.checking and msg.get("status") == "cleared":
+                self.stop_checking()
+            elif msg["pin"] == self.checking and self.pather.home and math.dist(self.pather.home, self.pins[msg["pin"]]) > self.pather.orbit_m:
+                self.pather.set_home(self.pins[msg["pin"]])  # the estimate moved: follow it
+
+    def on_ctrl(self, msg):
+        """The ranger's clicks: Investigate flies to the pin; Clear goes back to the path."""
+        cmd, pin = msg.get("cmd"), msg.get("pin")
+        if cmd == "investigate" and pin in self.pins:
+            self.checking = pin
+            self.pather.set_home(self.pins[pin])
+        elif cmd == "clear" and pin == self.checking or cmd == "new_search":
+            self.stop_checking()
+            if cmd == "new_search":
+                self.stop_watching()
+
+    def stop_checking(self):
+        self.checking = None
+        self.pather.set_home(None)
+
+    def stop_watching(self):
+        """The case is closed: no more check-ins."""
+        self.pather.set_watch(None)
 
     def set_route(self, pts):
         self.pather.set_route(pts)
@@ -291,6 +389,19 @@ class FakePod:
                 yield TARGET, self.target(t, ph, ex, ey, r95, st, c, k, last_s), False
         if self.loc:
             yield COVERAGE, self.loc.message(t), True
+        yield from self.sensors(t, px, py)
+
+    def sensors(self, t, px, py):
+        """Stand-in thermal and camera: warm and a person only near a phone with person = true."""
+        near = [(math.hypot(px - ph.x, py - ph.y), ph) for ph in self.phones if ph.person and not ph.with_drone]
+        d, ph = min(near, key=lambda n: n[0]) if near else (math.inf, None)
+        if "thermal" in self.only:
+            hot = d <= self.thermal_m
+            yield THERMAL, {"t": t, "max_c": round((33.8 if hot else 14.5) + self.rng.gauss(0, 0.3), 1), "hot": hot,
+                            "conf": 0.8 if hot else 0.2}, False
+        if "vision" in self.only and d <= self.camera_m:
+            yield VISION, {"t": t, "kind": "person", "conf": round(min(0.95, 0.78 + self.rng.gauss(0, 0.04)), 2),
+                           "track": ph.track}, False
 
     def target(self, t, ph, x, y, r95, st, c, k, last_s):
         rules = self.cfg["rules"]
@@ -339,6 +450,8 @@ def main():
             pod.set_route(CaseStore(cfg, pod.pm).view()["route"])
             pod.on_mode(msg)
         bus.subscribe(MODE, on_mode)
+        bus.subscribe(TARGET, lambda _t, m: pod.on_target(m))
+        bus.subscribe(CTRL, lambda _t, m: pod.on_ctrl(m))
 
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # `kill` cleans up like Ctrl+C
     start = time.monotonic()

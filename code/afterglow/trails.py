@@ -5,6 +5,7 @@ Everything is in local metres, from parkmap.py.
 
     ranked = rank(cfg, pm, start_xy)          # [{"name", "pct", "dist_m", "length_m", "pop"}, ...]
     pts = route(pm, "Ocean Path", start_xy)   # [[x, y], ...] along the trail, nearest end first
+    pts = route(pm, "Ocean Path", start_xy, max_m=600)   # just the stretch to search first
     along, total, off = progress(pts, x, y)   # metres along the route, its length, metres off it
 
 The score is a stand-in until we have the published trail-use numbers:
@@ -88,15 +89,37 @@ def chain(ps: list) -> list:
     return best
 
 
-def route(pm: ParkMap, name: str, start) -> list[list[float]]:
-    """The trail as one line, starting at the end nearer the start point; [] if no such trail."""
+def route(pm: ParkMap, name: str, start, max_m: float | None = None) -> list[list[float]]:
+    """The trail as one line; [] if no such trail.
+
+    Without max_m: the whole trail, starting at the end nearer the start point.
+    With max_m: the stretch to search first. It begins where the trail passes closest to the
+    start (the car park) and runs max_m along the longer way from there."""
     ps = pieces(pm).get(name)
     if not ps:
         return []
     line = chain(ps)
-    if math.dist(line[-1], start) < math.dist(line[0], start):
+    if max_m:
+        line = stretch(line, start, max_m)
+    elif math.dist(line[-1], start) < math.dist(line[0], start):
         line = line[::-1]
     return [[round(x, 1), round(y, 1)] for x, y in line]
+
+
+def stretch(line, start, max_m: float) -> list:
+    """max_m of line, from its point nearest start, the longer way along it."""
+    i = min(range(len(line)), key=lambda k: math.dist(line[k], start))
+    way = line[i:] if length(line[i:]) >= length(line[:i + 1]) else line[i::-1]
+    out, run = [way[0]], 0.0
+    for a, b in zip(way, way[1:]):
+        seg = math.dist(a, b)
+        if run + seg >= max_m:
+            f = (max_m - run) / seg if seg else 0.0
+            out.append((a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1])))
+            return out
+        out.append(b)
+        run += seg
+    return out
 
 
 def progress(pts, x: float, y: float) -> tuple[float, float, float]:

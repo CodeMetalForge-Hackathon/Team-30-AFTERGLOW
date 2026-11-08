@@ -61,6 +61,26 @@ def test_route_is_one_line_starting_at_the_end_nearer_the_start(park_pm):
     assert trails.route(park_pm, "No such trail", start) == []
 
 
+def test_stretch_starts_by_the_car_and_runs_the_longer_way(park_pm):
+    car = [1150.0, 820.0]  # Gorham Mountain lot, beside Ocean Path
+    pts = trails.route(park_pm, "Ocean Path", car, max_m=600)
+    assert abs(trails.length(pts) - 600) < 1
+    assert math.dist(pts[0], car) < 40  # where the trail passes the car
+    whole = trails.route(park_pm, "Ocean Path", car)
+    assert trails.dist_to(whole, *pts[-1]) < 1  # still on the trail
+    assert trails.route(park_pm, "Ocean Path", car, max_m=99999) and trails.length(trails.route(park_pm, "Ocean Path", car, max_m=99999)) < trails.length(whole)
+
+
+def test_the_missing_phone_is_beside_the_stretch():
+    """The park scenario: the hidden iPhone is off the trail but in earshot of the stretch from Gorham lot."""
+    pm = ParkMap.load(PARK)
+    pts = trails.route(pm, "Ocean Path", [1150.0, 820.0], max_m=PARK["search"]["segment_m"])
+    ph = next(p for p in PARK["sim"]["phones"] if p["name"] == "dead_iphone")
+    assert PARK["rules"]["offtrail_m"] < trails.dist_to(pts, ph["x"], ph["y"]) <= PARK["search"]["corridor_m"] + 10
+    x0, y0, x1, y1 = PARK["locate"]["area_m"]
+    assert x0 <= ph["x"] <= x1 and y0 <= ph["y"] <= y1  # and inside the sweep box
+
+
 def test_progress_along_a_route():
     pts = [[0, 0], [100, 0], [100, 50]]
     assert trails.progress(pts, 50, 3) == (50.0, 150.0, 3.0)
@@ -81,7 +101,8 @@ def test_case_open_update_close_and_persist(tmp_path, park_pm):
     assert problems == []
     assert v["case"]["name"] == "Sam" and v["case"]["age"] == "34" and v["case"]["expect_cls"] == "findmy"
     assert v["start"]["label"] == "Gorham Mountain lot"
-    assert v["trail"] == v["ranking"][0]["name"] == "Ocean Path" and len(v["route"]) > 50
+    assert v["trail"] == v["ranking"][0]["name"] == "Ocean Path"
+    assert abs(trails.length(v["route"]) - PARK["search"]["segment_m"]) < 1  # just the stretch to search first
     assert json.loads(path.read_text())["name"] == "Sam"
     # the ranger picks another trail; the rest of the case stays
     problems, v = cs.open({"trail": "Gorham Mountain Trail"})
@@ -188,3 +209,122 @@ def test_demo_profile_has_trail_pathing_too(tmp_path):
     cs = CaseStore(DEMO, ParkMap.load(DEMO), path=tmp_path / "c.json")
     _, v = cs.open({"name": "Test", "car_park": "Car park A"})
     assert v["trail"] == "Taped trail" and len(v["route"]) >= 2
+
+
+# ---------- checking a ping: the fake pod flies there, its stand-in sensors read the scene ----------
+
+def test_investigate_flies_to_the_pin_and_the_sensors_find_the_person(park_pm):
+    from afterglow.contracts import THERMAL, VISION
+    pod = FakePod(PARK, park_pm, random.Random(2), only={"pose", "thermal", "vision"})
+    person = next(p for p in PARK["sim"]["phones"] if p.get("person"))
+    run = pod.run(0)
+    take = lambda n: [next(run) for _ in range(n)]  # noqa: E731
+    take(10)
+    pod.on_target({"pin": "P1", "x": person["x"] + 6, "y": person["y"] - 4, "status": "new"})  # an estimate, a little off
+    pod.on_ctrl({"cmd": "investigate", "pin": "P1"})
+    msgs = take(5 * 400)
+    for topic, msg, _ in msgs:
+        assert validate(topic, msg) == [], (topic, msg)
+    poses = [m for t, m, _ in msgs if t == POSE]
+    last = poses[-50:]
+    assert all(math.dist((m["x"], m["y"]), (person["x"] + 6, person["y"] - 4)) < pod.pather.orbit_m + 1 for m in last)  # circling it
+    assert any(m["hot"] for t, m, _ in msgs[-500:] if t == THERMAL)
+    assert any(m["kind"] == "person" for t, m, _ in msgs[-500:] if t == VISION)
+    # Clear: back to the path, and the sensors go quiet
+    pod.on_ctrl({"cmd": "clear", "pin": "P1"})
+    later = take(5 * 300)
+    assert not any(t == VISION for t, _, _ in later[-200:])
+    assert all(not m["hot"] for t, m, _ in later[-200:] if t == THERMAL)
+
+
+def test_the_decoy_is_not_a_person(park_pm):
+    from afterglow.contracts import THERMAL, VISION
+    pod = FakePod(PARK, park_pm, random.Random(4), only={"pose", "thermal", "vision"})
+    decoy = next(p for p in PARK["sim"]["phones"] if p["name"] == "airtag_lost")
+    assert not decoy.get("person")
+    pod.on_target({"pin": "P2", "x": decoy["x"], "y": decoy["y"], "status": "new"})
+    pod.on_ctrl({"cmd": "investigate", "pin": "P2"})
+    run = pod.run(0)
+    msgs = [next(run) for _ in range(5 * 400)][-500:]
+    assert not any(t == VISION for t, _, _ in msgs)
+    assert all(not m["hot"] for t, m, _ in msgs if t == THERMAL)
+
+
+def test_emergency_mode_keeps_the_pod_on_the_ping(park_pm):
+    pod = FakePod(PARK, park_pm, random.Random(5), only={"pose"})
+    pod.on_target({"pin": "P1", "x": 1180.0, "y": 490.0, "status": "investigating"})
+    pod.on_ctrl({"cmd": "investigate", "pin": "P1"})
+    pod.on_mode({"mode": "investigate"})
+    pod.on_ctrl({"cmd": "confirm", "pin": "P1"})
+    run = pod.run(0)
+    last = [m for _, m, _ in (next(run) for _ in range(5 * 300))][-20:]
+    assert all(math.dist((m["x"], m["y"]), (1180.0, 490.0)) < pod.pather.orbit_m + 1 for m in last)
+
+
+def test_case_links_a_ping(tmp_path, park_pm):
+    cs = CaseStore(PARK, park_pm, path=tmp_path / "c.json")
+    cs.open({"name": "Sam"})
+    assert cs.open({"ping": "P3"})[1]["case"]["ping"] == "P3"
+    assert cs.open({"ping": ""})[1]["case"]["ping"] == ""
+    assert cs.open({"ping": "drop table"})[0] == ["ping must look like P3, or be empty"]
+
+
+# ---------- team on the way: back to the sweep, with check-ins on the person ----------
+
+def test_team_on_the_way_sweeps_and_checks_in(park_pm):
+    pod = FakePod(PARK, park_pm, random.Random(6), only={"pose"})
+    person = (1180.0, 490.0)
+    pod.on_target({"pin": "P1", "x": person[0], "y": person[1], "status": "investigating"})
+    pod.on_ctrl({"cmd": "investigate", "pin": "P1"})
+    pod.on_mode({"mode": "investigate"})
+    pod.on_target({"pin": "P1", "x": person[0], "y": person[1], "status": "confirmed"})
+    pod.on_ctrl({"cmd": "confirm", "pin": "P1"})
+    run = pod.run(0)
+    [next(run) for _ in range(5 * 60)]
+    pod.on_mode({"mode": "patrol"})  # team on the way: back to the day sweep
+    hz, every, dwell = PARK["pose"]["publish_hz"], PARK["sim"]["checkin_s"], PARK["sim"]["checkin_dwell_s"]
+    poses = [m for _, m, _ in (next(run) for _ in range(int(hz * (every * 2.5 + 200))))]
+    near = [math.dist((m["x"], m["y"]), person) < pod.pather.orbit_m + 1 for m in poses]
+    away = [math.dist((m["x"], m["y"]), person) > 60 for m in poses]
+    assert sum(away) > len(poses) / 3  # mostly back on the sweep
+    visits = sum(1 for a, b in zip(near, near[1:]) if b and not a)
+    assert visits >= 2  # and it keeps coming back
+    assert sum(near) >= hz * dwell  # circling for a while each time
+    pod.stop_watching()
+    later = [m for _, m, _ in (next(run) for _ in range(int(hz * every * 2)))]
+    assert not any(math.dist((m["x"], m["y"]), person) < pod.pather.orbit_m + 1 for m in later[int(hz * 60):])
+
+
+def test_case_records_the_team_and_the_sweep_before(tmp_path, park_pm):
+    cs = CaseStore(PARK, park_pm, path=tmp_path / "c.json")
+    v = cs.open({"name": "Sam", "prior_mode": "night"})[1]
+    assert v["case"]["prior_mode"] == "night"
+    v = cs.open({"team": True})[1]
+    assert isinstance(v["case"]["team_t"], int)
+    assert cs.open({"prior_mode": "investigate"})[0] == ["prior_mode must be patrol or night"]
+
+
+def test_the_false_signal_comes_first_on_the_stretch(park_pm):
+    pts = trails.route(park_pm, "Ocean Path", [1150.0, 820.0], max_m=PARK["search"]["segment_m"])
+    phones = {p["name"]: p for p in PARK["sim"]["phones"]}
+    lost, person = phones["airtag_lost"], phones["dead_iphone"]
+    assert not lost.get("person") and person.get("person")
+    a_lost = trails.progress(pts, lost["x"], lost["y"])[0]
+    a_person = trails.progress(pts, person["x"], person["y"])[0]
+    assert a_lost < a_person - 100  # the trail search reaches the false signal well before the person
+    assert PARK["rules"]["offtrail_m"] < trails.dist_to(pts, lost["x"], lost["y"]) <= PARK["search"]["corridor_m"] + 10
+
+
+def test_reset_brings_the_local_stack_back_to_time_zero(tmp_path):
+    import local_stack
+    clock = local_stack.SimClock(4)
+    called = []
+    clock.on_reset = lambda: called.append(1)
+    clock.sim_ms = 5000
+    assert clock.set({"reset": True}) == [] and called == [1]
+    clock.restart()
+    assert clock.sim_ms == 0 and not clock.paused
+    s = State(1.0)
+    s.apply(POSE, {"t": 1, "x": 0, "y": 0, "z": 1, "src": "sim"})
+    s.clear()
+    assert s.poses == {} and s.pins == {} and s.bus_t == 0
