@@ -3,7 +3,13 @@
     python -m afterglow.dashboard                       # demo profile, broker from the config
     python -m afterglow.dashboard --config park.toml    # park profile (realistic view)
     python -m afterglow.dashboard --broker 10.0.0.5     # on the laptop, against the pod's broker
+                                                        # (the live pictures come from the pod too)
     python -m afterglow.dashboard --dry-run             # no broker: serves the page, prints commands
+
+Live pictures: camera.py and thermal.py write live/ on the Pi, so the Pi runs its own dashboard
+(afterglow@dashboard) to serve them. A laptop dashboard with --pod (default: the --broker host,
+when that isn't this machine) fetches /live/ and /snaps/ from it, and moves Last-Modified onto
+the laptop's clock, so a Pi clock that's off doesn't read as a frozen feed.
 
 Then open http://<host>:8080. The server subscribes to ag/#, keeps the latest state and
 streams it to every browser with Server-Sent Events (/api/events): the full state first,
@@ -24,7 +30,8 @@ HTTP API (docs/CONTRACTS.md, "Dashboard HTTP"):
     GET  /api/case     the open missing-person case, its start point, ranked trails and route
     POST /api/case     open or update the case: {"name", "age", "details", "carrying", "car_park", "trail"}
     POST /api/case/close
-    GET/POST /api/sim  simulation only (tools/local_stack.py): {"paused": bool, "speed": 1|2|4}
+    GET/POST /api/sim  simulation only (tools/local_stack.py): {"paused": bool, "speed": 1|2|4|10}, {"reset": true},
+                       {"flight": "out" | "home"} (Send out / Return to base); GET adds "flight", "base", "plan"
     GET  /live/..., /snaps/...   image files from [http] live_dir and snaps_dir
 
 Pages: / (the ranger's dashboard), /tv.html (the operator TV), /livemap.html (the map alone).
@@ -41,7 +48,9 @@ import queue
 import socket
 import threading
 import time
-from email.utils import formatdate
+import urllib.error
+import urllib.request
+from email.utils import formatdate, parsedate_to_datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -65,6 +74,8 @@ OBS_LOG = 60  # recent raw observations kept
 TRAIL_MAX = 4000  # breadcrumb points per drone
 QUEUE_MAX = 5000  # messages buffered per browser before it's dropped (it reconnects)
 STATUS_S = 2.0
+POD_TIMEOUT_S = 2.0  # a live picture from the pod's dashboard; the TV asks again in a second
+LOCAL_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
 
 
 class State:
@@ -233,6 +244,12 @@ def make_meta(cfg: dict, pm: ParkMap) -> dict:
         "map": pm.to_json(),
         "building": building(cfg),
         "thermal": {"hot_min_c": cfg["thermal"]["hot_min_c"], "hot_max_c": cfg["thermal"]["hot_max_c"]},
+        # the TV's location tabs, and how often health.py reports (its panel goes grey when ag/sys stops)
+        "sites": [dict(s) for s in http.get("sites", [])],
+        "health": {"period_s": cfg["health"]["period_s"], "stale_s": cfg["health"]["stale_s"]},
+        # the indoor walk ([pose] source = "imu"): the TV draws a floor plan with this line instead of the satellite map
+        "walk": ({"from": list(cfg["imu"]["line_from"]), "to": list(cfg["imu"]["line_to"]), "hall_w_m": cfg["imu"]["hall_w_m"]}
+                 if cfg["pose"].get("source") == "imu" else None),
         "search": {"car_parks": cfg["search"]["car_parks"], "entrance_xy": cfg["search"]["entrance_xy"],
                    "corridor_m": cfg["search"]["corridor_m"], "checkin_s": cfg["search"]["checkin_s"],
                    # the box the sweep and the grids cover, for the map to zoom to
@@ -269,8 +286,64 @@ def safe_file(base: Path, rel: str) -> Path | None:
     return p if p.is_relative_to(base.resolve()) and p.is_file() else None
 
 
-def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict, cases: CaseStore | None = None, sim=None):
-    """sim: tools/local_stack.py's SimClock (pause and speed for the fake pod), or None on the real system."""
+class PodPictures:
+    """The pod's live/ and snaps/ pictures, fetched from the dashboard running on the Pi."""
+
+    def __init__(self, base_url: str, timeout: float = POD_TIMEOUT_S):
+        self.base = base_url.rstrip("/")
+        self.timeout = timeout
+        self.ok = None  # last fetch reached the pod (None: not tried yet); logged only when it changes
+
+    def _seen(self, ok: bool, why=""):
+        if ok != self.ok:
+            if ok:
+                log.info("pictures from the pod at %s", self.base)
+            else:
+                log.warning("can't reach the pod's dashboard at %s for pictures (%s); is afterglow@dashboard running?",
+                            self.base, why)
+            self.ok = ok
+
+    def fetch(self, path: str):
+        """GET path ("/live/camera.jpg") from the pod -> (body, content type, mtime on our clock),
+        None if the pod has no such picture, or raises OSError if the pod can't be reached."""
+        try:
+            with urllib.request.urlopen(self.base + path, timeout=self.timeout) as r:
+                body, h = r.read(), r.headers
+        except urllib.error.HTTPError as e:
+            self._seen(True)
+            if e.code == 404:
+                return None
+            raise OSError(f"HTTP {e.code}") from e
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            self._seen(False, getattr(e, "reason", e))
+            raise OSError(str(e)) from e
+        self._seen(True)
+        # Last-Modified is on the Pi's clock: keep the picture's age (the Pi's Date minus it), not the time.
+        try:
+            age = max(0.0, (parsedate_to_datetime(h["Date"]) - parsedate_to_datetime(h["Last-Modified"])).total_seconds())
+        except (TypeError, ValueError):  # a header missing or unreadable: call it fresh
+            age = 0.0
+        return body, h.get("Content-Type") or "application/octet-stream", time.time() - age
+
+
+def pod_url(arg: str | None, broker: str | None, http_port: int) -> str | None:
+    """--pod HOST[:PORT] (or "off"); without it, the --broker host when that isn't this machine."""
+    if arg and arg.lower() == "off":
+        return None
+    host = arg or (broker.partition(":")[0] if broker else "")
+    if not arg and host in LOCAL_HOSTS:
+        return None
+    if not host:
+        return None
+    if host.startswith(("http://", "https://")):
+        return host
+    return f"http://{host}" if ":" in host else f"http://{host}:{http_port}"
+
+
+def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict, cases: CaseStore | None = None, sim=None,
+                 pod: PodPictures | None = None):
+    """sim: tools/local_stack.py's SimClock (pause and speed for the fake pod), or None on the real system.
+    pod: fetch /live/ and /snaps/ from the pod's dashboard instead of the local folders."""
     meta_json = json.dumps(meta, separators=(",", ":")).encode()
 
     class Handler(BaseHTTPRequestHandler):
@@ -297,8 +370,20 @@ def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict, cases: Ca
             except OSError:  # a live frame renamed away between the check and the read
                 self.send_error(404)
                 return
+            self.send_bytes(body, mimetypes.guess_type(path.name)[0] or "application/octet-stream", mtime, cache)
+
+        def send_pod(self, path: str):
+            try:
+                got = pod.fetch(path)
+            except OSError:
+                return self.send_error(502, "pod unreachable")
+            if got is None:
+                return self.send_error(404)
+            self.send_bytes(*got, cache=False)
+
+        def send_bytes(self, body: bytes, ctype: str, mtime: float, cache: bool):
             self.send_response(200)
-            self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+            self.send_header("Content-Type", ctype)
             # with the Date header, the TV works out how old a live picture is (a frozen feed shows)
             self.send_header("Last-Modified", formatdate(mtime, usegmt=True))
             self.send_header("Content-Length", str(len(body)))
@@ -322,6 +407,8 @@ def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict, cases: Ca
                 return self.send_json(200, snap)
             for prefix in ("live", "snaps"):
                 if path.startswith(f"/{prefix}/"):
+                    if pod:
+                        return self.send_pod(path)
                     return self.send_file(safe_file(dirs[prefix], path[len(prefix) + 2:]), cache=False)
             if path == "/":
                 path = "/index.html"
@@ -424,6 +511,8 @@ def main():
     ap.add_argument("--broker", help="MQTT host[:port], overrides [mqtt] (run the dashboard on the laptop)")
     ap.add_argument("--host", default="0.0.0.0", help="address to serve on (default: every interface)")
     ap.add_argument("--port", type=int, help="HTTP port (default: [http] port)")
+    ap.add_argument("--pod", help="HOST[:PORT] of the pod's dashboard to fetch live/ and snaps/ pictures from "
+                                  "(default: the --broker host, unless local; 'off' = this machine's folders)")
     ap.add_argument("--dry-run", action="store_true", help="no broker: serve the page, print commands")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -446,10 +535,15 @@ def main():
     cases = CaseStore(cfg, pm)
     cases.listeners.append(lambda view: state.broadcast("case", view))
 
-    server = ThreadingHTTPServer((a.host, a.port or cfg["http"]["port"]), make_handler(state, cmds, meta, dirs, cases))
+    url = pod_url(a.pod, a.broker, cfg["http"]["port"])
+    pod = PodPictures(url) if url else None
+
+    server = ThreadingHTTPServer((a.host, a.port or cfg["http"]["port"]),
+                                 make_handler(state, cmds, meta, dirs, cases, pod=pod))
     server.daemon_threads = True
     log.info("dashboard (%s) on http://%s:%d  (operator TV: /tv.html)", meta["name"],
              "localhost" if a.host == "0.0.0.0" else a.host, server.server_address[1])
+    log.info("live pictures from %s", f"the pod's dashboard at {url}" if pod else dirs["live"])
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:

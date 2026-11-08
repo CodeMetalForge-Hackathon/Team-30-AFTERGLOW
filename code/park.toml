@@ -86,6 +86,16 @@ off_file = "runs/lora_off.json"
 [pose]
 carry_height_m = 3.0
 publish_hz = 5
+# "gps" = NMEA on [serial] gps (falls back to waypoint taps when gps = ""), "imu" = the BNO086
+# walk along [imu] line, "waypoints" = taps only.
+source = "gps"
+
+[imu]
+# Same keys as afterglow.toml; park doesn't use them (it's simulated).
+line_from = [0.0, 0.0]
+line_to = [10.0, 0.0]
+stride_m = 0.7
+hall_w_m = 3.0
 
 [track]
 # Outdoor placeholders from docs/CONTRACTS.md until ME 2's range test.
@@ -139,9 +149,14 @@ period_s = 5               # publish this often
 stale_s = 30               # a part (omni, wifi, thermal, camera, GPS fix) counts as working if heard within this
 
 [http]
-port = 8080
-live_dir = "live"
+port = 8081                # not 8080, so it runs next to the State Street demo (afterglow.toml) on the laptop
+live_dir = "live/park"     # the simulation's fake pictures, apart from the real pod's (afterglow.toml: live)
 snaps_dir = "snaps"
+# Same as afterglow.toml: the TV's location tabs.
+sites = [
+  { name = "Acadia NP", tag = "simulation", profile = "park", port = 8081, pod = false },
+  { name = "60 State St", tag = "live demo", profile = "afterglow", port = 8080, pod = true },
+]
 
 [atak]
 # Same as afterglow.toml. The markers land around this profile's origin (Blackwoods).
@@ -179,7 +194,7 @@ checkin_s = 300.0
 # Lanes over the search box ([locate] area_m).
 # A dumb stand-in path; real routes come from planner.py.
 path = "lanes"
-speed_mps = 14.0           # quick for the demo: the false signal pings in about 1 minute, the person about 1 minute later
+speed_mps = 14.0           # quick for the demo: after Send out, the false signal pings in about 1:15, the person about 1 minute later (local_stack --seed 6)
 height_m = 15.0
 lane_m = 40.0
 lanes_from = "north" # start the lanes by Gorham Mountain lot (the north edge)
@@ -189,6 +204,10 @@ rssi_n = 2.4
 rssi_sigma = 4.0
 rssi_floor = -98.0
 checkin_dwell_s = 30.0     # each [search] checkin_s, the fake pod circles the found person this long, then goes back to its sweep
+# local_stack.py: the drone waits here, on the ground with its scanners off, until the ranger
+# presses "Send out" on the TV; "Return to base" flies it back. Then the lanes above.
+base_xy = [1150.0, 820.0]
+base_name = "Gorham Mountain lot"
 # Two things to find, so the map stays readable: a false signal first, then the person. Off-trail distances measured with
 # parkmap.dist_to_trail (trails and roads).
 phones = [

@@ -107,6 +107,18 @@ off_file = "runs/lora_off.json"  # lora_off is remembered here (relative to this
 # Height used when the GPS can't give one (props-off carried demo): metres above ground.
 carry_height_m = 3.0
 publish_hz = 5
+# Where position.py gets the pose. "gps" = NMEA on [serial] gps (falls back to waypoint taps
+# when gps = ""), "imu" = the BNO086 walk along [imu] line, "waypoints" = taps only.
+source = "imu"             # 60 State Street: no GPS indoors, so the pod is walked along a straight line
+
+[imu]
+# [pose] source = "imu": someone carries the pod from line_from towards line_to. Distance walked =
+# the BNO086's step count x stride_m, clamped to the line. The game rotation vector gives a heading
+# for show only. A waypoint tap re-anchors the walk to that waypoint's spot on the line.
+line_from = [0.0, 0.0]     # metres; along the taped trail (waypoints 0..3 run 0..9 m east)
+line_to = [10.0, 0.0]
+stride_m = 0.7             # metres per step
+hall_w_m = 3.0             # the TV draws the hall this wide around the line; the dashboard reads it
 
 [track]
 # tracker.py sets a track's state from its r95. Placeholders until ME 2's range test.
@@ -170,6 +182,13 @@ stale_s = 30               # a part (omni, wifi, thermal, camera, GPS fix) count
 port = 8080
 live_dir = "live"          # live/thermal.png (thermal.py), live/camera.jpg (camera.py)
 snaps_dir = "snaps"        # snaps/<t>.jpg, the path in ag/vision "snap" (stretch: the person detector)
+# The location tabs on the operator TV. Each site is its own dashboard on this machine at its port
+# (its profile's [http] port); the TV links between them. pod = true: the real pod flies there, so the
+# TV shows its components' health on the main view. Same list in both profiles.
+sites = [
+  { name = "Acadia NP", tag = "simulation", profile = "park", port = 8081, pod = false },
+  { name = "60 State St", tag = "live demo", profile = "afterglow", port = 8080, pod = true },
+]
 
 [atak]
 # cot_out.py (laptop): ATAK markers from ag/alert, or from ag/target over Wi-Fi with --wifi.
@@ -220,6 +239,9 @@ rssi_n = 2.4
 rssi_sigma = 4.0
 rssi_floor = -98.0         # quieter than this is never heard
 checkin_dwell_s = 15.0     # each [search] checkin_s, the fake pod circles the found person this long, then goes back to its sweep
+# local_stack.py: the drone waits here until "Send out" on the TV; "Return to base" brings it back.
+base_xy = [0.0, 0.0]
+base_name = "Base"
 # Hidden phones. Omit x and y for one that rides on the pod (the team phone). person = true: someone
 # is with it, so the stand-in thermal reads warm and the camera sees them when the pod is close.
 phones = [

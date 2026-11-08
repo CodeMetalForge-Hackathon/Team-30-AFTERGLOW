@@ -16,7 +16,7 @@ const CLS = { findmy: 'Find My', findhub: 'Find Hub', samsung_off: 'Samsung offl
 const POD = '#3db9ff';
 const M_PER_DEG = 111320, D2R = Math.PI / 180;
 const DETS_MAX = 800, MAP_EVERY_MS = 200;
-const LIVE_SRC = new Set(['gps', 'waypoint']);
+const LIVE_SRC = new Set(['gps', 'waypoint', 'imu']); // the real pod (imu: the indoor walk, position.py)
 const fc = (f) => ({ type: 'FeatureCollection', features: f || [] });
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtM = (v) => (v == null || !isFinite(v) ? '?' : Math.abs(v) >= 100 ? `${Math.round(v)} m` : `${v.toFixed(1)} m`);

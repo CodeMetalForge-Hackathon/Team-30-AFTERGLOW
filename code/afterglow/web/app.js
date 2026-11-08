@@ -15,7 +15,7 @@ const CLS_LONG = {
 const RULE = { day_offtrail: 'Off-trail (day)', night_outside_camp: 'Outside camp (night)', search: 'Active search', sos: 'SOS answer' };
 const STATUS_ORDER = { investigating: 0, new: 1, acknowledged: 2, confirmed: 3, cleared: 4 };
 const MODES = [['patrol', 'Patrol'], ['night', 'Night'], ['investigate', 'Investigate'], ['search', 'Search']];
-const LIVE_SRC = new Set(['gps', 'waypoint']);
+const LIVE_SRC = new Set(['gps', 'waypoint', 'imu']); // the real pod (imu: the indoor walk, position.py)
 const STALE_MS = 5000;
 const NO_ANSWER_MS = 6000;
 

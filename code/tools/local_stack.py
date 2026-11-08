@@ -5,7 +5,11 @@ and locate -> the dashboard. For laptops without Mosquitto (Windows), and as a d
     python tools/local_stack.py --config park.toml --speed 5          # fake pod (fake_bus.py's [sim])
     python tools/local_stack.py --config park.toml --replay runs/1432.log --loop   # a recorded real run
     python tools/local_stack.py --config park.toml --feeds            # plus fake camera and thermal pictures
-    then open http://localhost:8080/tv.html (operator TV), /livemap.html (live map feed) or / (dashboard)
+
+The fake pod waits at [sim] base_xy (on the ground, scanners off) until "Send out" on the TV, then
+flies its lanes; "Return to base" brings it back. Both are POST /api/sim {"flight": "out" | "home"}.
+    then open http://localhost:<[http] port>/tv.html (operator TV; park.toml 8081, afterglow.toml 8080),
+    /livemap.html (live map feed) or / (dashboard)
 
 Sources:
     fake (default)  tools/fake_bus.py's FakePod, publishing pose, ble and its stand-in thermal and camera. Its cheating
@@ -105,7 +109,8 @@ def wire(cfg, bus, state, pm):
     last = [0.0]
 
     def to_locate(topic, msg):
-        locate_guarded(loc, loc.feed, topic, msg)
+        if not (topic == POSE and msg.get("src") == "sim" and msg.get("z") == 0):  # docked at base: searches nothing
+            locate_guarded(loc, loc.feed, topic, msg)
         if time.monotonic() - last[0] >= LOCATE_MIN_WALL_S:  # at most 2 grids a wall second, like locate.py live
             if locate_guarded(loc, loc.maybe_publish):
                 last[0] = time.monotonic()
@@ -129,6 +134,8 @@ class SimClock:
         self.sim_ms, self.last = 0.0, time.monotonic()
         self.listeners = []
         self.on_reset = None  # set by main(): back to time zero
+        self.pod = None  # the fake pod now running (set by main(); replaced on a reset)
+        self.base = None  # {"name", "x", "y"}: where it waits for "Send out"
 
     def restart(self):
         with self.lock:
@@ -143,12 +150,26 @@ class SimClock:
             return self.sim_ms
 
     def view(self):
-        return {"paused": self.paused, "speed": self.speed}
+        """flight: "docked" (waiting at base), "out" (flying its path) or "returning"; plan: the lanes it flies."""
+        pod = self.pod
+        return {"paused": self.paused, "speed": self.speed, "flight": pod.flight if pod else None,
+                "base": self.base, "plan": pod.plan() if pod else []}
+
+    def changed(self):
+        for fn in list(self.listeners):
+            fn(self.view())
 
     def set(self, body):
         if body.get("reset") is True:  # the TV's Reset button: everything back to time zero
             if self.on_reset:
                 self.on_reset()
+            return []
+        if "flight" in body:  # the ranger's "Send out" / "Return to base" (sim only: the pilot flies the real pod)
+            if body["flight"] not in ("out", "home") or self.pod is None:
+                return ['flight must be "out" or "home"']
+            self.pod.launch() if body["flight"] == "out" else self.pod.go_home()
+            log.info("sim: %s", "sent out" if body["flight"] == "out" else "returning to base")
+            self.changed()
             return []
         problems = []
         speed = body.get("speed", self.speed)
@@ -163,15 +184,14 @@ class SimClock:
         with self.lock:
             self.speed, self.paused = float(speed), paused
         log.info("sim %s at %gx", "paused" if paused else "running", self.speed)
-        for fn in list(self.listeners):
-            fn(self.view())
+        self.changed()
         return []
 
 
 def make_pod(cfg, pm, bus, cases, seed):
     """The fake pod, following the ranger's mode and the open case's trail (sim only)."""
     from fake_bus import FakePod
-    pod = FakePod(cfg, pm, random.Random(seed), only={"pose", "ble", "thermal", "vision"})
+    pod = FakePod(cfg, pm, random.Random(seed), only={"pose", "ble", "thermal", "vision", "sys"}, docked=True)
     pod.set_route(cases.view()["route"])
 
     def on_case(view):
@@ -187,7 +207,11 @@ def make_pod(cfg, pm, bus, cases, seed):
 
 def run_fake(pod, bus, clock, stop):
     t0 = now_ms()
+    flight = pod.flight
     for topic, msg, retain in pod.run(t0):
+        if pod.flight != flight:  # it landed back at base: tell the TVs
+            flight = pod.flight
+            clock.changed()
         while not stop.is_set():  # wait until simulated time reaches the message (forever while paused)
             ahead = msg["t"] - t0 - clock.elapsed_ms()
             if ahead <= 0:
@@ -224,10 +248,13 @@ class _NoBus:
         pass
 
 
-def run_feeds(cfg, live_dir, stop):
-    """--feeds: camera.py --fake and thermal.py --fake pictures in live/, for the TV's camera and heat
-    panels. They aren't tied to the source: the drone and phones they show are made up."""
+def run_feeds(cfg, live_dir, stop, view=None):
+    """--feeds: camera.py --fake and thermal.py --fake pictures in [http] live_dir, for the TV's camera
+    and heat panels. view: a function giving the fake pod's {"hot", "person"}, so the heat blob and
+    the person show only while the drone is over someone; None (replay) = their own loops."""
     from afterglow import camera, thermal
+    person = (lambda: view()["person"]) if view else None
+    warm = (lambda: view()["hot"]) if view else None
     cam = camera.Camera(cfg, live_dir)
     th = thermal.Thermal(cfg, _NoBus(), live_dir)
 
@@ -242,9 +269,9 @@ def run_feeds(cfg, live_dir, stop):
         except Exception:  # noqa: BLE001 - a broken fake picture must not stop the stack
             log.exception("feeds: %s stopped", name)
 
-    threading.Thread(target=loop, args=("camera", camera.fake_frames(cfg), lambda f: cam.handle_frame(*f),
+    threading.Thread(target=loop, args=("camera", camera.fake_frames(cfg, person=person), lambda f: cam.handle_frame(*f),
                                         float(cfg["camera"]["fps"])), daemon=True, name="feed-camera").start()
-    threading.Thread(target=loop, args=("thermal", thermal.fake_frames(), lambda f: th.handle_frame(*f),
+    threading.Thread(target=loop, args=("thermal", thermal.fake_frames(person=warm), lambda f: th.handle_frame(*f),
                                         float(cfg["thermal"]["fps"])), daemon=True, name="feed-thermal").start()
     log.info("feeds: fake camera and thermal pictures in %s", live_dir)
 
@@ -253,7 +280,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", help="profile: afterglow.toml (default) or park.toml")
     ap.add_argument("--speed", type=float, default=1.0, help="time multiplier for the source (fake pod: 1, 2, 4 or 10; the TV can change it)")
-    ap.add_argument("--seed", type=int, default=2, help="fake pod random seed (default 2: the park demo's false signal at ~1 min, the person ~1 min later)")
+    ap.add_argument("--seed", type=int, default=6, help="fake pod random seed (default 6: after Send out, the park demo's false signal at ~1:15, the person ~1 min later)")
     ap.add_argument("--replay", metavar="LOG", help="replay a mosquitto_sub -v log instead of the fake pod")
     ap.add_argument("--loop", action="store_true", help="with --replay: start again at the end")
     ap.add_argument("--host", default="127.0.0.1", help="address to serve on (0.0.0.0 = every interface)")
@@ -273,18 +300,19 @@ def main():
     stop = threading.Event()
     clock = None
     run = {}
-    if a.feeds:
-        dirs["live"].mkdir(parents=True, exist_ok=True)
-        run_feeds(cfg, dirs["live"], stop)
     if a.replay:
         threading.Thread(target=lambda: run_replay(a.replay, holder["bus"], a.speed, a.loop, stop), daemon=True, name="source").start()
     else:
         clock = SimClock(a.speed if a.speed in SimClock.SPEEDS else 1)
         clock.listeners.append(lambda view: state.broadcast("sim", view))
 
+        bx, by = cfg["sim"]["base_xy"]
+        clock.base = {"name": cfg["sim"]["base_name"], "x": bx, "y": by}
+
         def start_pod():
             run["stop"] = threading.Event()
             pod = make_pod(cfg, pm, holder["bus"], cases, a.seed)
+            clock.pod = pod
             run["thread"] = threading.Thread(target=run_fake, args=(pod, holder["bus"], clock, run["stop"]), daemon=True, name="source")
             run["thread"].start()
 
@@ -305,6 +333,10 @@ def main():
             state.broadcast("reset", {})
         clock.on_reset = reset
         start_pod()
+    if a.feeds:
+        dirs["live"].mkdir(parents=True, exist_ok=True)
+        idle = {"hot": False, "person": False}
+        run_feeds(cfg, dirs["live"], stop, view=(lambda: clock.pod.view if clock.pod else idle) if clock else None)
 
     server = ThreadingHTTPServer((a.host, a.port or cfg["http"]["port"]), make_handler(state, cmds, meta, dirs, cases, clock))
     server.daemon_threads = True
