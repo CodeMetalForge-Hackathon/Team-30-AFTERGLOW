@@ -57,6 +57,12 @@ Pins and parts come from `docs/HARDWARE.md`. The line formats are in `docs/CONTR
 - **Radio settings** are `#define`s at the top of the sketch. They must match `[lora]` in `code/afterglow.toml`; `tests/test_lora_rx.py` checks.
 - Solder the 915 MHz spring antenna to ANT before powering it. This is the last XIAO; there's no spare.
 
+## Reference beacon: spare XIAO #3 (`ref_beacon/`)
+
+- A test target we control: it advertises manufacturer data `FF FF 'A' 'G'`, which OMNI reports as `ref`. Tracker and geofence pin it in patrol and night, not in search.
+- Used for I6 (a pin within 5 m), the range test and the demo baseline. No wiring: USB-C power and the U.FL antenna.
+- **Quiet on purpose** (`ESP_PWR_LVL_N12`): a beacon whose median RSSI stays above `[track] with_drone_rssi` (-55) while the pod moves is taken to ride on the pod and never pinned. If OMNI doesn't hear it, try `N6`; if it goes grey (`with_drone`), go lower.
+
 ## Pod LoRa radio
 
 No firmware. It's a bare RFM95W on the Pi's SPI1, driven from Python (`code/afterglow/radio.py`).

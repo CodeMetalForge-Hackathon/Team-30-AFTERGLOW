@@ -31,6 +31,11 @@ sudo usermod -aG dialout,i2c,spi,gpio,video "$USER"
 echo "== Mosquitto"
 sudo systemctl enable --now mosquitto
 
+echo "== SSH (on at every boot) and the module service file (enable modules one by one later)"
+sudo systemctl enable --now ssh
+sudo cp "$CODE/../pi/systemd/afterglow@.service" /etc/systemd/system/
+sudo systemctl daemon-reload
+
 echo "== Python venv (sees apt's picamera2 and Hailo packages)"
 python3 -m venv --system-site-packages "$CODE/.venv"
 "$CODE/.venv/bin/pip" install -r "$CODE/requirements-pi.txt"
