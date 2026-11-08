@@ -41,6 +41,7 @@ import queue
 import socket
 import threading
 import time
+from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -272,9 +273,15 @@ def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict, cases: Ca
             if path is None:
                 self.send_error(404)
                 return
-            body = path.read_bytes()
+            try:
+                body, mtime = path.read_bytes(), path.stat().st_mtime
+            except OSError:  # a live frame renamed away between the check and the read
+                self.send_error(404)
+                return
             self.send_response(200)
             self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+            # with the Date header, the TV works out how old a live picture is (a frozen feed shows)
+            self.send_header("Last-Modified", formatdate(mtime, usegmt=True))
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "max-age=3600" if cache else "no-store")
             self.end_headers()

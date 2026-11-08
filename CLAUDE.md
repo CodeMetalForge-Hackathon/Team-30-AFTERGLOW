@@ -85,6 +85,7 @@ mosquitto_sub -v -t 'ag/#'                                               # watch
 .venv/bin/python -m afterglow.camera --fake [--frames 8]                 # fake camera: live/camera.jpg (on the Pi, no --fake)
 .venv/bin/python -m afterglow.dashboard [--config park.toml]             # dashboard on http://localhost:8080 (operator TV: /tv.html)
 .venv/bin/python tools/local_stack.py --config park.toml --speed 10      # whole laptop stack, no broker; open /tv.html
+.venv/bin/python tools/local_stack.py --config park.toml --feeds          # ... plus fake camera and heat pictures for the TV
 .venv/bin/python -m afterglow.dashboard --broker <pi-ip>                 # laptop dashboard against the pod's broker
 mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log                      # record a run
 .venv/bin/python tools/replay.py runs/1432.log [--loop] [--topics 'ag/obs/#,ag/pose']   # replay it

@@ -131,6 +131,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - [x] waypoint taps for the indoor park, on the map and as a 0–7 strip in the Pod panel;
   - [x] the coverage and probability overlays, and pod health from `ag/sys`;
   - [ ] the thermal and camera panel (it reloads the `live/` images about once a second). **Scale each picture to fit** (`object-fit: contain`): a 90° `rotate` in config makes it portrait (CONTRACTS.md, "Images over HTTP");
+    - [x] **On the operator TV (Sun 8 Nov):** Emergency's "Camera check" card shows the camera and heat pictures; outside Emergency, a Pictures switch on the map (Auto / On / Off) puts them in the map's corner (Auto: both while a ping is checked, heat alone in a night sweep). Each reloads once a second, swaps in only decoded frames, and says "Feed frozen" or "Feed lost" when the picture is over 5 s old (the server now sends `Last-Modified`). `local_stack.py --feeds` writes fake pictures. The ranger dashboard (`/`) still has no picture panel;
   - [x] serves `live/` and `snaps/` on port 8080;
   - [x] takes a `--broker` flag (it overrides `[mqtt] host`), so it also runs on the laptop. Each instance has its own MQTT client id, so the Pi's and the laptop's can share a broker;
   - [ ] draw `ag/plan` legs, with Accept and Reject (`accept_leg`, `reject_leg`), once `planner.py` exists.

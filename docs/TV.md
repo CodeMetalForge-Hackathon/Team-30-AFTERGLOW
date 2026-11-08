@@ -9,6 +9,7 @@ ranger's click: nothing auto-confirms a ping or accepts a leg.
 ```
 cd code
 .venv/bin/python tools/local_stack.py --config park.toml             # no broker needed; pause and speed on the TV
+.venv/bin/python tools/local_stack.py --config park.toml --feeds     # plus fake camera and heat pictures
 .venv/bin/python -m afterglow.dashboard --config park.toml            # or with Mosquitto + fake_bus.py
 ```
 
@@ -85,6 +86,26 @@ A thin bar under the top bar shows where the search is: **1 Search · 2 Signal �
 In the simulation, phones with `person = true` in `[sim] phones` read warm and show a person
 when the drone is close (stand-ins for thermal.py and person.py). The park's missing iPhone has
 one; the decoy doesn't. The weather and wind in the top bar are simulated too.
+
+## Camera and heat pictures
+
+The pod's live pictures, `live/camera.jpg` (camera.py) and `live/thermal.png` (thermal.py), served
+by the dashboard. Each reloads once a second and only swaps in a frame that has finished
+loading, so it never flickers. Pictures are scaled to fit, so a 90° `rotate` in config still fits.
+
+- **Emergency:** the "Camera check" card shows both, the camera above the heat picture, with the
+  warmest spot's temperature on the heat picture (`ag/thermal`; "picture only" when `max_c` is null).
+  A person detector's snapshot (`ag/vision` `snap`, stretch) replaces the camera for a minute.
+- **The other modes:** the **Pictures** switch on the map (Auto / On / Off, remembered per browser)
+  puts them in the map's bottom-right corner. Auto shows both while the drone checks a ping
+  (Investigate), the heat picture alone in a night sweep, and nothing otherwise.
+- **Old pictures:** the server sends `Last-Modified` with each picture. Over 5 s old, the picture
+  is dimmed with "Feed frozen" (the camera program stopped); if the server can't be reached it
+  says "Feed lost". Neither changes anything else on the TV.
+
+With no pod, `tools/local_stack.py --feeds` writes `camera.py --fake` and `thermal.py --fake`
+pictures. They aren't tied to the simulation: the heat picture's blob comes and goes on its own
+40 s loop, while the temperature shown comes from the fake pod's `ag/thermal`.
 
 ## The case
 

@@ -139,6 +139,22 @@ button { font: inherit; color: inherit; }
 .sosgrid b { display: block; font-size: 1.45rem; }
 .snap { flex: 1; min-height: 9rem; border-radius: 0.5rem; background: var(--panel-2); border: 1px dashed var(--line-2); display: grid; place-items: center; color: var(--muted); overflow: hidden; }
 .snap img { width: 100%; height: 100%; object-fit: contain; }
+/* live pictures: camera.jpg and thermal.png, scaled to fit (a 90° rotate in config makes one portrait) */
+.feed { position: relative; border-radius: 0.5rem; background: #000; border: 1px solid var(--line-2); display: grid; place-items: center; color: var(--muted); overflow: hidden; min-height: 8rem; }
+.feed.warm { border: 2px solid var(--p3); }
+.feed img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.feed img.old { opacity: 0.45; filter: grayscale(0.7); }
+.feed-none { font-size: 0.95rem; }
+.feed-name, .feed-tag, .feed-old { position: absolute; z-index: 1; background: rgba(6, 9, 6, 0.78); border-radius: 0.35rem; padding: 0.15rem 0.5rem; font-size: 0.78rem; font-weight: 600; }
+.feed-name { left: 0.4rem; top: 0.4rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text); }
+.feed-tag { right: 0.4rem; top: 0.4rem; font-family: var(--mono); color: var(--text); }
+.feed.warm .feed-tag { color: var(--p3); }
+.feed-old { left: 50%; bottom: 0.5rem; transform: translateX(-50%); white-space: nowrap; background: #2c2410; border: 1px solid var(--amber); color: var(--amber); }
+.feedcard .feed { flex: 1 1 0; }
+.mapfeeds { position: absolute; right: 0.8rem; bottom: 2.4rem; z-index: 5; width: min(18rem, 40%); display: flex; flex-direction: column; gap: 0.5rem; }
+.mapfeeds .feed { min-height: 0; aspect-ratio: 4 / 3; box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.5); }
+.mapfeeds .feed:first-child:not(:last-child) { aspect-ratio: 16 / 9; } /* the camera, when both show */
+.maptag .seglbl { border: 0; border-radius: 0; color: var(--muted); }
 
 /* map */
 .mapbox { position: relative; border-radius: 0.65rem; border: 1px solid var(--line); overflow: hidden; background: var(--map); min-height: 20rem; }
