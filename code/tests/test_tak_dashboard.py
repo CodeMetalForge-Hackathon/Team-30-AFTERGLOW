@@ -64,8 +64,8 @@ def test_http_serves_the_tak_tv_and_takes_rescue_routes():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
     try:
-        tv = urllib.request.urlopen(base + "/tv.js").read().decode()
-        assert tv == (WEB / "tv.js").read_text() and "FieldBanner" in tv  # the one TV, with the TAK parts built in
+        tv = urllib.request.urlopen(base + "/tv.js").read()  # bytes: no encoding or line-ending guesses (Windows)
+        assert tv == (WEB / "tv.js").read_bytes() and b"FieldBanner" in tv  # the one TV, with the TAK parts built in
         assert b"<html" in urllib.request.urlopen(base + "/tv.html").read().lower()
         assert json.load(urllib.request.urlopen(base + "/api/map"))["tak"] is True  # the TV may send rescue routes
         assert "teams" in json.load(urllib.request.urlopen(base + "/api/state"))

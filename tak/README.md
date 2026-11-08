@@ -24,12 +24,15 @@ live with the others, in `code/tests/test_tak_*.py`.
 
 ```bash
 pip install -r code/requirements-laptop.txt -r tak/requirements.txt
-python tak/tak_stack.py --config code/park.toml --port 8090 --start-paused
+python tak/tak_stack.py --config code/park.toml --port 8090 --feeds
 ```
 
-Open **http://localhost:8090**. The drone waits on the pad: the TV shows *Ready to launch* and no
-pings. Connect the phones (below), then press **▶ Start the search**. **Reset** on the TV takes the pins and
-routes off the phones too, and waits for Start again.
+Open **http://localhost:8090**. The drone waits at base (Gorham Mountain lot) with no pings. Connect the
+phones (below), then press **Send out · lawn-mower sweep**: the phones get "AFTERGLOW launched". The false
+signal pings about 1:15 later, the person about a minute after that. **Return to base** brings the drone
+home. **Reset** on the TV takes the pins and routes off the phones too, and puts the drone back at base.
+`--feeds` adds the fake camera and heat pictures, as `local_stack.py --feeds` does. `--start-paused` also
+stops the clock at time zero until **▶ Start the search** (then Send out).
 
 To show the TV on another screen on the same network, add `--host 0.0.0.0` (then `http://<laptop-ip>:8090`).
 
@@ -73,7 +76,7 @@ Either is enough:
 
 | On the TV (the ranger) | On the phones (field teams) |
 |---|---|
-| **▶ Start the search** | Chat: "AFTERGLOW launched: Day sweep…" |
+| **Send out · lawn-mower sweep** | Chat: "AFTERGLOW launched: Day sweep…" |
 | A new ping: yellow banner "New ping needs a ranger decision" | Marker `P2 · ranger decision` in the TV's colour, plus a chat "Possible person P2…" |
 | Blue banner "ALPHA (field team) asks the drone to check P2" + **Check P2 with the drone** | A team types `check P2` |
 | **Investigate** | Marker `P2 · drone checking`, plus a chat "Drone checking P2 now" |
@@ -120,7 +123,7 @@ fake pod / Pi ──ag/*──► tracker, geofence, locate ──► dashboard 
 |---|---|
 | `tak_link.py` | `cot_out.py` extended both ways: markers, chat at each step, the rescue route, the TLS server, positions, chat and commands from the phones. Runs on its own (MQTT) or inside `tak_stack.py`. |
 | `tak_dashboard.py` | Subclasses of the dashboard's `State` and `Commands` (field teams, `rescue()`), and its HTTP handler with `POST /api/rescue` added and `meta.tak` set, so the TV sends the rescue route. |
-| `tak_stack.py` | `code/tools/local_stack.py` plus TAK, the TAK dashboard and `--start-paused`. It imports local_stack and doesn't change it. |
+| `tak_stack.py` | `code/tools/local_stack.py` plus TAK, the TAK dashboard, `--feeds` and `--start-paused`, with the same Send out / Return to base. It imports local_stack and doesn't change it, so a change to local_stack's `main()` (like the base and Send out) has to be copied here too. |
 | `tak_certs.py` | The certificate authority, the server certificate and the iTAK data package (`tak/runs/`). |
 | `tak_contracts.py` | The two new topics, `ag/team` and `ag/rescue`, with their checks. |
 | TV (`code/afterglow/web/`) | The TAK parts are built in: field-report banner, field-teams card, team markers, rescue route to TAK, *Ready to launch*. Without TAK they stay idle. `store.js`'s `ag/team` part mirrors `TakState.apply()`. |

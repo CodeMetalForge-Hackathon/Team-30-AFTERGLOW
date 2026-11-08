@@ -61,6 +61,11 @@ class HoldClock(local_stack.SimClock):
     def set(self, body):
         if body.get("reset") is True:
             return super().set(body)
+        if "flight" in body:  # the TV's "Send out" / "Return to base": the phones hear the launch too
+            problems = super().set(body)
+            if not problems and body["flight"] == "out" and self.on_run:
+                self.on_run(False, False)
+            return problems
         before, started = self.paused, self.started
         if body.get("paused", self.paused) is False:
             self.started = True  # before super().set(), whose listeners send view() to the TVs
@@ -126,6 +131,7 @@ def main():
     ap.add_argument("--port", type=int, help="HTTP port (default: [http] port)")
     ap.add_argument("--start-paused", action="store_true",
                     help="fake pod: wait at time zero, drone on the pad, until the TV's Start (and again after Reset)")
+    ap.add_argument("--feeds", action="store_true", help="also write fake camera and thermal pictures to live/ (the TV's panels)")
     ap.add_argument("--no-tak", action="store_true", help="no TAK servers (the TV still has the TAK panels)")
     ap.add_argument("--no-chat", action="store_true", help="TAK markers only, no chat messages")
     ap.add_argument("--tls-dir", default=str(TAK / "runs"), help="tak/tak_certs.py's folder (default tak/runs)")
@@ -154,6 +160,8 @@ def main():
     else:
         clock = HoldClock(a.speed if a.speed in local_stack.SimClock.SPEEDS else 1, hold=a.start_paused)
         clock.listeners.append(lambda view: state.broadcast("sim", view))
+        bx, by = cfg["sim"]["base_xy"]  # where the drone waits for "Send out", as local_stack.py
+        clock.base = {"name": cfg["sim"]["base_name"], "x": bx, "y": by}
         if tak:
             def on_run(paused, started):
                 with holder["bus"].lock:
@@ -163,6 +171,7 @@ def main():
         def start_pod():
             run["stop"] = threading.Event()
             pod = local_stack.make_pod(cfg, pm, holder["bus"], cases, a.seed)
+            clock.pod = pod  # the clock drives "Send out" / "Return to base" on it
             run["thread"] = threading.Thread(target=local_stack.run_fake, args=(pod, holder["bus"], clock, run["stop"]),
                                              daemon=True, name="source")
             run["thread"].start()
@@ -188,6 +197,11 @@ def main():
             state.broadcast("reset", {})
         clock.on_reset = reset
         start_pod()
+    if a.feeds:  # as local_stack.py --feeds: fake camera and heat pictures that follow the sim
+        dirs["live"].mkdir(parents=True, exist_ok=True)
+        idle = {"hot": False, "person": False}
+        local_stack.run_feeds(cfg, dirs["live"], stop,
+                              view=(lambda: clock.pod.view if clock.pod else idle) if clock else None)
 
     server = ThreadingHTTPServer((a.host, a.port or cfg["http"]["port"]),
                                  make_tak_handler(state, cmds, meta, dirs, cases, clock))
