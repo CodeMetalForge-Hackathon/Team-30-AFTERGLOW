@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AFTERGLOW · nearby</title>
 <link rel="icon" href="data:,">
-<!-- Close-range view: the pod in the middle, north up, every Bluetooth and Wi-Fi signal around it.
+<!-- Close-range view: the pod in the middle, north up, the alert beacons around it. Alerts only: the classes
+     geofence can pin (contracts.ALWAYS_REPORTED: Find My, Find Hub, Samsung lost mode, our ref beacon), minus
+     baseline and with_drone beacons, which geofence never pins. Live phones, other Bluetooth and Wi-Fi are left out.
      - Ring: heard now, distance only (RSSI through the tracker's model, /api/map "rssi"). The pod's antennas
        are omnidirectional, so one spot can't give a direction.
      - Dot: located. tracker.py placed the beacon (ag/track state localized or pinned) from sightings at
@@ -25,7 +27,6 @@
   --text: #e4e7ea; --text-2: #a0a8b0; --text-3: #6c757e;
   --brand: #f0a63a; --ok: #3fb68b; --crit: #e5484d; --info: #4da3ff;
   --findmy: #e5484d; --findhub: #f76b15; --samsung: #f5c13d; --ref: #4da3ff;
-  --apple: #8b95a3; --other: #5d666f; --wifi: #4fb8c4;
   --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
   color-scheme: dark;
@@ -149,13 +150,13 @@ body.compact .north { font-size: 9px; }
 <body>
 <div class="app">
   <header>
-    <h1><b>AFTERGLOW</b> · Nearby signals</h1>
+    <h1><b>AFTERGLOW</b> · Nearby alerts</h1>
     <span class="badge" id="badge">…</span>
     <span class="spacer"></span>
     <span class="scale" id="scale"></span>
   </header>
   <div class="stage">
-    <svg id="radar" viewBox="-125 -125 250 250" role="img" aria-label="Signals around the pod, north up">
+    <svg id="radar" viewBox="-125 -125 250 250" role="img" aria-label="Alert beacons around the pod, north up">
       <defs>
         <radialGradient id="bgfill"><stop offset="0" stop-color="#121820"/><stop offset="1" stop-color="#0b0e11"/></radialGradient>
         <clipPath id="inside"><circle r="100"/></clipPath>
@@ -196,19 +197,13 @@ if (q.get('compact') === '1') document.body.classList.add('compact');
 const R0 = 16, R1 = 100, K = (R1 - R0) / MAX_M;     // svg radius of 0 m and of the edge; svg units per metre
 let model = { p0: -48, n: 2.4 };                    // replaced by /api/map
 
-// What each signal type is. Every signal is shown the same way; the colour says which type it is.
+// The alert classes (contracts.ALWAYS_REPORTED) and how each is shown; anything not in here isn't drawn.
 const KINDS = {
   findmy:      { name: 'Find My beacon',    short: 'Find My', what: 'iPhone or AirTag away from its owner (lost, dead or off)', c: '--findmy' },
   findhub:     { name: 'Find Hub tag',      short: 'Find Hub', what: 'Android phone or tag in offline finding', c: '--findhub' },
   samsung_off: { name: 'Samsung lost mode', short: 'Samsung', what: 'Samsung phone or tag in lost mode', c: '--samsung' },
   ref:         { name: 'Reference beacon',  short: 'Ref', what: 'Ours, for testing', c: '--ref' },
-  apple_other: { name: 'Apple device',      short: 'Apple', what: 'Live iPhone, Watch or AirPods near their owner', c: '--apple' },
-  other:       { name: 'Other Bluetooth',   short: 'BT', what: 'Headphones, watches, cars, anything else', c: '--other' },
-  wifi_rand:   { name: 'Wi-Fi probe',       short: 'Wi-Fi', what: 'A phone looking for networks (random address)', c: '--wifi' },
-  wifi:        { name: 'Wi-Fi device',      short: 'Wi-Fi', what: 'Fixed-address Wi-Fi device', c: '--wifi' },
 };
-const kindOf = (o, rand) => (o.kind === 'wifi' ? (rand[o.id] === false ? 'wifi' : 'wifi_rand') : (KINDS[o.cls] ? o.cls : 'other'));
-const kindOfCls = (cls) => (KINDS[cls] ? cls : 'other');   // ag/track cls (its "wifi" is fixed-address)
 
 const metres = (rssi) => 10 ** ((model.p0 - rssi) / (10 * model.n));
 const rssiAt = (m) => model.p0 - 10 * model.n * Math.log10(m);
@@ -239,7 +234,7 @@ function drawGrid() {
   const n = el('text', { class: 'north', y: -R1 - 4 }); n.textContent = 'N'; g.append(n);
   $('scale').textContent = `edge ${MAX_M} m ≈ ${Math.round(rssiAt(MAX_M))} dBm · 1 m = ${model.p0} dBm · n ${model.n}`;
   const lg = (k) => `<span><i style="--c:var(${KINDS[k].c})"></i>${KINDS[k].name}</span>`;
-  $('legend').innerHTML = ['findmy', 'findhub', 'samsung_off', 'apple_other', 'other', 'wifi_rand'].map(lg).join('') +
+  $('legend').innerHTML = Object.keys(KINDS).map(lg).join('') +
     `<hr><span><i class="o" style="--c:var(--text-2)"></i>Heard: distance only</span><span><i style="--c:var(--text-2)"></i>Located: real direction</span>`;
 }
 
@@ -258,32 +253,29 @@ function smoothed(o) {
 }
 
 let sel = null, hot = null;
-const rand = {};   // id -> Wi-Fi rand flag (the obs summary drops it; obs_log has it)
 
-// Everything to draw: located tracks (dots) and heard ids that no located track covers (rings).
+// Everything to draw, alerts only: located tracks (dots) and heard ids that no located track covers (rings).
 function collect(state) {
-  for (const { topic, msg } of state.obs_log || []) if (topic === 'ag/obs/wifi' && msg.id) rand[msg.id] = msg.rand;
   const now = state.bus_t || Date.now();
   const pose = Object.values(state.poses || {})[0];
   const havePose = !!pose && Number.isFinite(pose.x) && Number.isFinite(pose.y);
-  const items = [], covered = new Set(), onPod = new Set(), base = new Set();
+  const items = [], covered = new Set(), skip = new Set();   // skip: baseline and with_drone ids, never alerts
   let farther = 0;
   for (const tr of Object.values(state.tracks || {})) {
     const ids = tr.ids || [];
-    if (tr.baseline) ids.forEach((i) => base.add(i));
-    if (tr.with_drone) { ids.forEach((i) => onPod.add(i)); continue; }
+    if (tr.baseline || tr.with_drone) { ids.forEach((i) => skip.add(i)); continue; }
+    if (!KINDS[tr.cls]) continue;
     if (!havePose || !(tr.state === 'localized' || tr.state === 'pinned') || !Number.isFinite(tr.x) || !Number.isFinite(tr.y)) continue;
     const quiet = Math.max(0, (now - tr.t) / 1000) + (tr.last_s || 0);
     if (quiet > KEEP_S) continue;
     const dx = tr.x - pose.x, dy = tr.y - pose.y, m = Math.hypot(dx, dy);
     ids.forEach((i) => covered.add(i));
     if (m > EDGE_X * MAX_M) { farther++; continue; }
-    const k = kindOfCls(tr.cls), kind = KINDS[k];
-    items.push({ key: 'T:' + tr.track, located: true, id: ids[ids.length - 1] ?? tr.track, track: tr.track, kind,
-                 baseline: !!tr.baseline, m, brg: (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360,
-                 r95: tr.r95, state: tr.state, age: quiet, c: tr.c });
+    items.push({ key: 'T:' + tr.track, located: true, id: ids[ids.length - 1] ?? tr.track, track: tr.track, kind: KINDS[tr.cls],
+                 m, brg: (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360, r95: tr.r95, state: tr.state, age: quiet, c: tr.c });
   }
   for (const o of Object.values(state.obs || {})) {
+    if (o.kind !== 'ble' || !KINDS[o.cls] || skip.has(o.id)) continue;
     if (typeof o.rssi !== 'number' || typeof o.t !== 'number') continue;
     const age = Math.max(0, (now - o.t) / 1000);
     if (age > WINDOW_S) { delete smooth[o.id]; continue; }
@@ -291,9 +283,8 @@ function collect(state) {
     if (covered.has(o.id)) continue;            // drawn as its track's dot
     const m = metres(s.rssi);
     if (m > MAX_M) { farther++; continue; }
-    const kind = KINDS[kindOf(o, rand)], pod = onPod.has(o.id), bl = base.has(o.id);
     const h = s.hist, trend = h.length > 1 ? h[h.length - 1][1] - h[0][1] : 0;
-    items.push({ key: 'O:' + o.id, located: false, id: o.id, kind, onPod: pod, baseline: bl, m, rssi: s.rssi, age, n: o.n, trend });
+    items.push({ key: 'O:' + o.id, located: false, id: o.id, kind: KINDS[o.cls], m, rssi: s.rssi, age, n: o.n, trend });
   }
   items.sort((a, b) => (b.located - a.located) || a.m - b.m);
   return { items, farther, havePose };
@@ -378,7 +369,7 @@ const arrowSvg = (deg, c) => `<svg width="34" height="34" viewBox="-17 -17 34 34
 function row(it) {
   const status = it.located
     ? `<div class="st located">Located${it.state === 'pinned' ? ' (pinned)' : ''} · ±${(it.r95 ?? 0).toFixed(1)} m</div>`
-    : `<div class="st heardonly">${it.onPod ? 'Rides on the pod (one of ours)' : 'Heard · direction unknown'}</div>`;
+    : `<div class="st heardonly">Heard · direction unknown</div>`;
   const num = it.located
     ? `<div class="d">${it.m.toFixed(1)} m <i style="transform:rotate(${it.brg}deg)">↑</i> ${compass(it.brg)}</div>
        <div class="r">${it.age < 1 ? 'heard now' : 'heard ' + Math.round(it.age) + ' s ago'}</div>`
@@ -386,7 +377,7 @@ function row(it) {
        <div class="r">${Math.round(it.rssi)} dBm · ${it.age < 1 ? 'now' : Math.round(it.age) + ' s'}</div>`;
   return `<div class="row${it.key === sel ? ' sel' : ''}${it.key === hot ? ' hot' : ''}" data-key="${esc(it.key)}" style="--c:var(${it.kind.c})">
     <span class="bar"></span>
-    <div><div class="name">${it.kind.name}${it.baseline ? ' (baseline)' : ''}</div><div class="what">${it.kind.what}</div>${status}
+    <div><div class="name">${it.kind.name}</div><div class="what">${it.kind.what}</div>${status}
       <div class="id">${esc(it.located ? it.track + ' · ' + it.id : it.id + ' · heard ×' + it.n)}</div></div>
     <div class="num">${num}</div>
   </div>`;
@@ -394,7 +385,7 @@ function row(it) {
 
 function drawSide(items, farther) {
   const best = [...items].sort((a, b) => a.m - b.m)[0];
-  let html = `<div class="k">Nearest signal</div>`;
+  let html = `<div class="k">Nearest alert</div>`;
   if (!best) html += `<div class="v" style="color:var(--text-3)">none<small>within ${MAX_M} m</small></div>`;
   else if (best.located) html += `<div class="v" style="color:var(${best.kind.c})">${best.m.toFixed(1)} m<small>${best.kind.name}</small></div>
       <div class="t">Head <b>${compass(best.brg)}</b> (${Math.round(best.brg)}°) · ±${(best.r95 ?? 0).toFixed(1)} m</div>
@@ -404,9 +395,9 @@ function drawSide(items, farther) {
         <span class="${best.trend > 3 ? 'up' : best.trend < -3 ? 'down' : ''}">${best.trend > 3 ? 'getting closer' : best.trend < -3 ? 'getting farther' : 'steady'}</span></div>
       <div class="arrow"><b>?</b></div>`;
   $('nearest').innerHTML = html;
-  $('list').innerHTML = `<div class="sec"><span>Signals · ${items.length}</span></div>` +
-    (items.length ? items.map(row).join('') : `<div class="empty">Nothing heard within ${MAX_M} m.</div>`);
-  $('foot').textContent = `${farther} more heard farther away · located beacons stay ${KEEP_S} s after their last sighting`;
+  $('list').innerHTML = `<div class="sec"><span>Alerts · ${items.length}</span></div>` +
+    (items.length ? items.map(row).join('') : `<div class="empty">No alert beacon within ${MAX_M} m.</div>`);
+  $('foot').textContent = `${farther} more alerts heard farther away · located beacons stay ${KEEP_S} s after their last sighting`;
 }
 
 function render(state, linkLabel, linkCls) {
@@ -434,10 +425,9 @@ if (DEMO) {
   const legs = path.map((p, i) => { const q2 = path[(i + 1) % path.length]; return { p, q: q2, len: Math.hypot(q2[0] - p[0], q2[1] - p[1]) }; });
   const lap = legs.reduce((s, l) => s + l.len, 0);
   const at = (d) => { for (const l of legs) { if (d <= l.len) { const f = d / l.len; return [l.p[0] + (l.q[0] - l.p[0]) * f, l.p[1] + (l.q[1] - l.p[1]) * f]; } d -= l.len; } return path[0]; };
-  const TRACKED = new Set(['findmy', 'findhub', 'samsung_off', 'ref']);
+  // The live phones, Bluetooth and Wi-Fi here are heard but must never show (alerts only)
   const world = [['findmy', 1.5, 3.2], ['findhub', -2, -3.5], ['samsung_off', 6, 0.5], ['findmy', 3, -4.5],
-    ['apple_other', -1, 0.4], ['apple_other', 3, -3.2], ['apple_other', -7, 3], ['other', 0.5, -2.6], ['other', 5.5, 4],
-    ['wifi', -3, 2.6], ['wifi', 2, -0.4]].map(([cls, x, y], i) => ({ id: (0x1a2b3c4d * (i + 7) >>> 0).toString(16).padStart(8, '0').slice(-8), cls, x, y, seen: [], tn: i + 1 }));
+    ['apple_other', -1, 0.4], ['apple_other', 3, -3.2], ['other', 0.5, -2.6], ['wifi', -3, 2.6]].map(([cls, x, y], i) => ({ id: (0x1a2b3c4d * (i + 7) >>> 0).toString(16).padStart(8, '0').slice(-8), cls, x, y, seen: [], tn: i + 1 }));
   let walked = 0;
   setInterval(() => {
     const t = Date.now();
@@ -452,8 +442,7 @@ if (DEMO) {
       const wifi = b.cls === 'wifi';
       const o = state.obs[b.id] ||= { id: b.id, n: 0, first: t, best: -999 };
       Object.assign(o, { kind: wifi ? 'wifi' : 'ble', cls: wifi ? 'wifi' : b.cls, rssi, t, n: o.n + 1 });
-      if (wifi) rand[b.id] = true;
-      if (!TRACKED.has(b.cls)) continue;
+      if (!KINDS[b.cls]) continue;   // the tracker only tracks these (and Wi-Fi, which isn't an alert)
       b.seen.push([px, py]);
       if (b.seen.length < 3) continue;
       const xs = b.seen.map((s) => s[0]), ys = b.seen.map((s) => s[1]);

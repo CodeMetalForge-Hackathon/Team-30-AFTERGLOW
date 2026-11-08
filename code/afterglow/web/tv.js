@@ -1273,8 +1273,8 @@ function IndoorStage({ meta, s, st, m, bt, pose, podStale, podSite, sel, setSel 
         </${LiveFeed}>
       </section>
       <section class="pane">
-        <div class="sh"><h2 class="h">Nearby signals</h2><a class="aux" href="nearby.html" target="_blank" rel="noopener">Full view ↗</a></div>
-        <iframe class="nearby" src="nearby.html?compact=1" title="Signals around the pod: rings heard, dots located"></iframe>
+        <div class="sh"><h2 class="h">Nearby alerts</h2><a class="aux" href="nearby.html" target="_blank" rel="noopener">Full view ↗</a></div>
+        <iframe class="nearby" src="nearby.html?compact=1" title="Alert beacons around the pod: rings heard, dots located"></iframe>
       </section>
     </div>
     <${HallWalk} meta=${meta} s=${s} pose=${pose} podStale=${podStale} sel=${sel} setSel=${setSel} />
