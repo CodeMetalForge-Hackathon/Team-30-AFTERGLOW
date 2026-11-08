@@ -75,7 +75,7 @@ footer{padding:0 14px 14px;color:var(--muted);font-size:10.5px}
 <body>
 <header>
  <div><h1>TrailSAR <span style="color:var(--cyan)">/</span> Post-Closing Drone Sweep Simulator</h1>
- <p>Real OSM trails · real 3D terrain · BLE/LoRa beacon localisation · thermal + mmWave confirmation · probability-of-area search</p></div>
+ <p>Real OSM trails · real 3D terrain · BLE/LoRa beacon localisation · thermal + mmWave check · the ranger decides · probability-of-area search</p></div>
  <span class="tag">LOCAL · V0.3 · STEP 2</span>
 </header>
 <main>
@@ -90,7 +90,7 @@ footer{padding:0 14px 14px;color:var(--muted);font-size:10.5px}
     <span class="chip">Battery <b id="chipBat">—</b></span>
     <span class="chip">Hears phone <b id="chipSwath">—</b></span>
    </div>
-   <div id="found"><div class="fcard"><div class="ftitle">&#128680; MISSING PERSON FOUND</div><div class="fbody" id="fbody"></div><button class="primary" id="fcont">Continue mission &#9654;</button></div></div>
+   <div id="found"><div class="fcard"><div class="ftitle">&#128680; LIKELY PERSON · RANGER CONFIRM</div><div class="fbody" id="fbody"></div><button class="primary" id="fcont">Continue mission &#9654;</button></div></div>
    <div class="legend">
     <span><i class="sw" style="background:linear-gradient(90deg,#3f7f99,#f5bd62,#ff4d4d)"></i>Trail priority (low → high)</span>
     <span><i class="sw" style="background:linear-gradient(90deg,#3a1d6e,#f58b2b,#ffe066)"></i>Probability not yet ruled out</span>
@@ -119,7 +119,7 @@ footer{padding:0 14px 14px;color:var(--muted);font-size:10.5px}
    <div class="body">
     <div class="actions"><button class="primary" id="startBtn" disabled>▶ Run mission</button><button id="pauseBtn" disabled>Ⅱ Pause</button><button id="resetBtn" disabled>↺ Restart</button></div>
     <div class="stats">
-     <div class="stat"><small>PEOPLE FOUND</small><strong id="s_found">—</strong></div>
+     <div class="stat"><small>LIKELY PEOPLE</small><strong id="s_found">—</strong></div>
      <div class="stat"><small>FLIGHT TIME</small><strong id="s_ft">—</strong></div>
      <div class="stat"><small>SEARCH AREA RULED OUT</small><strong id="s_ruled">—</strong></div>
      <div class="stat"><small>TRAIL SWEPT (PLAN)</small><strong id="s_cov">—</strong></div>
@@ -131,7 +131,7 @@ footer{padding:0 14px 14px;color:var(--muted);font-size:10.5px}
   <section class="panel">
    <div class="ph">WHAT THE DRONE IS LISTENING FOR<span class="sub">FIND MY · FIND HUB · SAMSUNG · LoRa</span></div>
    <div class="body"><div id="blist" style="display:grid;gap:6px"></div>
-    <div class="msg">How it finds someone: hears a phone or tag on the trail sweep → flies toward the strongest signal and pins it down → drops to 25 m and checks with thermal + mmWave → sends the GPS fix to incident command. Then it moves on, and finally searches off-trail where lost people usually end up.</div></div>
+    <div class="msg">How it finds someone: hears a phone or tag on the trail sweep → flies toward the strongest signal and pins it down → drops to 25 m and checks with thermal + mmWave → proposes the pin to the ranger, who confirms or clears it. Then it moves on, and finally searches off-trail where lost people usually end up.</div></div>
   </section>
 
   <section class="panel">
@@ -690,7 +690,7 @@ function renderBeacons(){
  const ppl=S.beacons.filter(b=>b.person);
  $('s_found').textContent=ppl.length?`${ppl.filter(b=>b.verdict==='PERSON').length} of ${ppl.length}`:'—';
  $('blist').innerHTML=S.beacons.map(b=>{
-  const v=b.verdict==='PERSON'?'<span class="verdict v-person">PERSON CONFIRMED</span>':b.verdict==='DEVICE'?'<span class="verdict v-device">NO HEAT · LIKELY DEVICE · RANGER REVIEW</span>':b.verdict==='UNRESOLVED'?'<span class="verdict v-unres">UNRESOLVED · GROUND CHECK</span>':b.track&&!b.track.done?'<span class="verdict v-track">TRACKING</span>':'';
+  const v=b.verdict==='PERSON'?'<span class="verdict v-person">LIKELY PERSON · RANGER CONFIRM</span>':b.verdict==='DEVICE'?'<span class="verdict v-device">NO HEAT · LIKELY DEVICE · RANGER REVIEW</span>':b.verdict==='UNRESOLVED'?'<span class="verdict v-unres">UNRESOLVED · GROUND CHECK</span>':b.track&&!b.track.done?'<span class="verdict v-track">TRACKING</span>':'';
   return `<div class="bcn"><div><span class="dot" style="background:${b.type==='ref'?b.t.color:b.person?'#ff3b6b':'#8a97a8'}"></span><span class="k">#${b.id} ${b.t.sig}</span>${v}<div class="m">${b.t.label} · ${b.note}</div></div>
   <div style="text-align:right;white-space:nowrap">${b.hits?`<b style="color:${b.best>-95?'#ff7777':'#f5bd62'}">${b.hits} pkts</b><div class="m">best ${b.best.toFixed(0)} dBm</div>`:'<span class="m">not heard</span>'}</div></div>`;}).join('')||'<div class="msg">No beacons. Use Auto scenario or place your own.</div>';}
 function updateSwathChip(){const agl=+$('agl').value;$('chipSwath').textContent='±'+Math.round(swathEff(agl))+' m (pocketed phone) @ '+agl+' m AGL';}
@@ -731,14 +731,14 @@ function tick(){
  // Demo only: end once every hidden person is found. A real drone can't know how many are out there and would
  // finish its sweep; the simulation knows, so it stops instead of flying on for another hour.
  const ppl=S.beacons.filter(b=>b.person);
- if(!S.allFound&&ppl.length&&ppl.every(b=>b.verdict==='PERSON')&&!['HOMING','CONFIRM','RTH','LANDED'].includes(d.mode)){
-  S.allFound=true;S.endMission=true;setMode('RTH','All hidden people found: returning to launch (a real drone would finish its sweep).','#61d69b');
-  addEvent(`All ${ppl.length} hidden ${ppl.length>1?'people':'person'} found in ${fmtTime(S.sim.t)} → return to launch`,true);}
+ if(!S.allFound&&ppl.length&&ppl.every(b=>b.verdict==='PERSON')&&!['HOMING','CHECK','RTH','LANDED'].includes(d.mode)){
+  S.allFound=true;S.endMission=true;setMode('RTH','Every hidden person proposed to the ranger: returning to launch (a real drone would finish its sweep).','#61d69b');
+  addEvent(`All ${ppl.length} hidden ${ppl.length>1?'people':'person'} proposed to the ranger in ${fmtTime(S.sim.t)} → return to launch`,true);}
  switch(d.mode){
   case 'SWEEP':{S.sweepD=Math.min(S.route.len,S.sweepD+sp);const pos=sampleAt(S.sweepD);d.p=pos.p;d.alt=pos.alt;if(S.sweepD>=S.route.len)sweepFinished();break;}
   case 'REJOIN':if(moveTo(sampleAt(S.sweepD).p,sp))setMode('SWEEP','Rejoined planned trail route.');break;
   case 'HOMING':homingStep(sp);break;
-  case 'CONFIRM':confirmStep(sp);break;
+  case 'CHECK':confirmStep(sp);break;
   case 'POA':poaStep(sp);break;
   case 'RTH':if(moveTo(S.launch,sp))land();break;
   case 'HOLD':moveTo(S.holdAt,sp,40);break;
@@ -815,7 +815,7 @@ function startConfirm(){
  const r1=Math.max(35,Math.min(90,T.rms)),r2=r1+45;S.wp=[c];
  for(const r of [r1,r2])for(let k=0;k<8;k++){const a=k*Math.PI/4;S.wp.push(offset(c,r*Math.cos(a),r*Math.sin(a)));}
  S.wp.push(c);S.conf={t:0,th:0,mm:0,r2};
- setMode('CONFIRM',`${b.t.sig} localised to ±${Math.round(Math.max(10,T.rms))} m after ${fmtTime(S.sim.t-S.homeStart)}. Descending to 25 m AGL: thermal + mmWave search out to ${Math.round(r2)} m.`,'#f5bd62');
+ setMode('CHECK',`${b.t.sig} localised to ±${Math.round(Math.max(10,T.rms))} m after ${fmtTime(S.sim.t-S.homeStart)}. Descending to 25 m AGL: thermal + mmWave search out to ${Math.round(r2)} m.`,'#f5bd62');
  addEvent(`${b.t.sig} localised ±${Math.round(Math.max(10,T.rms))} m → thermal + mmWave check`);
  alertMsg(`Beacon localised to ±${Math.round(Math.max(10,T.rms))} m. Drone descends to 25 m AGL and orbits: thermal camera + mmWave radar look for a human heat signature and breathing/motion.`,'alert');}
 function confirmStep(sp){
@@ -834,16 +834,16 @@ function finishConfirm(){
  const atBeacon=heat&&hav(near.p,T.map)<=Math.min(100,Math.max(60,1.5*T.rms));
  if(heat&&!atBeacon){near.verdict='PERSON';near.found=true;near.confirmT=near.confirmT??S.sim.t;showMarker(near);if(near.track)near.track.done=true;
   const fix=offset(near.p,gauss()*4,gauss()*4);near.fix=fix;poaClear(fix,150);
-  log(`🔥 PERSON found ${Math.round(hav(near.p,T.map))} m from ${b.t.sig}'s estimate while checking it: a separate find. GPS fix sent to incident command.`,'#ff7777');
-  addEvent(`PERSON found while checking ${b.t.sig} (${Math.round(hav(near.p,T.map))} m away) → GPS fix to incident command`,true);
+  log(`🔥 Likely person ${Math.round(hav(near.p,T.map))} m from ${b.t.sig}'s estimate while checking it: a separate pin, proposed to the ranger to confirm.`,'#ff7777');
+  addEvent(`Likely person while checking ${b.t.sig} (${Math.round(hav(near.p,T.map))} m away) → pin proposed to the ranger`,true);
   if(S.story&&!S.story.found){S.story.found=S.sim.t;renderTimeline();}
   if(!S.quiet)showFound(near,fix,C);}
  const person=atBeacon;
  if(person){b.verdict='PERSON';near.verdict='PERSON';near.found=true;const fix=offset(near.p,gauss()*4,gauss()*4);
-  b.fix=fix;log(`🔥 PERSON CONFIRMED near ${b.t.sig}: thermal ${C.th} hits, mmWave ${C.mm} hits. GPS fix ${fix[1].toFixed(5)}, ${fix[0].toFixed(5)} sent to incident command.`,'#ff7777');
-  addEvent(`PERSON CONFIRMED (thermal ${C.th}, mmWave ${C.mm}) → GPS fix to incident command`,true);
-  if($('payload').checked)addEvent('Light / supply payload dropped near person');
-  alertMsg(`Person confirmed at ${fix[1].toFixed(5)}, ${fix[0].toFixed(5)} (thermal + mmWave). Coordinates sent to incident command${$('payload').checked?'; light/supply payload dropped':''}. Resuming sweep — there may be others.`,'good');
+  b.fix=fix;log(`🔥 LIKELY PERSON near ${b.t.sig}: thermal ${C.th} hits, mmWave ${C.mm} hits. Pin ${fix[1].toFixed(5)}, ${fix[0].toFixed(5)} proposed to the ranger to confirm.`,'#ff7777');
+  addEvent(`LIKELY PERSON (thermal ${C.th}, mmWave ${C.mm}) → pin proposed to the ranger`,true);
+  if($('payload').checked)addEvent('Light / supply drop proposed to the ranger');
+  alertMsg(`Likely person at ${fix[1].toFixed(5)}, ${fix[0].toFixed(5)} (thermal + mmWave). Pin proposed to the ranger, who confirms or clears it${$('payload').checked?'; a light/supply drop is proposed too':''}. Resuming sweep — there may be others.`,'good');
   near.confirmT=near.confirmT??S.sim.t;
   poaClear(fix,150); // that person is found: don't spend more battery searching around them
   if(S.story&&!S.story.found){S.story.found=S.sim.t;renderTimeline();}
@@ -852,14 +852,14 @@ function finishConfirm(){
  else if(2*b.track.rms<=C.r2+45){b.verdict='DEVICE';log(`No human signature at ${b.t.sig} (location ±${Math.round(b.track.rms)} m, searched to ${Math.round(C.r2)} m) — likely a dropped/lost device. Flagged for ranger review (not dismissed); will check again if heard later.`,'#9aabc2');
   addEvent(`${b.t.sig}: no heat/motion → likely a lost device, flagged for ranger review`);
   alertMsg(`No thermal or mmWave return at ${b.t.sig}: likely a lost device. Flagged for ranger review, not dismissed: the drone checks again if it hears it later. Resuming search.`);}
- else{b.verdict='UNRESOLVED';log(`${b.t.sig}: no heat/motion found, but location only ±${Math.round(b.track.rms)} m — NOT dismissed. Flagged to incident command; will re-localise if heard again.`,'#ff9a5a');
+ else{b.verdict='UNRESOLVED';log(`${b.t.sig}: no heat/motion found, but location only ±${Math.round(b.track.rms)} m — NOT dismissed. Flagged for the ranger; will re-localise if heard again.`,'#ff9a5a');
   addEvent(`${b.t.sig}: location too uncertain to rule out a person → flagged for ground check, will retry`,true);
-  alertMsg(`${b.t.sig}: no heat signature found, but the location estimate is too loose (±${Math.round(b.track.rms)} m) to rule out a person. Not dismissed: flagged to incident command, and the drone will try again if it hears the beacon.`,'alert');}
+  alertMsg(`${b.t.sig}: no heat signature found, but the location estimate is too loose (±${Math.round(b.track.rms)} m) to rule out a person. Not dismissed: flagged for the ranger, and the drone will try again if it hears the beacon.`,'alert');}
  showMarker(b);renderBeacons();S.active=null;
  const next=S.queue.shift(),of=$('onFind').value;
  if(next&&!next.track.done&&next.verdict!=='PERSON')startHoming(next);
  else if((person||heat)&&of==='hold'){S.holding=true;S.holdAt=near.fix;setMode('HOLD','Holding overhead as a beacon / LoRa relay for the ground team.');addEvent('Holding overhead to guide ground team');}
- else if((person||heat)&&of==='rth'){S.endMission=true;setMode('RTH','Person confirmed: returning to launch.');}
+ else if((person||heat)&&of==='rth'){S.endMission=true;setMode('RTH','Likely person proposed to the ranger: returning to launch.');}
  else if(!S.sweepDone)setMode('REJOIN','Returning to planned trail route.');
  else setMode('POA','Resuming probability-guided search.');}
 function showFound(near,fix,C){
@@ -868,7 +868,7 @@ function showFound(near,fix,C){
   if(diff>0)big=`<div class="fbig">&#8776; <b>${(diff/3600).toFixed(1)} hours earlier</b> than the ~9:00 pm thermal sighting in the real incident, and before anyone called for help.</div>`;}
  $('fbody').innerHTML=`<b>${near.note.replace(/^WHAT-IF: /,'')}</b><br>&#128205; ${fix[1].toFixed(5)}, ${fix[0].toFixed(5)} &middot; ${off<40?'on the trail':off+' m off-trail'}<br>
   &#128339; ${$('clock').textContent} &middot; T+${fmtTime(S.sim.t)} after the sweep launched<br>&#128293; thermal ${C.th} hit${C.th===1?'':'s'} &middot; &#128225; mmWave ${C.mm} &middot; beacon ${near.t.sig}<br>
-  &#9989; GPS fix sent to incident command${$('payload').checked?' &middot; light/supply payload dropped':''}${big}`;
+  &#128205; Pin proposed to the ranger, who confirms or clears it${$('payload').checked?' &middot; light/supply drop proposed':''}${big}`;
  $('found').style.display='grid';map.easeTo({center:near.p,zoom:15,duration:1200});}
 function poaClear(c,r){
  const P=S.poa;if(!P)return;
@@ -889,9 +889,9 @@ function land(){
   setMode(S.holding?'HOLD':!S.sweepDone?'REJOIN':'POA',`Battery swapped: sortie ${S.sortie} launching.`);return;}
  drawPOA();S.d.mode='LANDED';S.sim.running=false;$('chipMode').textContent='LANDED';$('missionState').textContent='MISSION COMPLETE';
  const bl=S.beacons.filter(b=>b.type!=='ref'),heard=bl.filter(b=>b.found).length,pers=bl.filter(b=>b.verdict==='PERSON').length,truth=bl.filter(b=>b.person).length;
- addEvent(`Landed. ${heard}/${bl.length} beacons heard, ${pers}/${truth} people confirmed, ${$('s_ruled').textContent} of probability ruled out`);
- log(`Mission complete in ${fmtTime(S.sim.t)}: ${heard}/${bl.length} beacons heard, ${pers}/${truth} people confirmed.`);
- alertMsg(`Mission complete: ${heard}/${bl.length} beacons heard · ${pers}/${truth} people confirmed · ${$('s_ruled').textContent} of search probability ruled out · ${Math.round(100*Math.max(0,S.bat)/S.batMax)}% battery left.`,pers===truth?'good':'');
+ addEvent(`Landed. ${heard}/${bl.length} beacons heard, ${pers}/${truth} people proposed as likely, ${$('s_ruled').textContent} of probability ruled out`);
+ log(`Mission complete in ${fmtTime(S.sim.t)}: ${heard}/${bl.length} beacons heard, ${pers}/${truth} people proposed as likely.`);
+ alertMsg(`Mission complete: ${heard}/${bl.length} beacons heard · ${pers}/${truth} people proposed as likely ·${$('s_ruled').textContent} of search probability ruled out · ${Math.round(100*Math.max(0,S.bat)/S.batMax)}% battery left.`,pers===truth?'good':'');
  drawPOA();}
 
 // ===================== simulation loop =====================
@@ -926,7 +926,7 @@ function updateDrone(){
  if(!S.route||!map.getSource('drone')||!S.d)return;
  const d=S.d,gnd=DEM.safe(d.p),agl=d.alt-gnd,top=agl*(+$('exag').value);
  map.getSource('drone').setData(fc([
-  {type:'Feature',properties:{base:top-3,top:top+3,color:d.mode==='HOMING'||d.mode==='CONFIRM'?'#ff7777':'#5cc8e8'},geometry:{type:'Polygon',coordinates:[squarePoly(d.p,7)]}},
+  {type:'Feature',properties:{base:top-3,top:top+3,color:d.mode==='HOMING'||d.mode==='CHECK'?'#ff7777':'#5cc8e8'},geometry:{type:'Polygon',coordinates:[squarePoly(d.p,7)]}},
   {type:'Feature',properties:{base:0,top:Math.max(0,top-3),color:'#e8f8ff'},geometry:{type:'Polygon',coordinates:[squarePoly(d.p,0.8)]}}]));
  map.getSource('foot').setData(fc([{type:'Feature',geometry:{type:'Polygon',coordinates:[circlePoly(d.p,Math.max(5,swath(BT.google,agl)))]}}]));
  map.getSource('dets').setData(fc(S.dets));
@@ -944,7 +944,7 @@ function updateDrone(){
 // ===================== A/B comparison =====================
 function clockAt(t){const [h,m]=$('closing').value.split(':').map(Number),x=h*3600+m*60+t;return String(Math.floor(x/3600)%24).padStart(2,'0')+':'+String(Math.floor(x/60)%60).padStart(2,'0');}
 // Monte-Carlo test: drop the lost hiker at N random off-trail spots (100–400 m off a high-priority trail, drifting
-// downhill), fly both search patterns against every spot, and report how often each one confirms the person.
+// downhill), fly both search patterns against every spot, and report how often each one proposes the person to the ranger.
 async function compareAB(){
  const hiker=S.beacons.find(b=>b.person);if(!S.route||!hiker){alertMsg('Place a beacon carried by a person first.');return;}
  const keep=$('pattern').value,N=16,orig={p:hiker.p,ground:hiker.ground};
@@ -965,7 +965,7 @@ async function compareAB(){
  const row=pat=>{const all=res[pat].filter(x=>x!=null).length;
   return {all,by:buckets.map(([lo,hi])=>{const idx=trials.map((t,i)=>i).filter(i=>trials[i].off>=lo&&trials[i].off<hi);return [idx.filter(i=>res[pat][i]!=null).length,idx.length];})};};
  const c=row('center'),z=row('corridor');
- const fmt=(lab,r)=>`${lab}: confirmed ${r.all}/${N} hikers (`+buckets.map(([lo,hi],j)=>`${lo}–${hi===450?'400':hi} m: ${r.by[j][0]}/${r.by[j][1]}`).join(' · ')+')';
+ const fmt=(lab,r)=>`${lab}: proposed ${r.all}/${N} hikers (`+buckets.map(([lo,hi],j)=>`${lo}–${hi===450?'400':hi} m: ${r.by[j][0]}/${r.by[j][1]}`).join(' · ')+')';
  S.ab={text:[fmt('Trail sweep → off-trail probability search',c),fmt('Parallel-lane corridor',z)],note:`${N} random lost-hiker positions, 100–400 m off high-priority trails, same drone and battery.`};
  log('Test — '+S.ab.text.join(' | '));
  alertMsg(S.ab.text.join('. ')+'.',z.all>c.all?'good':'');
@@ -985,7 +985,7 @@ function renderTimeline(){
  let big='';
  if(S.story.found){const [h,m]=$('closing').value.split(':').map(Number);const tf=h*3600+m*60+S.story.found,diff=21*3600-tf;
   const hh=Math.floor(tf/3600),mm=Math.floor(tf/60)%60;
-  big=`<div class="bigline">TrailSAR confirmed the hiker at <b>${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}</b> — ${fmtTime(S.story.found)} after a routine sunset sweep launched, with no 911 call needed. That is roughly <b>${(diff/3600).toFixed(1)} h before</b> the ~9:00 pm thermal sighting in the real incident.</div>`;}
+  big=`<div class="bigline">TrailSAR proposed the hiker to the ranger at <b>${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}</b> — ${fmtTime(S.story.found)} after a routine sunset sweep launched, with no 911 call needed. That is roughly <b>${(diff/3600).toFixed(1)} h before</b> the ~9:00 pm thermal sighting in the real incident.</div>`;}
  $('tl').innerHTML=`<div class="tl"><div><h3>REPORTED (CBS Colorado 2/2/26 · DroneXL 2/8/26)</h3>${QUANDARY_REAL.map(([t,x])=>`<div class="tli real"><b>${t}</b>${x}</div>`).join('')}</div><div><h3>TRAILSAR SIMULATION (reconstruction)</h3>${mine}</div></div>${big}${ab}`;
 }
 // ===================== Quandary story mode =====================
