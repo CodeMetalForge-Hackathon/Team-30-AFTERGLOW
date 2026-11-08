@@ -83,14 +83,16 @@ mosquitto_sub -v -t 'ag/#'                                               # watch
 .venv/bin/python -m afterglow.tracker & .venv/bin/python -m afterglow.locate & .venv/bin/python -m afterglow.geofence [--fresh]   # real modules, with fake_bus --only pose,ble
 .venv/bin/python -m afterglow.thermal --fake [--dry-run --frames 8]      # fake thermal: live/thermal.png + ag/thermal
 .venv/bin/python -m afterglow.camera --fake [--frames 8]                 # fake camera: live/camera.jpg (on the Pi, no --fake)
-.venv/bin/python -m afterglow.dashboard [--config park.toml]             # dashboard on http://localhost:8080 (operator TV: /tv.html)
-.venv/bin/python tools/local_stack.py --config park.toml --speed 10      # whole laptop stack, no broker; open /tv.html
+.venv/bin/python -m afterglow.dashboard [--config park.toml]             # dashboard on http://localhost:8080, park on :8081 (operator TV: /tv.html)
+.venv/bin/python tools/local_stack.py --config park.toml --feeds         # whole laptop stack, no broker; open http://localhost:8081/tv.html, then "Send out"
+                                                                         # TV location tabs ([http] sites): Acadia :8081 (sim) <-> 60 State St :8080 (live demo, pod components panel)
 .venv/bin/python tools/local_stack.py --config park.toml --feeds          # ... plus fake camera and heat pictures for the TV (Live tab: /tv.html, Live)
-.venv/bin/python -m afterglow.dashboard --broker <pi-ip>                 # laptop dashboard against the pod's broker
+.venv/bin/python -m afterglow.dashboard --broker <pi-ip>                 # laptop dashboard against the pod's broker; camera/heat pictures come from the Pi's afterglow@dashboard (--pod off: local live/)
 mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log                      # record a run
 .venv/bin/python tools/replay.py runs/1432.log [--loop] [--topics 'ag/obs/#,ag/pose']   # replay it
 .venv/bin/python -m afterglow.bridge --dry-run < lines.txt               # no hardware, no broker
-.venv/bin/python -m afterglow.position --dry-run < nmea.txt
+.venv/bin/python -m afterglow.position --dry-run --source gps < nmea.txt
+.venv/bin/python -m afterglow.position --fake-walk --dry-run              # indoor IMU walk ([pose] source = "imu"), no hardware
 .venv/bin/python tools/fake_bus.py --print --only pose,ble --duration 600 | .venv/bin/python -m afterglow.tracker --dry-run   # tracker on fake data, no broker
 .venv/bin/python -m afterglow.lora_rx --dry-run < rx_lines.txt           # laptop radio lines, no hardware
 conda activate sdr; python tools/pluto_rx.py --selftest                  # laptop: check GNU Radio + gr-lora_sdr, no Pluto

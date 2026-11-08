@@ -2,16 +2,18 @@
 import json
 import os
 import threading
+import time
 import urllib.error
 import urllib.request
-from email.utils import parsedate_to_datetime
-from http.server import ThreadingHTTPServer
+from email.utils import formatdate, parsedate_to_datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
 from afterglow import config
 from afterglow.contracts import COVERAGE, CTRL, MODE, OBS_BLE, POSE, TARGET, TRACK, validate
-from afterglow.dashboard import OBS_IDS, Commands, State, make_handler, make_meta, safe_file
+from afterglow.dashboard import (OBS_IDS, Commands, PodPictures, State, make_handler, make_meta, pod_url,
+                                 safe_file)
 from afterglow.parkmap import ParkMap
 
 T = 1_731_000_000_000
@@ -213,6 +215,96 @@ def test_http_live_picture_has_its_age(server, tmp_path):
     assert lm.timestamp() == 1_700_000_000 and date > lm
     with pytest.raises(urllib.error.HTTPError):
         urllib.request.urlopen(base + "/live/camera.jpg", timeout=5)
+
+
+class _SkewedPod(BaseHTTPRequestHandler):
+    """A pod dashboard whose clock is an hour fast, serving a 3 s old camera picture."""
+    SKEW, AGE = 3600, 3
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        if self.path != "/live/camera.jpg":
+            return self.send_error(404)
+        now = time.time() + self.SKEW
+        self.send_response_only(200)
+        self.send_header("Date", formatdate(now, usegmt=True))
+        self.send_header("Last-Modified", formatdate(now - self.AGE, usegmt=True))
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", "3")
+        self.end_headers()
+        self.wfile.write(b"jpg")
+
+
+def _serve(handler):
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+@pytest.fixture
+def laptop_and_pod(tmp_path):
+    pod_srv = _serve(_SkewedPod)
+    cfg = config.load()
+    meta = make_meta(cfg, ParkMap.load(cfg))
+    state, bus = State(meta["trail_step_m"]), StubBus()
+    pod = PodPictures(f"http://127.0.0.1:{pod_srv.server_address[1]}")
+    srv = _serve(make_handler(state, Commands(lambda: bus, cfg["waypoints"]), meta,
+                              {"live": tmp_path, "snaps": tmp_path}, pod=pod))
+    yield f"http://127.0.0.1:{srv.server_address[1]}", pod_srv
+    for s in (srv, pod_srv):
+        s.shutdown()
+        s.server_close()
+
+
+def test_live_pictures_come_from_the_pod_with_their_age_on_our_clock(laptop_and_pod):
+    base, _ = laptop_and_pod
+    with urllib.request.urlopen(base + "/live/camera.jpg", timeout=5) as r:
+        assert r.read() == b"jpg" and r.headers["Content-Type"] == "image/jpeg"
+        age = (parsedate_to_datetime(r.headers["Date"]) - parsedate_to_datetime(r.headers["Last-Modified"])).total_seconds()
+    assert 2 <= age <= 5  # the Pi's hour of skew is gone; the 3 s age is kept
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(base + "/live/thermal.png", timeout=5)
+    assert e.value.code == 404
+
+
+def test_unreachable_pod_is_502(laptop_and_pod):
+    base, pod_srv = laptop_and_pod
+    pod_srv.shutdown()
+    pod_srv.server_close()
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(base + "/live/camera.jpg", timeout=10)
+    assert e.value.code == 502
+
+
+@pytest.mark.parametrize("arg,broker,want", [
+    (None, None, None),
+    (None, "localhost", None),
+    (None, "127.0.0.1:1883", None),
+    (None, "10.0.0.5", "http://10.0.0.5:8080"),
+    (None, "10.0.0.5:1884", "http://10.0.0.5:8080"),  # the MQTT port isn't the HTTP port
+    ("off", "10.0.0.5", None),
+    ("10.0.0.7", "10.0.0.5", "http://10.0.0.7:8080"),
+    ("pod.local:9000", None, "http://pod.local:9000"),
+])
+def test_pod_url(arg, broker, want):
+    assert pod_url(arg, broker, 8080) == want
+
+
+def test_sites_are_the_same_in_both_profiles_and_match_their_ports():
+    """The TV's location tabs: each site's port is its profile's [http] port, so the links land."""
+    demo = config.load()
+    park = config.load(config.DEFAULT.parent / "park.toml")
+    assert demo["http"]["sites"] == park["http"]["sites"]
+    by_profile = {s["profile"]: s for s in demo["http"]["sites"]}
+    assert by_profile["afterglow"]["port"] == demo["http"]["port"] and by_profile["afterglow"]["pod"] is True
+    assert by_profile["park"]["port"] == park["http"]["port"] and by_profile["park"]["pod"] is False
+    assert demo["http"]["port"] != park["http"]["port"]  # both run on the laptop at once
+    meta = make_meta(demo, ParkMap.load(demo))
+    assert [s["name"] for s in meta["sites"]] == [s["name"] for s in demo["http"]["sites"]]
+    assert meta["health"]["period_s"] == demo["health"]["period_s"]
 
 
 def test_meta_has_the_building_and_the_check_in_time():

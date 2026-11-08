@@ -48,7 +48,7 @@ COLOURS = {1: 0xFFFF0000, 2: 0xFFFF8000, 3: 0xFFFFFF00, 4: 0xFF9E9E9E}  # prio -
 CLS_TEXT = {"findmy": "Apple Find My (separated)", "findhub": "Google Find Hub", "samsung_off": "Samsung lost mode",
             "ref": "our reference beacon", "wifi": "SOS Wi-Fi page", "other": "other beacon"}
 STATE_TEXT = {"heard": "rough position", "localized": "localized", "pinned": "pinned"}
-POSE_SRC_TEXT = {"sim": "SIMULATED", "replay": "REPLAY", "waypoint": "taped waypoints", "gps": "GPS"}
+POSE_SRC_TEXT = {"sim": "SIMULATED", "replay": "REPLAY", "waypoint": "taped waypoints", "gps": "GPS", "imu": "IMU walk"}
 XML_DECL = b'<?xml version="1.0" encoding="UTF-8"?>\n'
 
 

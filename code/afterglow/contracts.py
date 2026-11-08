@@ -31,7 +31,7 @@ ALWAYS_REPORTED = {"findmy", "findhub", "samsung_off", "ref"}
 STATES = ["heard", "localized", "pinned", "confirmed"]  # order = the alert's state code
 TRACK_STATES = STATES[:3]  # only the ranger's Confirm sets "confirmed", on ag/target; the tracker never does
 MODES = ["patrol", "night", "investigate", "search"]
-POSE_SRC = ["gps", "waypoint", "replay", "sim"]  # gps/waypoint = the real pod; the dashboard badges the others
+POSE_SRC = ["gps", "waypoint", "replay", "sim", "imu"]  # gps/waypoint/imu = the real pod; the dashboard badges the others
 THERMAL_SRC = ["ht203u", "fake"]  # optional ag/thermal src; the panel marks fake heat
 PIN_STATUS = ["new", "acknowledged", "investigating", "confirmed", "cleared"]
 RULES = ["day_offtrail", "night_outside_camp", "search", "sos"]

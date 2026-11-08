@@ -67,7 +67,17 @@ def write_atomic(path: Path, data: bytes):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_bytes(data)
-    os.replace(tmp, path)
+    # On Windows (laptop, --fake) the rename fails while the dashboard is reading the old picture:
+    # try again briefly, then skip this frame. On the Pi (Linux) the first try always works.
+    for wait in (0.01, 0.03, 0.1, None):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if wait is None:
+                log.debug("%s busy, frame skipped", path.name)
+                return
+            time.sleep(wait)
 
 
 class Thermal:
@@ -158,27 +168,33 @@ class Thermal:
         return rgb
 
 
-def fake_frame(i: int, rng: np.random.Generator, w: int = 256, h: int = 192) -> np.ndarray:
+def fake_frame(i: int, rng: np.random.Generator, w: int = 256, h: int = 192, person: bool | None = None) -> np.ndarray:
     """Frame i of the made-up scene, in degrees C.
 
     A cool background (16-18 C), a sun-warmed rock at 48 C in one corner (too hot for a person,
-    so it's ignored) and a person-sized blob at about 34 C drifting on a slow loop. The blob is
-    out of the frame for part of each loop, so `hot` turns on and off.
+    so it's ignored) and a person-sized blob at about 34 C. person None: the blob drifts on a slow
+    loop, out of the frame for part of it, so `hot` turns on and off. person True: the blob sits
+    near the middle, as when the drone circles over someone; False: no blob.
     """
     yy, xx = np.mgrid[0:h, 0:w]
     a = 16.0 + 2.0 * yy / h + rng.normal(0, 0.15, (h, w))
     a += 32.0 * np.exp(-(((xx - 0.88 * w) / 5) ** 2 + ((yy - 0.15 * h) / 4) ** 2))  # the rock
+    if person is False:
+        return a
     ph = 2 * math.pi * i / 160  # 40 s a loop at 4 frames a second
-    cx, cy = w / 2 + 0.62 * w * math.sin(ph), h / 2 + 0.25 * h * math.sin(2 * ph)
+    k = 0.62 if person is None else 0.08  # how far it wanders across the frame
+    cx, cy = w / 2 + k * w * math.sin(ph), h / 2 + 0.4 * k * h * math.sin(2 * ph)
     blob = np.exp(-(((xx - cx) / 4) ** 2 + ((yy - cy) / 8) ** 2))  # about 8 x 16 px: a person some way off
     return a + (34.0 - a) * blob
 
 
-def fake_frames(seed: int = 0):
+def fake_frames(seed: int = 0, person=None):
+    """person: None for the drifting loop, or a function saying whether a person is in view now
+    (local_stack.py ties it to the fake pod)."""
     rng = np.random.default_rng(seed)
     i = 0
     while True:
-        yield fake_frame(i, rng), True, "fake"
+        yield fake_frame(i, rng, person=None if person is None else bool(person())), True, "fake"
         i += 1
 
 

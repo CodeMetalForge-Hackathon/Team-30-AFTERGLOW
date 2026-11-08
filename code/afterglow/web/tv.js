@@ -17,7 +17,7 @@ const CARRY = [['iphone', 'iPhone'], ['airtag', 'AirTag'], ['android', 'Android 
 const CARRY_NAME = Object.fromEntries(CARRY);
 const PRIO_NAME = { 1: 'urgent', 2: 'strong ping', 3: 'possible', 4: 'heard only' };
 const STATUS_ORDER = { investigating: 0, new: 1, acknowledged: 2, confirmed: 3, cleared: 4 };
-const LIVE_SRC = new Set(['gps', 'waypoint']);
+const LIVE_SRC = new Set(['gps', 'waypoint', 'imu']); // the real pod (imu: the indoor walk, position.py)
 const POSE_STALE_MS = 10000;   // no pose this long: the Wi-Fi link to the pod is down
 const ALERT_FRESH_MS = 20000;  // a LoRa alert this recent: LoRa is still getting through
 const BLE_SILENT_MS = 15000;
@@ -358,20 +358,10 @@ function App() {
   const podStale = FORCE === 'lora' || (m.lastPoseWall > 0 && Date.now() - m.lastPoseWall > POSE_STALE_MS) || st.link !== 'live' || !s.broker;
   const loraFresh = FORCE === 'lora' || (m.lastAlertWall > 0 && Date.now() - m.lastAlertWall < ALERT_FRESH_MS);
   const locked = podStale; // commands go over Wi-Fi: none while it's down
-  const problems = [];
+  const problems = []; // the link only: health shows the battery alone (status bar, and the battery card on the live site)
   if (st.link !== 'live') problems.push('Dashboard server unreachable');
-  else if (!s.broker) problems.push('Message broker down');
+  else if (!s.broker) problems.push(meta.walk ? 'No signal from the pod' : 'Message broker down'); // the live demo reaches the pod's broker over Wi-Fi
   else if (podStale) problems.push('Pod Wi-Fi lost');
-  const sys = s.latest['ag/sys'];
-  if (sys) {
-    if (sys.cpu_c >= 80) problems.push(`Pod hot ${Math.round(sys.cpu_c)}°C`);
-    if (sys.throttled && sys.throttled !== '0x0') problems.push('Pod throttling');
-    if (sys.lora === false) problems.push('LoRa radio down');
-    if (typeof sys.disk_free_gb === 'number' && sys.disk_free_gb < 2) problems.push('Pod disk nearly full');
-    if (typeof sys.batt_pct === 'number' && sys.batt_pct < 20) problems.push(`Pod battery ${sys.batt_pct}%`);
-  }
-  if (paused) m.lastBleWall = Date.now();
-  if (!podStale && m.bleCount > 0 && Date.now() - m.lastBleWall > BLE_SILENT_MS) problems.push('Bluetooth scanner silent');
 
   // pings
   const pins = Object.values(s.pins);
@@ -382,7 +372,8 @@ function App() {
   const investigating = (m.lastChecked && s.pins[m.lastChecked]?.status === 'investigating' ? s.pins[m.lastChecked] : null)
     || pins.filter((p) => p.status === 'investigating').sort((a, b) => b.t - a.t)[0] || null;
   const selPin = sel && s.pins[sel] ? s.pins[sel] : null;
-  const alertPin = fresh.find((p) => !p.sos) || null;
+  const alertList = fresh.filter((p) => !p.sos); // every new ping waiting on the ranger; the banner can step through them
+  const alertPin = (selPin && alertList.includes(selPin) ? selPin : alertList[0]) || null; // the one picked, else the most urgent
   const linked = kase?.ping && s.pins[kase.ping] ? s.pins[kase.ping] : null;
   const confirmed = pins.filter((p) => p.status === 'confirmed' && !m.donePins?.[p.pin]).sort((a, b) => b.t - a.t)[0] || null; // a closed case's person is done
   const focus = selPin || alertPin || (mode !== 'investigate' ? investigating : null);
@@ -453,7 +444,7 @@ function App() {
   };
   const setSimState = async (body) => {
     const r = await post('/api/sim', body);
-    if (r.ok) setSim({ paused: r.data.paused, speed: r.data.speed }); else toast(`Simulation: ${r.problems.join('; ')}`, 'bad');
+    if (r.ok) { const { ok: _ok, problems: _p, ...view } = r.data; setSim(view); } else toast(`Simulation: ${r.problems.join('; ')}`, 'bad');
   };
   const teamOnWay = async (pin) => { // after a person is confirmed: the team is sent, the drone goes back to its sweep
     if (caseRef.current?.case) {
@@ -471,25 +462,33 @@ function App() {
   };
   const toggleChime = () => { Sound.unlock(); Sound.on = !Sound.on; savePref('chime', Sound.on); setChimeOn(Sound.on); if (Sound.on) Sound.play(false); };
 
-  const ctx = { meta, st, s, m, bt, mode, pose, cv, kase, locked, busy, pick, pinCmd, sendCtrl, setMode, setForm, closeCase, pickTrail, setSel, sel, open, focus, target, linked, linkPing, confirmRescue, notPerson, rescue, confirmed, teamOnWay, routeP, setRoutePin, backToSweep, checkin, every };
-  const wide = viewMode === 'investigate' ? !!target : !!focus; // room for the ping card, or the camera check
+  const podSite = !!(meta.sites || []).find((x) => x.profile === meta.profile)?.pod;
+  const ctx = { alertList, viewMode, night, sim, setSimState, podStale, podSite, meta, st, s, m, bt, mode, pose, cv, kase, locked, busy, pick, pinCmd, sendCtrl, setMode, setForm, closeCase, pickTrail, setSel, sel, open, focus, target, linked, linkPing, confirmRescue, notPerson, rescue, confirmed, teamOnWay, routeP, setRoutePin, backToSweep, checkin, every };
+  // the rail shows the ping waiting on the ranger (with its tabs); the strip over the map only when it doesn't
+  const railShowsAlert = viewMode !== 'investigate' && !!focus && alertList.includes(focus);
 
   return html`
     <div class="tv">
-      <${TopBar} ...${ctx} problems=${problems} chimeOn=${chimeOn} toggleChime=${toggleChime} sim=${sim} setSimState=${setSimState} live=${live} setLive=${setLive} />
-      <div class="banners">
-        <${Steps} stage=${stage} mode=${mode} cv=${cv} />
-        ${podStale && html`<${LoraBanner} m=${m} loraFresh=${loraFresh} />`}
-        ${sosPin && html`<${SosBanner} p=${sosPin} mode=${mode} setMode=${setMode} locked=${locked} pick=${pick} />`}
-        ${alertPin && html`<${PingBanner} p=${alertPin} m=${m} bt=${bt} kase=${kase} pick=${pick} />`}
-        ${checkin?.due && mode !== 'investigate' && !routeP && html`<${CheckinBanner} p=${confirmed} c=${checkin} pose=${pose} kase=${kase} show=${() => { setLive(false); setRoutePin(confirmed.pin); }} />`}
+      <${Header} ...${ctx} stage=${stage} live=${live} setLive=${setLive} />
+      <div class="body">
+        <main class="stage">
+          <div class="banners">
+            ${sim?.flight && sim.flight !== 'out' && html`<${BaseBanner} sim=${sim} pose=${pose} setSimState=${setSimState} />`}
+            ${podStale && html`<${LoraBanner} m=${m} loraFresh=${loraFresh} />`}
+            ${sosPin && html`<${SosBanner} p=${sosPin} mode=${mode} setMode=${setMode} locked=${locked} pick=${pick} />`}
+            ${alertPin && !railShowsAlert && html`<${PingBanner} p=${alertPin} list=${alertList} m=${m} bt=${bt} kase=${kase} pick=${pick} />`}
+            ${checkin?.due && mode !== 'investigate' && !routeP && html`<${CheckinBanner} p=${confirmed} c=${checkin} pose=${pose} kase=${kase} show=${() => { setLive(false); setRoutePin(confirmed.pin); }} />`}
+          </div>
+          ${live && html`<${LiveView} ...${ctx} />`}
+          ${meta.walk ? !live && html`<${IndoorStage} ...${ctx} />`
+            : html`<div class="stagemap" style=${live ? 'display:none' : ''}>
+                <${MapPane} meta=${meta} s=${s} sel=${sel} follow=${follow} setFollow=${setFollow} night=${night} cv=${cv} podStale=${podStale} m=${m} setSel=${setSel} mode=${viewMode} target=${target} rescue=${rescue} checking=${!!investigating && mode !== 'investigate'} bt=${bt} live=${live} sim=${sim} />
+                <${Hud} ...${ctx} />
+              </div>`}
+        </main>
+        <aside class="rail" aria-label="Decisions and details">${rail(ctx, podStale)}</aside>
       </div>
-      ${live && html`<${LiveView} ...${ctx} podStale=${podStale} />`}
-      <div class=${`grid ${wide ? 'wide-right' : ''}`} style=${live ? 'display:none' : ''}>
-        <div class="col">${left(ctx)}</div>
-        <${MapPane} meta=${meta} s=${s} sel=${sel} follow=${follow} setFollow=${setFollow} night=${night} cv=${cv} podStale=${podStale} m=${m} setSel=${setSel} mode=${viewMode} target=${target} rescue=${rescue} checking=${!!investigating && mode !== 'investigate'} bt=${bt} live=${live} />
-        <div class="col">${right(ctx, podStale)}</div>
-      </div>
+      <${StatusBar} ...${ctx} problems=${problems} chimeOn=${chimeOn} toggleChime=${toggleChime} />
       ${form && html`<${CaseForm} meta=${meta} init=${form} editing=${!!kase} save=${saveCase} cancel=${() => setForm(null)} />`}
       ${chimeOn && !Sound.ready() && html`<div class="soundhint" role="status">Click anywhere to turn on the ping chime</div>`}
       <div class="toasts">${toasts.map((t) => html`<div key=${t.id} class=${`toast ${t.kind}`}>${t.text}</div>`)}</div>
@@ -497,21 +496,34 @@ function App() {
 }
 
 // ---------- top bar and banners ----------
-function TopBar({ meta, s, bt, mode, pose, kase, locked, setMode, problems, chimeOn, toggleChime, sim, setSimState, live, setLive, setRoutePin }) {
-  const src = !pose ? null : pose.src === 'sim' ? ['b-sim', 'SIMULATED'] : pose.src === 'replay' ? ['b-replay', 'REPLAY'] : LIVE_SRC.has(pose.src) ? null : ['b-none', pose.src];
-  const showCase = kase && (mode === 'search' || mode === 'investigate');
+// The weather in the top bar is simulated (weather()), so it shows only with the fake pod.
+function Header({ meta, mode, locked, setMode, live, setLive, setRoutePin, stage, cv, bt, sim }) {
   return html`
     <header class="top">
-      <div class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="#e0a43a" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><circle cx="12" cy="12" r="9" stroke-opacity=".5"></circle></svg>AFTERGLOW</div>
-      ${showCase ? html`<div class="casechip" title=${`Case: ${kase.name}`}>${kase.name} · <span class="mono">${fmtDur(Date.now() - kase.opened_t)}</span></div>`
-                 : html`<div class="area">${meta.name}</div>`}
-      <div class="spacer"></div>
+      <div class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="#f0a63a" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3.5"></circle><circle cx="12" cy="12" r="9" stroke-opacity=".45"></circle></svg><span>AFTERGLOW</span></div>
+      <div class="vr"></div>
+      <${SiteTabs} meta=${meta} />
+      <${Phase} stage=${stage} mode=${mode} cv=${cv} />
       <div class="modes" role="group" aria-label="Mode">
         ${MODES.map(([k, label]) => html`<button class=${`${mode === k ? 'on' : ''} ${k === 'investigate' ? 'emerg' : ''}`} aria-pressed=${mode === k}
           disabled=${locked} onClick=${() => { setLive(false); setRoutePin(null); if (mode !== k) setMode(k); }}>${label}</button>`)}
       </div>
       <button class=${`livebtn ${live ? 'on' : ''}`} aria-pressed=${live} title="Live: camera, heat and every reading from the pod (Esc to leave)"
         onClick=${() => setLive(!live)}><i></i>Live</button>
+      <div class=${`clock ${sim?.paused ? 'paused' : ''}`} title="Bus time: the latest pose's time">${fmtClock(bt)}</div>
+    </header>`;
+}
+
+// The status bar: the source (simulated, replay, live), the sim controls, the links, the weather
+// (simulated, so only with the fake pod), the battery and the chime.
+function StatusBar({ s, m, bt, pose, sim, setSimState, problems, chimeOn, toggleChime, podSite }) {
+  const src = !pose ? null : pose.src === 'sim' ? ['b-sim', 'SIMULATED'] : pose.src === 'replay' ? ['b-replay', 'REPLAY'] : LIVE_SRC.has(pose.src) ? ['b-live', 'LIVE · REAL POD'] : ['b-none', pose.src];
+  const alertAgo = m.lastAlertWall > 0 ? Date.now() - m.lastAlertWall : null;
+  const sys = s.latest['ag/sys'];
+  const batt = typeof sys?.batt_pct === 'number' && isFinite(sys.batt_pct) ? sys.batt_pct : null;
+  const bst = batt == null ? 'off' : batt < 20 ? 'crit' : batt < 40 ? 'warn' : '';
+  return html`
+    <footer class="status">
       ${src && html`<span class=${`badge ${src[0]}`}>${src[1]}</span>`}
       ${sim && html`<span class="simctl" role="group" aria-label="Simulation">
         <button class=${sim.paused ? 'paused' : ''} onClick=${() => setSimState({ paused: !sim.paused })} aria-label=${sim.paused ? 'Resume the simulation' : 'Pause the simulation'}>
@@ -519,37 +531,92 @@ function TopBar({ meta, s, bt, mode, pose, kase, locked, setMode, problems, chim
                        : html`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"></path></svg>`}
         </button>
         ${[1, 2, 4].map((v) => html`<button class=${sim.speed === v ? 'on' : ''} aria-pressed=${sim.speed === v} onClick=${() => setSimState({ speed: v })}>${v}×</button>`)}
+        ${sim.flight === 'out' && html`<button title="Fly the drone straight back to base and land" onClick=${() => setSimState({ flight: 'home' })}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11 12 4l9 7"></path><path d="M5 10v10h14V10"></path></svg>Return to base</button>`}
         <${ResetButton} setSimState=${setSimState} />
       </span>`}
-      <${Weather} bt=${bt} />
-      <span class=${`health ${problems.length ? 'bad' : ''}`} title=${problems.join(' · ')}><i></i>${problems.length ? problems[0] + (problems.length > 1 ? ` +${problems.length - 1}` : '') : 'System OK'}</span>
+      <span class="sep"></span>
+      <span class=${`st ${problems.length ? 'crit' : ''}`} title=${problems.join(' · ')}><i></i>${problems.length ? problems[0] : html`Pod link <b>live</b>`}</span>
+      <span class=${`st ${alertAgo == null ? 'off' : alertAgo < ALERT_FRESH_MS ? '' : 'warn'}`} title="The last LoRa alert heard by the laptop"><i></i>LoRa <b>${alertAgo == null ? 'nothing heard' : fmtAgo(alertAgo)}</b></span>
+      <span class="push"></span>
+      ${sim && html`<${Weather} bt=${bt} />`}
+      ${(podSite || sys) && html`<span class="sep"></span><span class=${`st ${bst}`} title="Pod battery (health.py)"><i></i>Battery <b>${batt != null ? `${batt}%` : 'not measured'}</b></span>`}
       <button class=${`iconbtn ${chimeOn ? '' : 'off'}`} aria-label=${chimeOn ? 'Chime on: click to mute' : 'Chime muted: click to turn on'} title=${chimeOn ? 'Chime on' : 'Chime muted'} onClick=${toggleChime}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5z"></path>${chimeOn ? html`<path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M18.5 5.5a9 9 0 0 1 0 13"></path>` : html`<path d="m16 9 5 6"></path><path d="m21 9-5 6"></path>`}</svg>
       </button>
-      <div class=${`clock ${sim?.paused ? 'paused' : ''}`} title="Bus time: the latest pose's time">${fmtClock(bt)}</div>
-    </header>`;
+    </footer>`;
+}
+
+// Location tabs ([http] sites): each site is its own dashboard on its own port (Acadia, the
+// simulation; 60 State St, the live demo). The TV links between them on the same host, and checks
+// every few seconds whether the other one is running.
+const siteUrl = (x, path = location.pathname) => `${location.protocol}//${location.hostname}:${x.port}${path}`;
+const SITE_TAG = { simulation: 'Sim', 'live demo': 'Live' };
+function SiteTabs({ meta }) {
+  const sites = meta.sites || [];
+  const [up, setUp] = useState({}); // port -> reachable
+  useEffect(() => {
+    const others = sites.filter((x) => x.profile !== meta.profile);
+    if (!others.length) return undefined;
+    let alive = true;
+    const probe = () => others.forEach((x) => {
+      const ctl = new AbortController();
+      const tm = setTimeout(() => ctl.abort(), 2500);
+      // any HTTP answer means it's running (no-cors: we can't read it, and don't need to)
+      fetch(siteUrl(x, '/api/sim'), { mode: 'no-cors', cache: 'no-store', signal: ctl.signal })
+        .then(() => true, () => false)
+        .then((ok) => { clearTimeout(tm); if (alive) setUp((u) => (u[x.port] === ok ? u : { ...u, [x.port]: ok })); });
+    });
+    probe();
+    const id = setInterval(probe, 5000);
+    return () => { alive = false; clearInterval(id); };
+  }, [meta.profile]);
+  if (sites.length < 2) return html`<div class="area">${meta.name}</div>`;
+  return html`<nav class="sites" aria-label="Location">${sites.map((x) => {
+    const tag = html`<small class=${x.pod ? 't-live' : 't-sim'}>${SITE_TAG[x.tag] || x.tag}</small>`;
+    if (x.profile === meta.profile) return html`<span key=${x.port} class="site on" aria-current="page" title=${`${meta.name} · ${x.tag}`}>${x.name}${tag}</span>`;
+    const down = up[x.port] === false;
+    return html`<a key=${x.port} class=${`site ${down ? 'down' : ''}`} href=${siteUrl(x)}
+      title=${down ? `${x.name} isn't running (port ${x.port})` : `Switch to ${x.name} (${x.tag})`}>${x.name}${down ? html`<small class="t-down">not running</small>` : tag}</a>`;
+  })}</nav>`;
 }
 
 function ResetButton({ setSimState }) { // two clicks, so nobody resets the demo by accident
   const [sure, setSure] = useState(false);
   useEffect(() => { if (!sure) return; const id = setTimeout(() => setSure(false), 4000); return () => clearTimeout(id); }, [sure]);
   return html`<button class=${sure ? 'paused' : ''} title="Back to the start: no pings, no case, day sweep"
-    onClick=${() => (sure ? setSimState({ reset: true }) : setSure(true))}>${sure ? 'Sure? Reset' : 'Reset'}</button>`;
+    aria-label=${sure ? 'Click again to reset' : 'Reset the simulation'}
+    onClick=${() => (sure ? setSimState({ reset: true }) : setSure(true))}>${sure ? 'Sure?' : html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>`}</button>`;
 }
 
-function Steps({ stage, mode, cv }) {
+function Phase({ stage, mode, cv }) {
   const first = cv.case ? `Trail: ${cv.trail || '—'}` : mode === 'search' ? 'Trail pathing' : mode === 'night' ? 'Night sweep' : 'Day sweep';
   const steps = [['Search', first], ['Signal', 'a ping'], ['Check', 'heat and camera'], ['Rescue', cv.case?.team_t ? 'team on the way' : 'route the team']];
-  return html`<ol class="steps" aria-label="Where the search is">${steps.map(([t, sub], i) => html`
-    <li class=${i + 1 === stage ? 'now' : i + 1 < stage ? 'done' : ''} aria-current=${i + 1 === stage ? 'step' : null}>
-      <b>${i + 1}</b><span>${t}</span><small>${sub}</small></li>`)}</ol>`;
+  return html`<ol class="phase" aria-label="Where the search is">${steps.map(([t, sub], i) => html`
+    <li class=${i + 1 === stage ? 'now' : i + 1 < stage ? 'done' : ''} aria-current=${i + 1 === stage ? 'step' : null} title=${`${i + 1} ${t}: ${sub}`}>
+      <b>${i + 1}</b><span>${t}</span></li>`)}</ol>`;
 }
 
 function Weather({ bt }) {
   const w = weather(bt);
   return html`<span class=${`wx ${w.wind > 30 ? 'windy' : ''}`} title="Simulated weather">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 8h11a3 3 0 1 0-3-3"></path><path d="M3 12h16a3 3 0 1 1-3 3"></path><path d="M3 16h8"></path></svg>
-    <span>${w.temp}°C<br />${w.wind} km/h ${w.dir}</span></span>`;
+    <span>${w.temp}°C · wind ${w.wind} km/h ${w.dir}</span></span>`;
+}
+
+// The fake pod waits at base until the ranger sends it out (local_stack.py; the pilot flies the real pod).
+function BaseBanner({ sim, pose, setSimState }) {
+  const base = sim.base;
+  const left = sim.flight === 'returning' && pose && base ? Math.hypot(pose.x - base.x, pose.y - base.y) : null;
+  return html`<div class="banner ban-base" role="status">
+    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11 12 4l9 7"></path><path d="M5 10v10h14V10"></path></svg>
+    <div>
+      <div class="big">${sim.flight === 'returning' ? 'Returning to base' : 'Drone at base'}</div>
+      <div class="sub">${sim.flight === 'returning' ? `${base?.name || 'Base'} · ${fmtM(left)} to go` : `${base?.name || 'Base'} · on the ground, scanners off`}</div>
+    </div>
+    <div class="spacer"></div>
+    ${sim.flight === 'docked' && html`<button class="go" onClick=${() => setSimState({ flight: 'out' })}>Send out · lawn-mower sweep</button>`}
+  </div>`;
 }
 
 function LoraBanner({ m, loraFresh }) {
@@ -578,12 +645,32 @@ function SosBanner({ p, mode, setMode, locked, pick }) {
   </div>`;
 }
 
-function PingBanner({ p, m, bt, kase, pick }) {
+function PingBanner({ p, list, m, bt, kase, pick }) {
+  // Several new pings: tabs (and ‹ ›, or the [ and ] keys) switch which one the banner, the map and the
+  // ping card show. Picking only changes the view: it never acks or confirms anything.
   const match = kase?.expect_cls && kase.expect_cls === p.cls;
-  return html`<div class="banner ban-ping" role="alert" style=${`background:${prioColor(p.prio)}`}>
-    <span class="chipbig" style=${`color:${prioColor(p.prio)}`}>${p.pin}</span>
-    <div><div class="big">New ping needs a ranger decision</div><div class="sub">${CLS_PLAIN[p.cls] || p.cls}${match ? ' · matches what the person is carrying' : ''}</div></div>
+  const i = Math.max(0, list.findIndex((q) => q.pin === p.pin)), n = list.length;
+  const step = (d) => pick(list[(i + d + n) % n].pin);
+  useEffect(() => {
+    if (n < 2) return undefined;
+    const onKey = (e) => {
+      if (document.querySelector('.overlay') || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+      if (e.key === ']') step(1); else if (e.key === '[') step(-1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+  return html`<div class="banner ban-ping" role="alert" style=${`--c:${prioColor(p.prio)}`}>
+    <span class="chipbig">${p.pin}</span>
+    <div><div class="big">${n > 1 ? `${n} new pings need a ranger decision` : 'New ping needs a ranger decision'}</div><div class="sub">${CLS_PLAIN[p.cls] || p.cls}${match ? ' · matches what the person is carrying' : ''}</div></div>
     <div class="spacer"></div>
+    ${n > 1 && html`<div class="pingtabs" role="tablist" aria-label="New pings ([ and ] to switch)">
+      <button class="pt-step" aria-label="Previous ping" title="Previous ping ([)" onClick=${() => step(-1)}>‹</button>
+      ${list.map((q) => html`<button key=${q.pin} role="tab" aria-selected=${q.pin === p.pin} class=${`pt ${q.pin === p.pin ? 'on' : ''}`}
+        title=${`${q.pin} · ${CLS_PLAIN[q.cls] || q.cls} · waiting ${fmtDur(bt - (m.firstSeen[q.pin] ?? bt))}`} onClick=${() => pick(q.pin)}>
+        <i style=${`background:${prioColor(q.prio)}`}></i>${q.pin}</button>`)}
+      <button class="pt-step" aria-label="Next ping" title="Next ping (])" onClick=${() => step(1)}>›</button>
+    </div>`}
     <span class="sub">Waiting</span><span class="timer">${fmtDur(bt - (m.firstSeen[p.pin] ?? bt))}</span>
     <button onClick=${() => pick(p.pin)}>Show</button>
   </div>`;
@@ -616,28 +703,36 @@ function CheckinBanner({ p, c, pose, kase, show }) {
 }
 
 // ---------- columns ----------
-function left(c) {
-  if (c.routeP) return html`<${PilotCard} ...${c} /><${RescueWatch} ...${c} p=${c.routeP} />`;
-  if (c.mode === 'investigate') return html`<${PilotCard} ...${c} /><${SosCard} ...${c} />`;
-  if (c.mode === 'search') return c.kase ? html`<${CaseCard} ...${c} /><${TrailProgress} ...${c} /><${TrailsCard} ...${c} />` : html`<${CaseEntry} ...${c} big=${true} />`;
-  return html`<${SweepCard} ...${c} /><${RuleCard} mode=${c.mode} meta=${c.meta} />${c.confirmed ? html`<${RescueWatch} ...${c} p=${c.confirmed} />` : html`<${CaseEntry} ...${c} />`}`;
+// The box on the map: the sweep in the sweeps, the stretch in trail pathing, the pilot's heading in an emergency.
+function Hud(c) {
+  if (c.routeP || (c.mode === 'investigate' && c.target)) return html`<div class="hud"><${PilotCard} ...${c} /></div>`;
+  if (c.mode === 'search') return c.kase && c.cv.trail && c.m.bins.length ? html`<div class="hud"><${TrailProgress} ...${c} /></div>` : null;
+  return html`<div class="hud"><${SweepCard} ...${c} /></div>`;
 }
 
-function right(c, podStale) {
+// The rail: the decision first (the ping waiting on the ranger, or the emergency), then the rest.
+function rail(c, podStale) {
   const loraList = podStale && Object.keys(c.m.alerts).length ? html`<${LoraPings} m=${c.m} />` : null;
-  if (c.routeP) return html`${loraList}<${RescueCard} ...${c} p=${c.routeP} />`;
+  const battery = c.podSite ? html`<${BatteryCard} ...${c} />` : null;
+  if (c.routeP) return html`${loraList}<${RescueCard} ...${c} p=${c.routeP} /><${RescueWatch} ...${c} p=${c.routeP} /><${PingsTable} ...${c} /><${EventsCard} m=${c.m} />`;
   if (c.mode === 'investigate') {
-    return html`${loraList}${c.target ? html`<${CameraCard} ...${c} /><${RescueCard} ...${c} p=${c.target} />` : html`<div class="p calm"><div class="t">Nothing to investigate</div><div class="lbl">Pick a ping, then press Investigate.</div></div><${PingsCard} ...${c} />`}`;
+    if (!c.target) return html`${loraList}<section class="p"><h2 class="h">Emergency</h2><div class="lbl">Nothing to investigate. Pick a ping, then press Investigate.</div></section>
+      <${PingsTable} ...${c} /><${SosCard} ...${c} />${battery}<${EventsCard} m=${c.m} />`;
+    return html`${loraList}<${RescueCard} ...${c} p=${c.target} /><${CameraCard} ...${c} /><${SosCard} ...${c} /><${PingsTable} ...${c} />${battery}`;
   }
-  if (c.focus) return html`${loraList}<${PingCard} ...${c} p=${c.focus} /><${OtherPings} ...${c} />`;
-  return html`
-    ${loraList}
+  const caseBits = c.mode === 'search' ? (c.kase ? html`<${CaseCard} ...${c} /><${TrailsCard} ...${c} />` : html`<${CaseEntry} ...${c} big=${true} />`)
+    : c.confirmed ? html`<${RescueWatch} ...${c} p=${c.confirmed} />` : html`<${CaseEntry} ...${c} />`;
+  return html`${loraList}
+    ${c.focus && html`<${PingCard} ...${c} p=${c.focus} />`}
     <${LegCard} ...${c} />
-    <${PingsCard} ...${c} />
-    ${c.mode !== 'search' && html`<${EventsCard} m=${c.m} />`}`;
+    ${c.mode === 'search' && caseBits}
+    <${PingsTable} ...${c} />
+    ${c.mode !== 'search' && caseBits}
+    ${battery}
+    <${EventsCard} m=${c.m} />`;
 }
 
-function SweepCard({ s, m, bt, mode }) {
+function SweepCard({ s, m, bt, mode, meta }) {
   const cov = s.latest['ag/coverage'];
   const pct = cov ? cov.pct : null;
   let eta = null;
@@ -655,15 +750,12 @@ function SweepCard({ s, m, bt, mode }) {
     <div class="row"><span class="lbl">In this mode</span><span class="num">${fmtDur(m.modeSince ? bt - m.modeSince : null)}</span></div>
     <div class="row"><span class="lbl">Est. to finish</span><span class="num">${eta != null ? '~' + fmtDur(eta) : '—'}</span></div>
     ${mode === 'night' && html`<div class="row"><span class="lbl">Thermal</span><span>${heatText(th, bt) ? `On · ${heatText(th, bt)}` : 'No thermal data'}</span></div>`}
+    <div class="rulenote"><b>Pings on:</b> ${mode === 'night'
+      ? 'any lost-phone beacon outside the campground. Campers’ phones are ignored.'
+      : `a lost-phone beacon more than ${meta.offtrail_m} m off trail, heard on 2+ passes, outside campgrounds.`}</div>
   </section>`;
 }
 
-function RuleCard({ mode, meta }) {
-  const text = mode === 'night'
-    ? 'Any lost-phone beacon outside the campground. Campers’ phones are ignored.'
-    : `A lost-phone beacon more than ${meta.offtrail_m} m off trail, heard on 2+ passes, outside campgrounds.`;
-  return html`<section class="p"><h2 class="h">Pings on</h2><div style="line-height:1.45">${text}</div></section>`;
-}
 
 function CaseEntry({ kase, setForm, setMode, locked, big }) {
   if (kase) {
@@ -746,44 +838,28 @@ function LegCard({ s, locked, busy, sendCtrl }) {
   </section>`;
 }
 
-function PingsCard({ open, bt, sel, pick, mode }) {
-  if (!open.length) {
-    return html`<section class="p calm grow">
-      <svg viewBox="0 0 24 24" fill="none" stroke="var(--moss)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="m8 12 3 3 5-6"></path></svg>
-      <div class="t">No pings</div>
-      <div class="lbl">${mode === 'night' ? 'A chime plays when one arrives.' : 'Nothing needs the ranger.'}</div>
-    </section>`;
-  }
-  return html`<section class="p grow">
-    <h2 class="h">Pings · ${open.length} open</h2>
-    <div class="pinglist">
-      ${open.map((p) => html`<button class=${`pingrow ${p.pin === sel ? 'sel' : ''}`} key=${p.pin} onClick=${() => pick(p.pin)}>
-        <span class="chip" style=${`background:${prioColor(p.prio)}`}>${p.pin}</span>
-        <span><div class="l1">${CLS_SHORT[p.cls] || p.cls} · ±${fmtM(p.r95)}</div><div class="l2">${p.off_trail_m != null ? `${p.off_trail_m} m off trail · ` : ''}heard ${fmtAgo(bt - (p.t - (p.last_s || 0) * 1000))}</div></span>
-        <span class="st" style=${`color:${p.status === 'new' ? prioColor(p.prio) : 'var(--muted)'}`}>${p.status.toUpperCase()}</span>
-      </button>`)}
-    </div>
+function PingsTable({ open, bt, sel, pick, mode }) {
+  return html`<section class="p">
+    <div class="sh"><h2 class="h">Pings</h2><span class="aux">${open.length ? `${open.length} open` : 'none open'}</span></div>
+    ${open.length ? html`<table class="tbl">
+      <thead><tr><th></th><th>Beacon</th><th>Status</th><th class="r">Off trail</th><th class="r">Heard</th></tr></thead>
+      <tbody>${open.map((p) => html`<tr key=${p.pin} class=${p.pin === sel ? 'sel' : ''} tabindex="0" onClick=${() => pick(p.pin)} onKeyDown=${(e) => e.key === 'Enter' && pick(p.pin)}>
+        <td><span class="mini" style=${`background:${prioColor(p.prio)}`}>${p.pin}</span></td>
+        <td>${CLS_SHORT[p.cls] || p.cls} <span class="dim">±${fmtM(p.r95)}</span></td>
+        <td><span class="stt" style=${`color:${p.status === 'new' ? prioColor(p.prio) : 'var(--muted)'}`}>${p.status}</span></td>
+        <td class="r mono">${p.off_trail_m != null ? `${p.off_trail_m} m` : '—'}</td>
+        <td class="r mono dim">${fmtAgo(bt - (p.t - (p.last_s || 0) * 1000))}</td></tr>`)}</tbody>
+    </table>` : html`<div class="lbl">${mode === 'night' ? 'Nothing yet. A chime plays when one arrives.' : 'Nothing needs the ranger.'}</div>`}
   </section>`;
 }
 
-function OtherPings({ open, focus, bt, pick }) { // the rest, small, so the ranger can switch
-  const rest = open.filter((p) => p.pin !== focus.pin);
-  if (!rest.length) return null;
-  return html`<section class="p" style="gap:0.3rem;padding:0.7rem 0.9rem">
-    <h2 class="h">Other pings</h2>
-    ${rest.map((p) => html`<button class="pingrow" key=${p.pin} onClick=${() => pick(p.pin)} style="padding:0.35rem">
-      <span class="chip" style=${`background:${prioColor(p.prio)};height:1.6rem;min-width:2.3rem`}>${p.pin}</span>
-      <span class="l2">${CLS_SHORT[p.cls] || p.cls} · ${p.status} · heard ${fmtAgo(bt - (p.t - (p.last_s || 0) * 1000))}</span>
-    </button>`)}
-  </section>`;
-}
 
 function RescueWatch({ p, kase, m, bt, s, closeCase, checkin, every, routeP, setRoutePin }) { // back on the sweep, a person found: keep an eye on them
   const th = s.latest['ag/thermal'], v = s.latest['ag/vision'];
   const c = checkin;
   const near = !!c?.near;
   const [sure, setSure] = useState(false);
-  return html`<section class="p" style="border-color:var(--p1)">
+  return html`<section class="p" style="box-shadow:inset 3px 0 0 var(--p1)">
     <h2 class="h">Rescue under way · ${p.pin}${kase?.ping === p.pin ? ` · ${kase.name}` : ''}</h2>
     <div class="row"><span class="lbl">Team</span><span>${kase?.team_t ? `on the way · ${fmtDur(Date.now() - kase.team_t)}` : m.teamPins?.[p.pin] ? 'on the way' : 'not sent yet'}</span></div>
     <div class="row"><span class="lbl">Last check-in</span><span>${near ? 'over them now' : c?.last != null ? fmtAgo(bt - c.last) : 'none yet'}</span></div>
@@ -800,14 +876,14 @@ function RescueWatch({ p, kase, m, bt, s, closeCase, checkin, every, routeP, set
 }
 
 function EventsCard({ m }) {
-  const ev = m.events.slice(0, 3);
-  return html`<section class="p">
-    <h2 class="h">Last 3 events</h2>
-    <div class="events">${ev.length ? ev.map((e) => html`<div><span class="mono">${fmtHM(e.t)}</span>${e.text}</div>`) : html`<div class="dim">Nothing yet</div>`}</div>
+  const ev = m.events.slice(0, 8);
+  return html`<section class="p fill">
+    <h2 class="h">Activity</h2>
+    <div class="events">${ev.length ? ev.map((e) => html`<div><time class="mono">${fmtClock(e.t)}</time><span>${e.text}</span></div>`) : html`<div class="dim">Nothing yet</div>`}</div>
   </section>`;
 }
 
-function PingCard({ p, meta, s, m, bt, cv, kase, locked, busy, pinCmd, setSel, sel, linkPing, confirmRescue, notPerson }) {
+function PingCard({ p, alertList = [], meta, s, m, bt, cv, kase, locked, busy, pinCmd, setSel, sel, pick, linkPing, confirmRescue, notPerson }) {
   const camp = distToCamp(meta, p.x, p.y);
   const start = cv.start && kase ? cv.start : null;
   const fromStart = start ? Math.hypot(p.x - start.x, p.y - start.y) : null;
@@ -815,34 +891,56 @@ function PingCard({ p, meta, s, m, bt, cv, kase, locked, busy, pinCmd, setSel, s
   const warm = p.flags?.thermal;
   const match = kase?.expect_cls && kase.expect_cls === p.cls;
   const b = busy[p.pin];
-  return html`<section class=${`p ping-p${p.prio || 4}`} style="gap:0.9rem">
-    <div style="display:flex;align-items:center;gap:0.9rem">
-      <span class="chip xl" style=${`background:${prioColor(p.prio)}`}>${p.pin}</span>
-      <div style="flex:1"><div style="font-size:1.45rem;font-weight:700">Priority ${p.prio} · ${PRIO_NAME[p.prio] || ''}</div><div class="lbl">${CLS_PLAIN[p.cls] || p.cls}</div></div>
-      ${sel === p.pin && html`<button class="link" onClick=${() => setSel(null)}>Back</button>`}
+  // several new pings: tabs (and ‹ ›, or [ and ]) switch which one this card and the map show. Only the view changes.
+  const n = alertList.length, i = alertList.findIndex((q) => q.pin === p.pin), tabs = n > 1 && i >= 0;
+  const step = (d) => pick(alertList[(i + d + n) % n].pin);
+  useEffect(() => {
+    if (!tabs) return undefined;
+    const onKey = (e) => {
+      if (document.querySelector('.overlay') || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+      if (e.key === ']') step(1); else if (e.key === '[') step(-1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+  const head = p.status === 'new' ? html`Needs a decision${n ? html`<span class="count">${n}</span>` : ''}`
+    : p.status === 'investigating' ? 'Checking this ping' : p.status === 'acknowledged' ? 'Ping acknowledged' : `Ping ${p.status}`;
+  return html`<section class="p decision" style=${`--prio:${prioColor(p.prio)}`}>
+    <div class="sh"><h2 class="h">${head}</h2>
+      <span class="aux">${tabs ? '[ ] to switch' : ''}${sel === p.pin && html` <button class="link" onClick=${() => setSel(null)}>Back</button>`}</span></div>
+    ${tabs && html`<div class="ptabs" role="tablist" aria-label="New pings">
+      <button class="step" aria-label="Previous ping" onClick=${() => step(-1)}>‹</button>
+      ${alertList.map((q) => html`<button key=${q.pin} role="tab" aria-selected=${q.pin === p.pin} class=${q.pin === p.pin ? 'on' : ''} onClick=${() => pick(q.pin)}
+        title=${`${q.pin} · ${CLS_PLAIN[q.cls] || q.cls}`}><i style=${`background:${prioColor(q.prio)}`}></i>${q.pin}<small>${fmtDur(bt - (m.firstSeen[q.pin] ?? bt))}</small></button>`)}
+      <button class="step" aria-label="Next ping" onClick=${() => step(1)}>›</button>
+    </div>`}
+    <div class="pid">
+      <span class="pchip">${p.pin}</span>
+      <div><div class="what">${CLS_PLAIN[p.cls] || p.cls}</div><div class="why">Priority ${p.prio} · ${PRIO_NAME[p.prio] || ''}</div></div>
+      ${p.status === 'new' && html`<div class="wait"><b>${fmtDur(bt - (m.firstSeen[p.pin] ?? bt))}</b><span>waiting</span></div>`}
     </div>
-    ${match && html`<div style="color:var(--moss);font-weight:600">Matches what the person is carrying</div>`}
+    ${match && html`<div class="okline">Matches what the person is carrying</div>`}
     ${kase && html`<div class="row" style="align-items:center"><span class="lbl">${kase.ping === p.pin ? `This is ${kase.name}'s ping` : kase.ping ? `Case is linked to ${kase.ping}` : 'Not linked to the case'}</span>
       <button class="link" onClick=${() => linkPing(kase.ping === p.pin ? '' : p.pin)}>${kase.ping === p.pin ? 'Unlink' : 'Link to case'}</button></div>`}
-    ${p.sos && html`<div style="color:#ff8f93;font-weight:700">SOS: ${p.sos.hurt ? 'hurt' : 'not hurt'}, ${p.sos.walk ? 'can walk' : "can't walk"}, ${p.sos.count || '?'} people</div>`}
-    <div class="facts">
-      <div class="fact"><b>±${fmtM(p.r95)}</b><span class="lbl">search circle</span></div>
-      <div class="fact"><b>${fmtAgo(bt - (p.t - (p.last_s || 0) * 1000))}</b><span class="lbl">last heard</span></div>
-      <div class="fact"><b>${p.off_trail_m != null ? `${p.off_trail_m} m` : '—'}</b><span class="lbl">off trail</span></div>
-      <div class="fact"><b>${camp === 0 ? 'inside' : fmtM(camp)}</b><span class="lbl">${camp === 0 ? 'the campground' : 'from campground'}</span></div>
-      ${fromStart != null && html`<div class="fact"><b>${fmtM(fromStart)}</b><span class="lbl">from ${start.label === 'Park entrance' ? 'the entrance' : 'the car'} (straight line)</span></div>`}
-      ${warm && html`<div class="fact warm"><b>${fmtC(th?.max_c) || 'warm'}</b><span>thermal: warm spot</span></div>`}
+    ${p.sos && html`<div class="badline">SOS: ${p.sos.hurt ? 'hurt' : 'not hurt'}, ${p.sos.walk ? 'can walk' : "can't walk"}, ${p.sos.count || '?'} people</div>`}
+    <div class="kv">
+      <div><b>±${fmtM(p.r95)}</b><span>search circle</span></div>
+      <div><b>${fmtAgo(bt - (p.t - (p.last_s || 0) * 1000))}</b><span>last heard</span></div>
+      <div><b>${p.off_trail_m != null ? `${p.off_trail_m} m` : '—'}</b><span>off trail</span></div>
+      <div><b>${camp === 0 ? 'inside' : fmtM(camp)}</b><span>${camp === 0 ? 'the campground' : 'from campground'}</span></div>
+      ${fromStart != null && html`<div><b>${fmtM(fromStart)}</b><span>from ${start.label === 'Park entrance' ? 'the entrance' : 'the car'}</span></div>`}
+      ${warm && html`<div class="warm"><b>${fmtC(th?.max_c) || 'warm'}</b><span>thermal: warm spot</span></div>`}
     </div>
-    <div style="flex:1"></div>
     ${p.status === 'new' || p.status === 'acknowledged' ? html`
       <div class="btns">
         <button class="btn primary big" disabled=${locked || b} onClick=${() => pinCmd(p.pin, 'investigate', 'Investigate')}>Investigate</button>
         <button class="btn big" disabled=${locked || b} onClick=${() => pinCmd(p.pin, 'clear', 'Clear')}>Clear</button>
       </div>
-      <button class="btn" disabled>Confirm person · unlocks while investigating</button>`
+      <button class="btn ghost" disabled>Confirm person · unlocks while investigating</button>`
     : p.status === 'investigating' ? html`<${CheckPanel} p=${p} c=${m.checks[p.pin]} bt=${bt} locked=${locked} b=${b} confirmRescue=${confirmRescue} notPerson=${notPerson} />`
-    : html`<div class="lbl" style="text-align:center;font-size:1.1rem">${p.status === 'confirmed' ? 'Person confirmed by the ranger' : 'Cleared by the ranger'}</div>`}
+    : html`<div class="lbl" style="text-align:center">${p.status === 'confirmed' ? 'Person confirmed by the ranger' : 'Cleared by the ranger'}</div>`}
     ${locked && html`<div class="lbl small">Commands need the Wi-Fi link to the pod.</div>`}
+    ${p.status === 'new' && html`<div class="rule">The drone never decides: every ping waits for a ranger.</div>`}
   </section>`;
 }
 
@@ -910,7 +1008,7 @@ function SosCard({ target, locked, busy, sendCtrl }) {
   </section>`;
 }
 
-function CameraCard({ s, bt, m, target }) { // Emergency: the live camera and heat pictures, for the ranger's own check
+function CameraCard({ s, bt, m, target, podSite }) { // Emergency: the live camera and heat pictures, for the ranger's own check
   const v = s.latest['ag/vision'], th = s.latest['ag/thermal'];
   const c = target && m.checks[target.pin];
   const seen = v && bt - v.t < 10000 ? v : null;
@@ -919,8 +1017,8 @@ function CameraCard({ s, bt, m, target }) { // Emergency: the live camera and he
   return html`<section class="p grow feedcard">
     <h2 class="h">Camera check${seen ? ` · ${seen.kind} ${Math.round(seen.conf * 100)}%` : ''}</h2>
     ${snap ? html`<div class="feed"><img src=${`/${snap}`} alt=${`Camera snapshot: ${v.kind}`} /><span class="feed-name">Snapshot</span></div>`
-           : html`<${LiveFeed} file="camera.jpg" name="Camera" />`}
-    <${LiveFeed} file="thermal.png" name="Heat" tag=${heat} warm=${!!(c?.warm || (th?.hot && heat))} />
+           : html`<${LiveFeed} file="camera.jpg" name="Camera" pod=${podSite} />`}
+    <${LiveFeed} file="thermal.png" name="Heat" tag=${heat} warm=${!!(c?.warm || (th?.hot && heat))} pod=${podSite} />
     ${seen && html`<div class="row"><span class="lbl">Camera</span><span>person seen · ${Math.round(seen.conf * 100)}%</span></div>`}
   </section>`;
 }
@@ -929,7 +1027,9 @@ function CameraCard({ s, bt, m, target }) { // Emergency: the live camera and he
 // Each feed fetches its picture once a second and swaps it in only once it has decoded, so it never
 // flickers. The server's Last-Modified and Date headers give the picture's age: an old picture is
 // dimmed and marked "frozen" (the camera stopped), and failed fetches mark it "lost".
-function LiveFeed({ file, name, tag, warm, every = FEED_EVERY_MS, children }) {
+// pod: the real pod's feed (live-demo site). Then nothing stale is passed off as live: no picture, a
+// failed fetch or a picture over a minute old shows NO SIGNAL instead of an old frame.
+function LiveFeed({ file, name, tag, warm, every = FEED_EVERY_MS, pod = false, children }) {
   const [f, setF] = useState({ url: null, age: null, err: false, wall: 0 });
   useEffect(() => {
     let alive = true, busy = false, url = null;
@@ -961,6 +1061,12 @@ function LiveFeed({ file, name, tag, warm, every = FEED_EVERY_MS, children }) {
   const lost = f.err && Date.now() - f.wall > FEED_OLD_S * 1000;
   const frozen = !lost && f.age != null && f.age > FEED_OLD_S;
   const since = lost ? Date.now() - f.wall + (f.age || 0) * 1000 : (f.age || 0) * 1000;
+  if (pod && (f.url ? lost || (frozen && f.age > 60) : f.err)) {
+    return html`<div class="feed nosignal" role="status">
+      <div class="nosig"><b>No signal</b><span>The ${name.toLowerCase()} feed from the pod isn't reaching this laptop${f.url ? ` · last picture ${fmtAgo(since)}` : ''}</span></div>
+      <span class="feed-name">${name}</span>
+    </div>`;
+  }
   return html`<div class=${`feed ${warm ? 'warm' : ''}`}>
     ${f.url ? html`<img src=${f.url} alt=${`Live ${name.toLowerCase()} picture`} class=${lost || frozen ? 'old' : ''} />`
             : html`<span class="feed-none">${f.err ? `No ${name.toLowerCase()} feed` : 'Connecting…'}</span>`}
@@ -974,28 +1080,32 @@ function LiveFeed({ file, name, tag, warm, every = FEED_EVERY_MS, children }) {
 // ---------- the Live tab: everything the pod is sending, live ----------
 // Camera, the heat picture with the thermal readings drawn over it, the building map with the pod
 // on it, and the raw numbers. Only looks: nothing here sends a command.
-function LiveView({ meta, s, st, m, bt, pose, podStale }) {
+// Pictures first, side by side and the same size; the numbers under them. The live-demo site
+// (pod = true) adds the building map and the pod's components; the simulation needs neither.
+function LiveView({ meta, s, st, m, bt, pose, podStale, podSite }) {
   const th = s.latest['ag/thermal'];
   const fresh = th && bt - th.t < THERMAL_FRESH_MS ? th : null;
-  return html`<div class="live">
+  const plan = !!meta.building && !meta.walk; // the main view already is the floor plan when there's a walk line
+  return html`<div class=${`live ${plan ? '' : 'flat'}`}>
     <section class="p livecell">
       <h2 class="h">Camera · Camera Module 3</h2>
-      <${LiveFeed} file="camera.jpg" name="Camera" every=${500} />
+      <${LiveFeed} file="camera.jpg" name="Camera" every=${500} pod=${podSite} />
     </section>
     <section class="p livecell">
       <h2 class="h">Heat · HT-203U thermal${fresh?.src ? ` · ${fresh.src === 'ht203u' ? 'live sensor' : fresh.src}` : ''}</h2>
-      <${LiveFeed} file="thermal.png" name="Heat" every=${250} tag=${heatText(th, bt)} warm=${!!fresh?.hot}>
+      <${LiveFeed} file="thermal.png" name="Heat" every=${250} tag=${heatText(th, bt)} warm=${!!fresh?.hot} pod=${podSite}>
         ${fresh && html`<${ThermalOverlay} th=${fresh} />`}
       </${LiveFeed}>
     </section>
-    <section class="p livecell">
-      <h2 class="h">${meta.building ? meta.building.name : meta.name}${meta.building?.approximate ? ' · approximate outline' : ''}${pose ? ` · pod by ${pose.src === 'waypoint' ? 'taped waypoint' : pose.src}` : ''}</h2>
+    ${plan && html`<section class="p livecell">
+      <h2 class="h">${meta.building.name}${meta.building.approximate ? ' · approximate outline' : ''}${pose ? ` · pod by ${pose.src === 'waypoint' ? 'taped waypoint' : pose.src}` : ''}</h2>
       <${BuildingMap} meta=${meta} s=${s} pose=${pose} podStale=${podStale} />
-    </section>
+    </section>`}
     <section class="p livecell livedata">
       <h2 class="h">Live readings</h2>
-      <${LiveData} meta=${meta} s=${s} st=${st} m=${m} bt=${bt} pose=${pose} th=${th} fresh=${fresh} />
+      <${LiveData} meta=${meta} s=${s} st=${st} m=${m} bt=${bt} pose=${pose} th=${th} fresh=${fresh} podSite=${podSite} />
     </section>
+    ${podSite && html`<div class="livehealth"><${BatteryCard} meta=${meta} s=${s} bt=${bt} podStale=${podStale} /></div>`}
   </div>`;
 }
 
@@ -1028,7 +1138,7 @@ function Sparkline({ hist, lo, hi, band }) { // max_c over the last 2 minutes; b
   </svg>`;
 }
 
-function LiveData({ meta, s, st, m, bt, pose, th, fresh }) {
+function LiveData({ meta, s, st, m, bt, pose, th, fresh, podSite }) {
   const rate = (t) => st.rates?.[t] ?? 0;
   const sys = s.latest['ag/sys'];
   const recent = Object.values(s.obs).filter((o) => bt - o.t < 30000);
@@ -1056,11 +1166,10 @@ function LiveData({ meta, s, st, m, bt, pose, th, fresh }) {
         ${Row('Position', pose ? `${pose.x.toFixed(1)} E, ${pose.y.toFixed(1)} N m` : '—')}
         ${Row('Height', pose?.z != null ? `${pose.z.toFixed(1)} m` : '—')}
         ${Row('Position from', pose ? `${pose.src}${pose.wp != null ? ` ${pose.wp}` : ''} · ${rate('ag/pose').toFixed(1)} /s` : '—')}
+        ${pose?.src === 'imu' && Row('Walked', `${(pose.dist_m ?? 0).toFixed(1)} m · ${pose.steps ?? 0} steps${pose.heading != null ? ` · heading ${Math.round(pose.heading)}°` : ''}`)}
+        ${podSite && html`
         ${Row('CPU', sys ? `${Math.round(sys.cpu_c)} °C${sys.throttled && sys.throttled !== '0x0' ? ' · throttling' : ''}` : '—', sys?.cpu_c >= 80 ? 'duetxt' : '')}
-        ${Row('LoRa radio', sys ? (sys.lora ? 'on' : 'down') : '—', sys && !sys.lora ? 'duetxt' : '')}
-        ${Row('GPS', sys ? (sys.gps_fix ? 'fix' : 'no fix (indoors: waypoints)') : '—')}
-        ${Row('Disk free', typeof sys?.disk_free_gb === 'number' ? `${sys.disk_free_gb.toFixed(1)} GB` : '—')}
-        ${Row('Battery', typeof sys?.batt_pct === 'number' ? `${sys.batt_pct}%` : 'not measured')}
+        ${Row('LoRa radio', sys ? (sys.lora ? 'on' : 'down') : '—', sys && !sys.lora ? 'duetxt' : '')}`}
       </div>
       <div>
         <div class="livehead">Bluetooth and pings</div>
@@ -1073,6 +1182,109 @@ function LiveData({ meta, s, st, m, bt, pose, th, fresh }) {
         ${Row('Link', st.link !== 'live' ? 'server unreachable' : !s.broker ? 'broker down' : 'live', st.link !== 'live' || !s.broker ? 'duetxt' : '')}
       </div>
     </div>`;
+}
+
+// ---------- health: the pod's battery alone (health.py's ag/sys batt_pct) ----------
+function BatteryCard({ s, bt, meta, podStale }) {
+  const sys = s.latest['ag/sys'];
+  const v = typeof sys?.batt_pct === 'number' && isFinite(sys.batt_pct) ? sys.batt_pct : null;
+  const age = sys && bt ? Math.max(0, bt - sys.t) : null;
+  const every = (meta.health?.period_s ?? 5) * 1000;
+  const stale = !!sys && (podStale || age > Math.max(3 * every, 15000));
+  const state = v == null ? 'off' : v < 20 ? 'crit' : v < 40 ? 'warn' : 'ok';
+  return html`<section class="p battery">
+    <div class="sh"><h2 class="h">Pod battery</h2><span class="aux">${!sys ? 'no report yet' : `reported ${fmtAgo(age)}${stale ? ' · old' : ''}`}</span></div>
+    <div class="battrow"><b class=${`mono b-${state}`}>${v != null ? `${v}%` : '—'}</b>
+      <span class="lbl">${v == null ? (sys ? 'not measured (on USB power)' : 'waiting for health.py on the pod') : state === 'crit' ? 'low' : state === 'warn' ? 'getting low' : 'good'}</span></div>
+    <div class="bar"><i class=${`b-${state}`} style=${`width:${v ?? 0}%`}></i></div>
+  </section>`;
+}
+
+
+// ---------- the indoor walk (State St, [pose] source = "imu") ----------
+// The main map for the live demo: inside the building, north up, in local metres. Someone carries
+// the pod forward along one straight line ([imu] line_from -> line_to); position.py counts the
+// IMU's steps along it. The walked part fills in, a mark every metre, base at the start.
+function IndoorStage({ meta, s, st, m, bt, pose, podStale, podSite, sel, setSel }) {
+  const th = s.latest['ag/thermal'];
+  const fresh = th && bt - th.t < THERMAL_FRESH_MS ? th : null;
+  const rate = (t) => st.rates?.[t] ?? 0;
+  return html`<div class="istage">
+    <div class="feeds">
+      <section class="pane">
+        <div class="sh"><h2 class="h">Camera</h2><span class="aux">Camera Module 3</span></div>
+        <${LiveFeed} file="camera.jpg" name="Camera" every=${500} pod=${podSite} />
+      </section>
+      <section class="pane">
+        <div class="sh"><h2 class="h">Heat</h2><span class="aux">HT-203U · <b>${rate('ag/thermal').toFixed(1)}</b> fps</span></div>
+        <${LiveFeed} file="thermal.png" name="Heat" every=${250} tag=${heatText(th, bt)} warm=${!!fresh?.hot} pod=${podSite}>
+          ${fresh && html`<${ThermalOverlay} th=${fresh} />`}
+        </${LiveFeed}>
+      </section>
+    </div>
+    <${HallWalk} meta=${meta} s=${s} pose=${pose} podStale=${podStale} sel=${sel} setSel=${setSel} />
+    <${Readings} meta=${meta} s=${s} st=${st} m=${m} bt=${bt} fresh=${fresh} />
+  </div>`;
+}
+
+// The indoor walk ([pose] source = "imu"): someone carries the pod along one straight line
+// ([imu] line_from -> line_to); position.py counts the IMU's steps along it. Drawn as a strip,
+// base at the left: the walked part fills in, a mark every metre, pings beside the line.
+function HallWalk({ meta, s, pose, podStale, sel, setSel }) {
+  const w = meta.walk;
+  const [ax, ay] = w.from, [bx, by] = w.to;
+  const len = Math.hypot(bx - ax, by - ay) || 1;
+  const ux = (bx - ax) / len, uy = (by - ay) / len, nx = -uy, ny = ux; // along, and across, the line
+  const live = pose && !podStale;
+  const d = pose ? Math.max(0, Math.min(len, pose.dist_m ?? ((pose.x - ax) * ux + (pose.y - ay) * uy))) : 0;
+  const pct = (v) => `${(100 * v) / len}%`;
+  const every = len <= 20 ? 1 : len <= 60 ? 5 : 10;
+  const ticks = [];
+  for (let k = every; k < len - 1e-6; k += every) ticks.push(k);
+  const pins = Object.values(s.pins).filter((p) => p.status !== 'cleared');
+  const hd = pose?.heading;
+  return html`<section class="walk">
+    <div>
+      <div class="sh"><h2 class="h">Hall walk</h2><span class="aux">${meta.building?.name || meta.name} · a mark every ${every} m</span></div>
+      <div class="hall" role="img" aria-label=${`Indoor walk: ${d.toFixed(1)} of ${len.toFixed(0)} metres`}>
+        <div class="h-todo"></div>
+        ${d > 0 && html`<div class="h-done" style=${`width:${pct(d)}`}></div>`}
+        ${ticks.map((k) => html`<div key=${k} class=${`tick ${d > 0 && k <= d + 1e-6 ? 'on' : ''}`} style=${`left:${pct(k)}`}><b>${k}</b></div>`)}
+        ${pins.map((p) => {
+          const along = Math.max(0, Math.min(len, (p.x - ax) * ux + (p.y - ay) * uy)), side = (p.x - ax) * nx + (p.y - ay) * ny;
+          return html`<button key=${p.pin} class=${`h-ping ${side < 0 ? 'below' : ''} ${sel === p.pin ? 'sel' : ''}`} style=${`left:${pct(along)};--c:${prioColor(p.prio)}`}
+            onClick=${() => setSel(p.pin)} title=${`${p.pin} · ${along.toFixed(1)} m along`}>${p.pin}</button>`;
+        })}
+        <div class="h-base" title="Base: the start">B</div><div class="h-end" title=${`End · ${len.toFixed(0)} m`}></div>
+        ${pose && html`<div class=${`h-pod ${live ? '' : 'stale'}`} style=${`left:${pct(d)}`} title="The pod"></div>`}
+      </div>
+    </div>
+    <div class="walkside">
+      <div class="bigline"><b>${pose ? d.toFixed(1) : '—'}</b><span>of ${len.toFixed(0)} m walked</span></div>
+      <div class="bar"><i style=${`width:${Math.round((d / len) * 100)}%`}></i></div>
+      <div class="lbl small">${!pose || podStale ? 'No signal from the pod'
+        : pose.src === 'imu' ? `IMU · ${pose.steps ?? 0} steps${hd != null ? ` · heading ${Math.round(hd)}°` : ''}`
+        : `Position from ${pose.src}`}</div>
+    </div>
+  </section>`;
+}
+
+// The numbers under the pictures on the live site.
+function Readings({ meta, s, st, m, bt, fresh }) {
+  const rate = (t) => st.rates?.[t] ?? 0;
+  const recent = Object.values(s.obs).filter((o) => bt - o.t < 30000);
+  const beacons = recent.filter((o) => o.kind === 'ble' && o.cls !== 'apple_other' && o.cls !== 'other');
+  const strongest = [...beacons].sort((a, b) => b.rssi - a.rssi)[0];
+  const al = s.latest['ag/alert'];
+  const band = meta.thermal ? [meta.thermal.hot_min_c, meta.thermal.hot_max_c] : null;
+  return html`<section class="readings">
+    <div><span>Warmest spot</span><b class=${fresh?.hot ? 'warmtxt' : ''}>${fresh && typeof fresh.max_c === 'number' ? html`${fresh.max_c.toFixed(1)}<small>°C</small>` : '—'}</b>
+      <${Sparkline} hist=${m.thHist} lo=${band?.[0] - 4} hi=${band?.[0] + 4} band=${band} /></div>
+    <div><span>Bluetooth scans</span><b>${rate('ag/obs/ble').toFixed(1)}<small>/s</small></b><span class="sub">passive · addresses hashed</span></div>
+    <div><span>Lost devices heard</span><b>${beacons.length}</b><span class="sub">of ${recent.length} heard · 30 s</span></div>
+    <div><span>Strongest</span><b>${strongest ? html`${strongest.rssi}<small>dBm</small>` : '—'}</b><span class="sub">${strongest ? CLS_SHORT[strongest.cls] || strongest.cls : 'nothing heard'}</span></div>
+    <div><span>Last LoRa alert</span><b>${m.lastAlertWall > 0 ? fmtAgo(Date.now() - m.lastAlertWall) : '—'}</b><span class="sub">${al?.rssi != null ? `${al.rssi} dBm at the Pluto` : 'none heard yet'}</span></div>
+  </section>`;
 }
 
 // The building, north up, in local metres: outline, the taped park, waypoints, the pod and the pings.
@@ -1136,7 +1348,7 @@ function RescueCard({ p, rescue, kase, locked, busy, pinCmd, confirmRescue, notP
   const b = busy[p.pin];
   const r = rescue;
   const sent = !!(kase?.team_t || m.teamPins?.[p.pin]);
-  return html`<section class="p" style="border-color:#f2f2f2">
+  return html`<section class="p" style="box-shadow:inset 3px 0 0 var(--text)">
     ${routeP && html`<button class="btn primary big" onClick=${backToSweep}>← Back to the sweep</button>
       <div class="lbl small" style="text-align:center">The drone is still sweeping. This view changes nothing (Esc also leaves it).</div>`}
     <h2 class="h">Rescue route · ${p.pin}${kase?.ping === p.pin ? ` · ${kase.name}` : ''}</h2>
@@ -1160,7 +1372,7 @@ function RescueCard({ p, rescue, kase, locked, busy, pinCmd, confirmRescue, notP
 
 function LoraPings({ m }) {
   const rows = Object.values(m.alerts).sort((a, b) => (a.prio - b.prio) || (b.wall - a.wall));
-  return html`<section class="p" style="border-color:var(--amber)">
+  return html`<section class="p" style="box-shadow:inset 3px 0 0 var(--amber)">
     <h2 class="h">Pings from LoRa</h2>
     <div class="pinglist">${rows.map((a) => html`<div class="pingrow" key=${a.track}>
       <span class="chip" style=${`background:${prioColor(a.prio)}`}>T${a.track}</span>
@@ -1176,7 +1388,7 @@ function LoraPings({ m }) {
 const MAP_LAYERS = { probability: false, trail: false, tracks: false, heard: false, roads: true, labels: false };
 const SWEEP = new Set(['patrol', 'night']);
 
-function MapPane({ meta, s, sel, follow, setFollow, night, cv, podStale, m, setSel, mode, target, rescue, checking, bt, live }) {
+function MapPane({ meta, s, sel, follow, setFollow, night, cv, podStale, m, setSel, mode, target, rescue, checking, bt, live, sim }) {
   const host = useRef(null);
   const lm = useRef(null);
   const ex = useRef({ car: null, pod: null, hits: -1, fitKey: null });
@@ -1213,6 +1425,13 @@ function MapPane({ meta, s, sel, follow, setFollow, night, cv, podStale, m, setS
     map.getSource('tv-rescue')?.setData(fc(rescue ? [lineF(lm.current, rescue.pts)] : []));
     const fitKey = `${mode}|${cv.case ? cv.route.length : 0}|${mode === 'investigate' ? target?.pin : ''}`;
     if (fitKey !== ex.current.fitKey) { ex.current.fitKey = fitKey; frame(lm.current, meta, mode, cv, target, s, rescue); }
+    // the sim's lawn-mower lanes, faint, while it sweeps (not on the way home), and where base is
+    const plan = sim?.plan?.length > 1 && SWEEP.has(mode) && sim.flight !== 'returning' ? sim.plan : null;
+    if (plan !== ex.current.plan) { ex.current.plan = plan; map.getSource('tv-plan')?.setData(fc(plan ? [lineF(lm.current, plan)] : [])); }
+    if (sim?.base && !ex.current.baseMark) {
+      const el = Object.assign(document.createElement('div'), { className: 'basemark', textContent: 'H', title: `Base · ${sim.base.name}` });
+      ex.current.baseMark = new maplibregl.Marker({ element: el }).setLngLat(lm.current.toLL(sim.base.x, sim.base.y)).addTo(map);
+    }
     const hits = m.binsHit ? m.binsHit.reduce((a, v) => a + v, 0) : 0;
     if (hits !== ex.current.hits) { ex.current.hits = hits; map.getSource('tv-flown')?.setData(fc(flownParts(lm.current, m))); }
     const pose = s.poses.pod || Object.values(s.poses)[0];
@@ -1244,18 +1463,20 @@ function MapPane({ meta, s, sel, follow, setFollow, night, cv, podStale, m, setS
       </span>`}
       ${podStale && m.lastPoseWall > 0 && html`<span class="stale">Drone last seen ${fmtAgo(Date.now() - m.lastPoseWall)}</span>`}
     </div>
-    <${MapKey} mode=${mode} kase=${cv.case} rescue=${!!rescue} />
+    <${MapKey} mode=${mode} kase=${cv.case} rescue=${!!rescue} sim=${sim} />
     ${feedWhich.length > 0 && html`<${MapFeeds} s=${s} bt=${bt} which=${feedWhich} />`}
   </div>`;
 }
 
-function MapKey({ mode, kase, rescue }) {
+function MapKey({ mode, kase, rescue, sim }) {
   const rows = [['pod', 'Drone and what it can hear']];
+  if (sim?.base) rows.push(['base', 'Base: where it waits']);
   if (SWEEP.has(mode)) rows.push(['cov', 'Ground already searched'], ['area', 'Search area']);
+  if (SWEEP.has(mode) && sim?.plan?.length > 1 && sim.flight !== 'returning') rows.push(['plan', 'Planned sweep (lanes)']);
   if (mode === 'search' && kase) rows.push(['route', 'Trail stretch to search'], ['flown', 'Searched so far'], ['car', 'Where the car is']);
   if (rescue) rows.push(['rescue', 'Route for the ground team']);
   rows.push(['ping', 'Ping: colour shows how urgent']);
-  return html`<div class="mapkey" aria-label="Map key">${rows.map(([k, t]) => html`<div key=${k}><i class=${`k-${k}`}>${k === 'car' ? 'P' : k === 'ping' ? 'P1' : ''}</i>${t}</div>`)}</div>`;
+  return html`<div class="mapkey" aria-label="Map key">${rows.map(([k, t]) => html`<div key=${k}><i class=${`k-${k}`}>${k === 'car' ? 'P' : k === 'ping' ? 'P1' : k === 'base' ? 'H' : ''}</i>${t}</div>`)}</div>`;
 }
 
 const fc = (f) => ({ type: 'FeatureCollection', features: f || [] });
@@ -1272,7 +1493,8 @@ function setupMap(live) {
   for (const id of ['drone', 'hill']) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none');
   if (map.getLayer('foot')) map.setPaintProperty('foot', 'fill-opacity', 0.1);
   const before = map.getLayer('tracks') ? 'tracks' : undefined;
-  for (const id of ['tv-area', 'tv-route', 'tv-flown', 'tv-rescue']) map.addSource(id, { type: 'geojson', data: fc() });
+  for (const id of ['tv-plan', 'tv-area', 'tv-route', 'tv-flown', 'tv-rescue']) map.addSource(id, { type: 'geojson', data: fc() });
+  map.addLayer({ id: 'tv-plan', type: 'line', source: 'tv-plan', layout: { 'line-join': 'round' }, paint: { 'line-color': '#9fd8ff', 'line-width': 1.5, 'line-opacity': 0.55, 'line-dasharray': [2, 3] } }, before);
   map.addLayer({ id: 'tv-area', type: 'line', source: 'tv-area', paint: { 'line-color': '#e6eadf', 'line-width': 2, 'line-opacity': 0.7, 'line-dasharray': [3, 2] } }, before);
   map.addLayer({ id: 'tv-route-glow', type: 'line', source: 'tv-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#e0a43a', 'line-width': 16, 'line-opacity': 0.35, 'line-blur': 4 } }, before);
   map.addLayer({ id: 'tv-route', type: 'line', source: 'tv-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#f2c26b', 'line-width': 4 } }, before);

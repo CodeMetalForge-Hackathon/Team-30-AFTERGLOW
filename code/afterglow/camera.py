@@ -84,9 +84,10 @@ class Camera:
         return data
 
 
-def fake_frames(cfg: dict, seed: int = 0):
+def fake_frames(cfg: dict, seed: int = 0, person=None):
     """Made-up pictures: grass, a sandy trail, and a person in an orange jacket walking a slow loop
-    while the view drifts, as if the pod were moving."""
+    while the view drifts, as if the pod were moving. person: None to always show them, or a
+    function saying whether a person is in view now (local_stack.py ties it to the fake pod)."""
     c = cfg["camera"]
     w, h = int(c["width"]), int(c["height"])
     rng = np.random.default_rng(seed)
@@ -103,8 +104,13 @@ def fake_frames(cfg: dict, seed: int = 0):
     i = 0
     while True:
         img = Image.fromarray(np.roll(base, -2 * i, axis=1))  # the view drifts 2 px a picture
+        if person is not None and not person():
+            yield img, "fake"
+            i += 1
+            continue
         ph = 2 * math.pi * i / 120  # a minute a loop at 2 pictures a second
-        px, py = w / 2 + 0.3 * w * math.sin(ph), h / 2 + 0.2 * h * math.sin(2 * ph)
+        k = 1.0 if person is None else 0.25  # tied to the fake pod: they stay near the middle while it circles
+        px, py = w / 2 + k * 0.3 * w * math.sin(ph), h / 2 + k * 0.2 * h * math.sin(2 * ph)
         d = ImageDraw.Draw(img)
         d.ellipse([px - 14 * s, py + 22 * s, px + 18 * s, py + 30 * s], fill=(30, 45, 25))  # shadow
         d.rectangle([px - 8 * s, py - 10 * s, px + 8 * s, py + 12 * s], fill=(235, 110, 20))  # jacket
