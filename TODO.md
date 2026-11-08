@@ -203,6 +203,7 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 ## Phase 4: Demo hardening and freeze (hours 16–26)
 
 - [ ] Load the best run's replay and test it, as the backup if the hardware fails.
+- [ ] **Fix the simulator's wording before anyone shows it (`simulator/`, PR #4).** It breaks the one rule on screen. When it finds heat or motion it shows "PERSON CONFIRMED" and "MISSING PERSON FOUND", and it says it "sends the GPS fix to incident command". Make it propose and leave the decision to the ranger: e.g. "LIKELY PERSON · RANGER CONFIRM" and "proposes the pin to the ranger", in `simulator/index.html` and `simulator/README.md`. The no-heat case ("ranger review") is already right. Also decide whether it stays "TrailSAR" or becomes AFTERGLOW.
 - [ ] Demo setup:
   - a 10-minute baseline at the demo spot, with any team trackers on the pod, so they show grey instead of relying on `with_drone`;
   - a team iPhone switched off at least 20 minutes early and hidden;
