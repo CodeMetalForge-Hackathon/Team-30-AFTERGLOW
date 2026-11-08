@@ -210,7 +210,7 @@ def c_thermal(a):
     try:
         p = subprocess.run(["v4l2-ctl", "-d", dev, "--stream-mmap", "--stream-skip=3", "--stream-count=1", "--stream-to=-"],
                            capture_output=True, timeout=15)
-        c, sensor_c = thermal.parse_raw(p.stdout, float(th["raw_per_c"]), float(th["raw_offset_c"]))
+        c, sensor_c = thermal.parse_raw(p.stdout, *thermal.calibration(th))
     except (subprocess.TimeoutExpired, ValueError) as e:
         return "FAIL", f"{dev}: {e} (another program using it? thermal.py running?)"
     return "PASS", f"{dev}: scene {c.min():.1f} to {c.max():.1f} C, median {float(np.median(c)):.1f} C; sensor {sensor_c:.1f} C"

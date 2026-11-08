@@ -187,18 +187,26 @@ TEMP_ROWS, HEADER_ROWS = 192, 4  # rows 0-191: 16-bit raw heat; 192-195: header;
 FRAME_BYTES = RAW_W * RAW_H * 2
 
 
-def parse_raw(buf: bytes, per_c: float, offset_c: float):
+def parse_raw(buf: bytes, per_c: float, offset_c: float, sensor_k: float = 0.0, sensor_ref_c: float = 0.0):
     """One 256x392 YUYV buffer from the HT-203U -> (degrees C, 192 x 256; the sensor's own temperature in C).
 
     The top 192 rows aren't a picture: each 2-byte pixel is a little-endian raw heat value, linear in
-    temperature. degrees C = raw / per_c - offset_c ([thermal] raw_per_c, raw_offset_c: 16 counts a
-    degree; the offset from a wall at room temperature, so it can be a degree or two out).
-    Header row 0, word 0 is the sensor's temperature in hundredths of a degree."""
+    temperature. Header row 0, word 0 is the sensor's own temperature in hundredths of a degree.
+    The raw values sag as the camera warms up (a wall: 5101 at sensor 22.5 C, 4998 at 24.7 C), so:
+        degrees C = (raw + sensor_k * (sensor - sensor_ref_c)) / per_c - offset_c
+    ([thermal] raw_per_c, raw_offset_c, raw_sensor_k, raw_sensor_ref_c; from a wall at about 22 C and
+    a palm, Sat 7 Nov, so a degree or two out)."""
     if len(buf) != FRAME_BYTES:
         raise ValueError(f"frame is {len(buf)} bytes, not {FRAME_BYTES} (256x392 YUYV)")
     words = np.frombuffer(buf, "<u2").reshape(RAW_H, RAW_W)
-    celsius = words[:TEMP_ROWS].astype(np.float32) / per_c - offset_c
-    return celsius, words[TEMP_ROWS, 0] / 100.0
+    sensor = words[TEMP_ROWS, 0] / 100.0
+    raw = words[:TEMP_ROWS].astype(np.float32) + sensor_k * (sensor - sensor_ref_c)
+    return raw / per_c - offset_c, sensor
+
+
+def calibration(th: dict) -> tuple:
+    """[thermal] -> parse_raw's calibration arguments."""
+    return (float(th["raw_per_c"]), float(th["raw_offset_c"]), float(th["raw_sensor_k"]), float(th["raw_sensor_ref_c"]))
 
 
 def find_device(th: dict) -> str:
@@ -220,7 +228,7 @@ def camera_frames(cfg: dict):
     import threading
 
     th = cfg["thermal"]
-    per_c, offset_c = float(th["raw_per_c"]), float(th["raw_offset_c"])
+    cal = calibration(th)
     latest = {"buf": None, "n": 0}
     cond = threading.Condition()
 
@@ -262,7 +270,7 @@ def camera_frames(cfg: dict):
                 continue
             buf, seen = latest["buf"], latest["n"]
         try:
-            celsius, sensor_c = parse_raw(buf, per_c, offset_c)
+            celsius, sensor_c = parse_raw(buf, *cal)
         except ValueError as e:
             log.error("%s: is the camera in another mode? Check v4l2-ctl --list-formats-ext", e)
             continue

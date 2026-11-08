@@ -182,8 +182,8 @@ def test_parse_raw_matches_the_wall_and_palm_check():
     th = config.load()["thermal"]
     raw = np.full((192, 256), 5101, np.uint16)  # the wall
     raw[60:140, 80:180] = 5303                   # the palm
-    c, sensor = thermal.parse_raw(ht203u_buffer(raw), float(th["raw_per_c"]), float(th["raw_offset_c"]))
-    assert c.shape == (192, 256) and sensor == 22.5
+    c, sensor = thermal.parse_raw(ht203u_buffer(raw), *thermal.calibration(th))
+    assert c.shape == (192, 256) and sensor == 22.5  # the reference sensor temperature: no drift term
     assert abs(float(np.median(c[:40])) - 22.0) < 0.2       # wall at room temperature
     assert 33.5 < float(c[100, 120]) < 35.5                  # palm: skin temperature
     with pytest.raises(ValueError):
@@ -195,7 +195,7 @@ def test_a_palm_in_view_is_hot():
     cfg = config.load()
     raw = np.full((192, 256), 5101, np.uint16)
     raw[80:110, 100:130] = 5303
-    c, _ = thermal.parse_raw(ht203u_buffer(raw), float(cfg["thermal"]["raw_per_c"]), float(cfg["thermal"]["raw_offset_c"]))
+    c, _ = thermal.parse_raw(ht203u_buffer(raw), *thermal.calibration(cfg["thermal"]))
     bus = []
 
     class B:
@@ -207,3 +207,12 @@ def test_a_palm_in_view_is_hot():
         thermal.Thermal(cfg, B(), d).handle_frame(c, True, "ht203u")
     topic, msg = bus[0]
     assert validate(topic, msg) == [] and msg["hot"] is True and msg["src"] == "ht203u"
+
+
+def test_warm_camera_drift_is_corrected():
+    """The same wall: raw 5101 at sensor 22.5 C, 4998 at 24.66 C. Both must read about 22 C."""
+    from afterglow import config, thermal
+    cal = thermal.calibration(config.load()["thermal"])
+    cold, _ = thermal.parse_raw(ht203u_buffer(np.full((192, 256), 5101, np.uint16), 2250), *cal)
+    warm, _ = thermal.parse_raw(ht203u_buffer(np.full((192, 256), 4998, np.uint16), 2466), *cal)
+    assert abs(float(cold.mean()) - 22.0) < 0.3 and abs(float(warm.mean()) - 22.0) < 0.3

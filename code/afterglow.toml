@@ -52,10 +52,14 @@ hot_max_c = 45.0           # warmer is an engine or a sun-baked rock, not a pers
 hot_rise_c = 5.0           # degrees above the frame's median
 # hot, when it gives only a picture (no temperatures): how far the spot stands out, in spreads of the frame
 hot_z = 6.0
-# HT-203U raw heat -> degrees C = raw / raw_per_c - raw_offset_c (two-point check Sat 7 Nov:
+# HT-203U raw heat -> degrees C = (raw + drift) / raw_per_c - raw_offset_c (check Sat 7 Nov:
 # a wall read 5101, a palm 5303). The offset is set so the wall reads 22 C; redo it against a known temperature.
 raw_per_c = 16.0
 raw_offset_c = 296.8
+# The raw values sag as the camera warms (a wall: 5101 at sensor 22.5 C, 4998 at 24.7 C): add
+# raw_sensor_k counts per degree of sensor temperature above raw_sensor_ref_c (header word 0).
+raw_sensor_k = 47.7
+raw_sensor_ref_c = 22.5
 
 [camera]
 # camera.py: the Camera Module 3 -> live/camera.jpg, a live view for the dashboard's camera panel.
