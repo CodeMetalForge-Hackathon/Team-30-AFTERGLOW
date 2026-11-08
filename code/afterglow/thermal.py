@@ -229,6 +229,7 @@ def camera_frames(cfg: dict):
 
     th = cfg["thermal"]
     cal = calibration(th)
+    anchor = None if th["absolute"] else float(th["ambient_c"])
     latest = {"buf": None, "n": 0}
     cond = threading.Condition()
 
@@ -274,6 +275,10 @@ def camera_frames(cfg: dict):
         except ValueError as e:
             log.error("%s: is the camera in another mode? Check v4l2-ctl --list-formats-ext", e)
             continue
+        if anchor is not None:
+            # The raw offset drifts by many degrees as the camera warms; shift the frame so its
+            # background reads ambient_c. A person still stands out by the same number of degrees.
+            celsius = celsius + (anchor - float(np.median(celsius)))
         yield celsius, True, "ht203u"
 
 

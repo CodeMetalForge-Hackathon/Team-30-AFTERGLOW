@@ -48,6 +48,11 @@ raw_offset_c = 296.8
 # raw_sensor_k counts per degree of sensor temperature above raw_sensor_ref_c (header word 0).
 raw_sensor_k = 47.7
 raw_sensor_ref_c = 22.5
+# Even so the HT-203U's absolute reading drifts (a wall read 16 C after warm-up). false: shift each frame
+# so its median (the background) reads ambient_c; a person still stands out by the same degrees, so
+# the hot band above keeps working and max_c is approximate. true: trust the calibration above.
+absolute = false
+ambient_c = 22.0           # indoors; set to the air temperature outdoors
 
 [camera]
 # Same as afterglow.toml (camera.py --fake works with either profile).
