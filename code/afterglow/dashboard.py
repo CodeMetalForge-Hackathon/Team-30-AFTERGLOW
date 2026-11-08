@@ -34,7 +34,7 @@ HTTP API (docs/CONTRACTS.md, "Dashboard HTTP"):
                        {"flight": "out" | "home"} (Send out / Return to base); GET adds "flight", "base", "plan"
     GET  /live/..., /snaps/...   image files from [http] live_dir and snaps_dir
 
-Pages: / (the ranger's dashboard), /tv.html (the operator TV), /livemap.html (the map alone).
+One dashboard: / is the operator TV (web/tv.html, also at /tv.html). nearby.html is its Nearby alerts pane.
 The case (case.py) is laptop-only personal data: it's saved under runs/ and streamed to the
 browsers as an SSE "case" event, never published on the bus.
 """
@@ -79,7 +79,7 @@ LOCAL_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
 
 
 class State:
-    """Everything the browser needs, kept by topic. app.js's reducer mirrors apply()."""
+    """Everything the browser needs, kept by topic. store.js's reducer mirrors apply()."""
 
     def __init__(self, trail_step_m: float):
         self.lock = threading.Lock()
@@ -413,7 +413,7 @@ def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict, cases: Ca
                         return self.send_pod(path)
                     return self.send_file(safe_file(dirs[prefix], path[len(prefix) + 2:]), cache=False)
             if path == "/":
-                path = "/index.html"
+                path = "/tv.html"  # the one dashboard
             return self.send_file(safe_file(WEB, path), cache=path.startswith("/vendor/"))
 
         def do_POST(self):
@@ -543,7 +543,7 @@ def main():
     server = ThreadingHTTPServer((a.host, a.port or cfg["http"]["port"]),
                                  make_handler(state, cmds, meta, dirs, cases, pod=pod))
     server.daemon_threads = True
-    log.info("dashboard (%s) on http://%s:%d  (operator TV: /tv.html)", meta["name"],
+    log.info("dashboard (%s): open http://%s:%d", meta["name"],
              "localhost" if a.host == "0.0.0.0" else a.host, server.server_address[1])
     log.info("live pictures from %s", f"the pod's dashboard at {url}" if pod else dirs["live"])
     try:

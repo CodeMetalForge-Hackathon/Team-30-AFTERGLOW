@@ -197,13 +197,13 @@ def post(url, body: bytes, ctype="application/json"):
 def test_http_page_and_map(server):
     base, _, _ = server
     code, ctype, body = get(base + "/")
-    assert code == 200 and b"app.js" in body and ctype.startswith("text/html")
+    assert code == 200 and b"tv.js" in body and ctype.startswith("text/html")  # / is the operator TV
     _, _, body = get(base + "/api/map")
     meta = json.loads(body)
     assert meta["profile"] == "afterglow" and meta["map"]["zones"] and meta["waypoints"]["0"] == [0.0, 0.0]
     assert "tak" not in meta  # no TAK server here: the TV must not post rescue routes (tv.js checks meta.tak)
     assert meta["rssi"] == {"p0": -48.0, "n": 2.4}  # nearby.html's RSSI -> metres
-    assert get(base + "/vendor/leaflet-1.9.4/leaflet.js")[0] == 200
+    assert get(base + "/vendor/maplibre-gl-4.7.1/maplibre-gl.js")[0] == 200
     assert get(base + "/nearby.html")[0] == 200
 
 

@@ -4,15 +4,7 @@ The live bus drawn on a 3D terrain map, with labels on the map and a built-in ke
 
 ## Use it
 
-**As a page** (quickest). With the dashboard running, open `http://localhost:8080/livemap.html`, or embed it:
-
-```html
-<iframe src="/livemap.html" style="width:100%;height:600px;border:0"></iframe>
-```
-
-URL options: `?key=0` hides the key, `?key=open` or `?key=closed` forces it, `?tools=0`, `?status=0`, `?labels=0`, `?follow=1` (camera follows the pod).
-
-**As a component** in the dashboard. It has the same shape as `map.js`'s `MapView`, so it can replace or sit beside it:
+It's the map inside the one dashboard (the operator TV, `tv.js`); there's no page of its own. As a component:
 
 ```html
 <link rel="stylesheet" href="vendor/maplibre-gl-4.7.1/maplibre-gl.css">
@@ -26,11 +18,11 @@ lm.update(store.state, { sel, layers, follow });                        // whene
 lm.flyTo(x, y);  lm.fit();  lm.setLayer('coverage', false);  lm.destroy();
 ```
 
-- `layers` keys: `coverage`, `probability`, `trail`, `tracks`, `roads` (the same as MapView), plus `heard` and `labels`.
+- `layers` keys: `coverage`, `probability`, `trail`, `tracks`, `roads`, `heard` and `labels`.
 - Constructor options: `onPick(pin)` (a pin was clicked), `key`, `tools`, `status`, `labels` (default `true`; `key` also takes `'open'` or `'closed'`).
-- `mountLiveMap(el, opts)` does the fetch, the `store.js` connection and the updates in one call. `livemap.html` uses it.
+- `mountLiveMap(el, opts)` does the fetch, the `store.js` connection and the updates in one call.
 
-To try it without the pod or Mosquitto: `python tools/local_stack.py --config park.toml --speed 10`, then open `/livemap.html`.
+To try it without the pod or Mosquitto: `python tools/local_stack.py --config park.toml --speed 10`, then open `http://localhost:8081`.
 
 ## What each thing on the map means
 

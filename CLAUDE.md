@@ -49,8 +49,8 @@ code/
     trails.py           trail pathing: rank trails from a start point ([search] popularity), the route along one
     case.py             the open missing-person case (laptop only, runs/; never on the bus or LoRa)
     dashboard.py        web server on [http] port: SSE state stream, /api/ctrl, /api/mode, /api/case, live/ and snaps/
-    web/                dashboard front end: app.js (Preact+htm panels), map.js (Leaflet, metres), store.js (SSE reducer);
-                        tv.html/tv.js/tv.css (operator TV around livemap.js, docs/TV.md); livemap.js (3D map, docs/LIVEMAP.md);
+    web/                the one dashboard, served at /: tv.html/tv.js/tv.css (operator TV, Preact+htm, docs/TV.md),
+                        livemap.js (its 3D map, docs/LIVEMAP.md), store.js (SSE reducer);
                         nearby.html (close-range view of alert beacons only, north up: rings = heard, RSSI distance only; dots = located by tracker.py; ?demo=1 for fake data)
   afterglow.toml        DEMO profile (taped indoor park at 60 State Street, Boston); must be identical on the pod and the laptop
   park.toml             PARK profile (realistic view, real Acadia trails), laptop only; same keys as afterglow.toml
@@ -89,10 +89,9 @@ mosquitto_sub -v -t 'ag/#'                                               # watch
 .venv/bin/python -m afterglow.tracker & .venv/bin/python -m afterglow.locate & .venv/bin/python -m afterglow.geofence [--fresh] & .venv/bin/python -m afterglow.planner   # real modules, with fake_bus --only pose,ble
 .venv/bin/python -m afterglow.thermal --fake [--dry-run --frames 8]      # fake thermal: live/thermal.png + ag/thermal
 .venv/bin/python -m afterglow.camera --fake [--frames 8]                 # fake camera: live/camera.jpg (on the Pi, no --fake)
-.venv/bin/python -m afterglow.dashboard [--config park.toml]             # dashboard on http://localhost:8080, park on :8081 (operator TV: /tv.html)
-.venv/bin/python tools/local_stack.py --config park.toml --feeds         # whole laptop stack, no broker; open http://localhost:8081/tv.html, then "Send out"
+.venv/bin/python -m afterglow.dashboard [--config park.toml]             # the one dashboard (operator TV): http://localhost:8080, park on :8081
+.venv/bin/python tools/local_stack.py --config park.toml --feeds         # whole laptop stack + fake camera/heat, no broker; open http://localhost:8081, then "Send out"
                                                                          # TV location tabs ([http] sites): Acadia :8081 (sim) <-> 60 State St :8080 (live demo, pod components panel)
-.venv/bin/python tools/local_stack.py --config park.toml --feeds          # ... plus fake camera and heat pictures for the TV (Live tab: /tv.html, Live)
 .venv/bin/python -m afterglow.dashboard --broker <pi-ip>                 # laptop dashboard against the pod's broker; camera/heat pictures come from the Pi's afterglow@dashboard (--pod off: local live/)
 mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log                      # record a run
 .venv/bin/python tools/replay.py runs/1432.log [--loop] [--topics 'ag/obs/#,ag/pose']   # replay it

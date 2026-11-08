@@ -65,14 +65,15 @@ def test_park_run_makes_real_pins_and_clicks_change_them():
 
 
 def test_livemap_is_self_contained_and_draws_only():
-    html = (WEB / "livemap.html").read_text(encoding="utf-8")
+    html = (WEB / "tv.html").read_text(encoding="utf-8")
     js = (WEB / "livemap.js").read_text(encoding="utf-8")
-    assert 'src="vendor/maplibre-gl-4.7.1/maplibre-gl.js"' in html and "from './livemap.js'" in html
+    assert 'src="vendor/maplibre-gl-4.7.1/maplibre-gl.js"' in html
+    assert "from './livemap.js'" in (WEB / "tv.js").read_text(encoding="utf-8")
     assert (WEB / "vendor" / "maplibre-gl-4.7.1" / "maplibre-gl.js").stat().st_size > 500_000
     assert "import('./store.js')" in js  # the same reducer as the dashboard
     # It only draws: no commands, so the map can never act for the ranger
     assert "/api/ctrl" not in js and "/api/mode" not in js and "method: 'POST'" not in js
-    # Same public shape as map.js's MapView, so the dashboard can swap it in
+    # The methods the TV calls
     for name in ("constructor(el, meta", "update(state", "setLayer(name", "flyTo(x, y)", "fit()", "destroy()"):
         assert name in js
     assert "cdn." not in html and "unpkg" not in html
