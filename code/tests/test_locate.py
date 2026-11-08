@@ -300,7 +300,7 @@ def test_both_profiles_build():
         loc = Locate(cfg, Collect())
         assert loc.nx * loc.ny <= MAX_CELLS
     park = Locate(config.load(CODE / "park.toml"), Collect())
-    assert (park.nx, park.ny, park.cell) == (80, 80, 10.0)
+    assert (park.nx, park.ny, park.cell) == (30, 46, 10.0)
 
 
 # ---------- the fake pod through the real tracker ----------

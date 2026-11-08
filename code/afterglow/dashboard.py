@@ -21,7 +21,15 @@ HTTP API (docs/CONTRACTS.md, "Dashboard HTTP"):
     GET  /api/events   SSE: "state" (full), "msg" ({topic, msg}), "status" (every 2 s)
     POST /api/ctrl     {"cmd": "ack", "pin": "P1"} etc.; t is added here
     POST /api/mode     {"mode": "night"}
+    GET  /api/case     the open missing-person case, its start point, ranked trails and route
+    POST /api/case     open or update the case: {"name", "age", "details", "carrying", "car_park", "trail"}
+    POST /api/case/close
+    GET/POST /api/sim  simulation only (tools/local_stack.py): {"paused": bool, "speed": 1|2|4}
     GET  /live/..., /snaps/...   image files from [http] live_dir and snaps_dir
+
+Pages: / (the ranger's dashboard), /tv.html (the operator TV), /livemap.html (the map alone).
+The case (case.py) is laptop-only personal data: it's saved under runs/ and streamed to the
+browsers as an SSE "case" event, never published on the bus.
 """
 import argparse
 import json
@@ -39,6 +47,7 @@ from urllib.parse import urlsplit
 
 from . import config as cfgmod
 from .bus import Bus, PrintBus
+from .case import CaseStore
 from .contracts import (ALL, CTRL, MODE, OBS_BLE, OBS_WIFI, PLAN, POSE, RETAINED, TARGET, TRACK,
                         now_ms, validate)
 from .parkmap import ParkMap
@@ -63,6 +72,10 @@ class State:
         self.lock = threading.Lock()
         self.clients: set[queue.Queue] = set()
         self.trail_step = trail_step_m
+        self.clear()
+
+    def clear(self):
+        """Forget everything heard (the sim's reset). Browsers stay connected."""
         self.poses = {}  # drone -> latest ag/pose ("pod" until there's a drone field)
         self.trails = {}  # drone -> [[x, y], ...]
         self.pins = {}  # pin -> latest ag/target
@@ -131,6 +144,16 @@ class State:
             self.plans[msg["id"]] = msg
         else:
             self.latest[topic] = msg
+
+    def broadcast(self, ev: str, obj):
+        """Send one extra SSE event (the case) to every browser."""
+        data = json.dumps(obj, separators=(",", ":"))
+        with self.lock:
+            for q in list(self.clients):
+                try:
+                    q.put_nowait((ev, data))
+                except queue.Full:
+                    pass
 
     def snapshot(self) -> dict:
         return {"poses": self.poses, "trails": self.trails, "pins": self.pins, "tracks": self.tracks,
@@ -206,6 +229,10 @@ def make_meta(cfg: dict, pm: ParkMap) -> dict:
         "live": {"thermal": "/live/thermal.png", "camera": "/live/camera.jpg"},
         "dirs": {"live": http["live_dir"], "snaps": http["snaps_dir"]},
         "map": pm.to_json(),
+        "search": {"car_parks": cfg["search"]["car_parks"], "entrance_xy": cfg["search"]["entrance_xy"],
+                   "corridor_m": cfg["search"]["corridor_m"],
+                   # the box the sweep and the grids cover, for the map to zoom to
+                   "area": [round(v, 1) for v in (cfg["locate"]["area_m"] or pm.bounds())]},
     }
 
 
@@ -222,7 +249,8 @@ def safe_file(base: Path, rel: str) -> Path | None:
     return p if p.is_relative_to(base.resolve()) and p.is_file() else None
 
 
-def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict):
+def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict, cases: CaseStore | None = None, sim=None):
+    """sim: tools/local_stack.py's SimClock (pause and speed for the fake pod), or None on the real system."""
     meta_json = json.dumps(meta, separators=(",", ":")).encode()
 
     class Handler(BaseHTTPRequestHandler):
@@ -258,6 +286,10 @@ def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict):
                 return self.events()
             if path == "/api/map":
                 return self.send_json(200, meta_json)
+            if path == "/api/case":
+                return self.send_json(200, cases.view() if cases else {"case": None})
+            if path == "/api/sim":
+                return self.send_json(200, sim.view()) if sim else self.send_error(404)
             if path == "/api/state":
                 with state.lock:
                     snap = json.dumps(state.snapshot(), separators=(",", ":")).encode()
@@ -271,7 +303,7 @@ def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict):
 
         def do_POST(self):
             path = urlsplit(self.path).path
-            if path not in ("/api/ctrl", "/api/mode"):
+            if path not in ("/api/ctrl", "/api/mode", "/api/case", "/api/case/close", "/api/sim"):
                 return self.send_error(404)
             # JSON only: a browser must ask (CORS preflight) before sending it cross-origin, and this
             # server never says yes, so another web page can't click Confirm for the ranger.
@@ -286,8 +318,25 @@ def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict):
                     raise ValueError("body must be a JSON object")
             except ValueError as e:
                 return self.send_json(400, {"ok": False, "problems": [str(e)]})
+            if path.startswith("/api/case"):
+                return self.case(path, body)
+            if path == "/api/sim":
+                if sim is None:
+                    return self.send_json(404, {"ok": False, "problems": ["not a simulation"]})
+                problems = sim.set(body)
+                return self.send_json(400 if problems else 200, {"ok": not problems, "problems": problems, **sim.view()})
             code, out = cmds.ctrl(body) if path == "/api/ctrl" else cmds.mode(body)
             self.send_json(code, out)
+
+        def case(self, path, body):
+            if cases is None:
+                return self.send_json(503, {"ok": False, "problems": ["no case store on this server"]})
+            if path == "/api/case/close":
+                return self.send_json(200, {"ok": True, **cases.close()})
+            problems, view = cases.open(body)
+            if problems:
+                return self.send_json(400, {"ok": False, "problems": problems})
+            self.send_json(200, {"ok": True, **view})
 
         def events(self):
             q = state.subscribe()
@@ -298,6 +347,10 @@ def make_handler(state: State, cmds: Commands, meta: dict, dirs: dict):
                 self.send_header("X-Accel-Buffering", "no")
                 self.end_headers()
                 self.wfile.write(b"retry: 1500\n\n")
+                if cases:
+                    self.wfile.write(f"event: case\ndata: {json.dumps(cases.view(), separators=(',', ':'))}\n\n".encode())
+                if sim:
+                    self.wfile.write(f"event: sim\ndata: {json.dumps(sim.view())}\n\n".encode())
                 next_status = 0.0
                 while True:
                     try:
@@ -364,11 +417,13 @@ def main():
         threading.Thread(target=connect, args=(host, port, state, holder, stop), daemon=True).start()
     cmds = Commands(lambda: holder.get("bus"), cfg["waypoints"])
     dirs = {k: cfgmod.resolve(cfg, cfg["http"][f"{k}_dir"]) for k in ("live", "snaps")}
+    cases = CaseStore(cfg, pm)
+    cases.listeners.append(lambda view: state.broadcast("case", view))
 
-    server = ThreadingHTTPServer((a.host, a.port or cfg["http"]["port"]), make_handler(state, cmds, meta, dirs))
+    server = ThreadingHTTPServer((a.host, a.port or cfg["http"]["port"]), make_handler(state, cmds, meta, dirs, cases))
     server.daemon_threads = True
-    log.info("dashboard (%s) on http://%s:%d", meta["name"], "localhost" if a.host == "0.0.0.0" else a.host,
-             server.server_address[1])
+    log.info("dashboard (%s) on http://%s:%d  (operator TV: /tv.html)", meta["name"],
+             "localhost" if a.host == "0.0.0.0" else a.host, server.server_address[1])
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:

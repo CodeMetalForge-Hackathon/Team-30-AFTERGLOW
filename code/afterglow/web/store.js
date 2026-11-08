@@ -57,7 +57,8 @@ export function apply(s, topic, msg, trailStep) {
 
 // Connects and keeps reconnecting (EventSource does that by itself). onChange is called
 // at most once per animation frame, however fast messages arrive.
-export function connect({ trailStep, onChange }) {
+// on: optional extra SSE events, { name: fn(parsed data) } (tv.js uses "case").
+export function connect({ trailStep, onChange, on = {} }) {
   const store = {
     state: emptyState(),
     link: 'connecting',      // 'live' once the full state has arrived
@@ -102,6 +103,7 @@ export function connect({ trailStep, onChange }) {
     store.state.broker = store.status.broker;
     changed();
   });
+  for (const [name, fn] of Object.entries(on)) es.addEventListener(name, (e) => { fn(JSON.parse(e.data)); changed(); });
   es.onerror = () => { store.link = 'reconnecting'; changed(); };
   return store;
 }

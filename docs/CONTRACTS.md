@@ -199,10 +199,15 @@ dashboard.py serves everything on one port (`[http] port`, 8080), so there are n
 | `GET /api/state` | The same full state as one JSON object, for debugging |
 | `POST /api/ctrl` | A click: `{"cmd":"ack","pin":"P1"}`, `{"cmd":"waypoint","n":3}` and so on. The server keeps only `cmd`, `pin`, `id` and `n`, stamps `t`, runs `validate()` and checks that pin commands carry `pin`, leg commands carry `id` and `waypoint` carries a configured `n`. Then it publishes to `ag/ctrl`. Answers `{"ok":true,"msg":…}`, or `400` / `503` with `{"ok":false,"problems":[…]}`. The body must be sent as `Content-Type: application/json` (else `415`), so another web page can't post a click |
 | `POST /api/mode` | `{"mode":"night"}`, published to `ag/mode` the same way, **retained** |
+| `GET /api/case` | The open missing-person case for trail pathing (`tv.html`): `{"case", "start", "ranking", "trail", "route"}`. `case` is `null` when none is open; otherwise `name`, `age`, `details`, `carrying`, `expect_cls`, `car_park`, `trail`, `opened_t`. `start` is `{x, y, label}` (the car park, else the park entrance); `ranking` the most likely trails (`name`, `pct`, `dist_m`, `length_m`, `pop`); `route` the chosen trail as `[[x, y], …]` |
+| `POST /api/case` | Open the case, or update the open one with the fields given: `name` (needed), `age`, `details`, `carrying` (`iphone`, `airtag`, `android`, `samsung`, `unknown`), `car_park` (a `[search] car_parks` name, or `""`), `trail`. Answers the same shape as `GET` plus `ok`, or `400` with `problems` |
+| `POST /api/case/close` | Close the case |
 
 - The full state holds the latest pose per drone (`drone` field, or `"pod"`), each drone's path, and the latest `ag/target` per pin, `ag/track` per track and `ag/plan` per id. It also holds a summary per heard id with the last 60 raw observations, the latest message on every other topic, and per-topic counts.
 - **The dashboard's clock** (`bus_t`) is the latest pose's `t`, or the newest `t` before any pose arrives. Ages on the page are measured against it, because fake and replayed time isn't wall time.
 - The dashboard publishes only when someone clicks. It never sends `ag/ctrl` or `ag/mode` by itself.
+- **The case is laptop-only personal data** (`afterglow/case.py`). It's saved to `[search] case_file` under `runs/` (never committed), sent to browsers as an extra SSE `case` event (on connect and on every change), and **never** published on the bus or sent over LoRa. The sim reads the file to know which trail to fly.
+- `/api/map` also carries `search`: `car_parks`, `entrance_xy` and `corridor_m` from the `[search]` table (SAMPLE values until the published trail-use data is in).
 - **No login:** anyone who can reach port 8080 can click. Keep the pod and the laptop on the team's travel router, never the venue Wi-Fi.
 
 ## Serial lines from the ESP32 boards

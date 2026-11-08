@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from afterglow import config
-from afterglow.contracts import COVERAGE, OBS_BLE, POSE, TARGET, TRACK, validate
+from afterglow.contracts import COVERAGE, OBS_BLE, POSE, TARGET, THERMAL, TRACK, VISION, validate
 from afterglow.parkmap import ParkMap
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
@@ -32,7 +32,8 @@ def test_every_message_validates(out):
     _, _, msgs = out
     for topic, msg, _ in msgs:
         assert validate(topic, msg) == [], (topic, msg)
-    assert {t for t, _, _ in msgs} == {POSE, OBS_BLE, TRACK, TARGET, COVERAGE}
+    seen = {t for t, _, _ in msgs}
+    assert {POSE, OBS_BLE, TRACK, TARGET, COVERAGE, THERMAL} <= seen <= {POSE, OBS_BLE, TRACK, TARGET, COVERAGE, THERMAL, VISION}
 
 
 def test_pose_is_marked_simulated(out):
@@ -70,6 +71,9 @@ def test_every_hidden_phone_gets_pinned(out):
         if t == TARGET:
             last[m["pin"]] = m
     hidden = [p for p in cfg["sim"]["phones"] if "x" in p]
+    a = cfg["locate"]["area_m"]
+    if a:  # phones outside the sweep box (park: the Cadillac South Ridge hiker) are for trail pathing only
+        hidden = [p for p in hidden if a[0] <= p["x"] <= a[2] and a[1] <= p["y"] <= a[3]]
     assert len(last) == len(hidden)
     assert all(m["state"] == "pinned" for m in last.values()), {k: m["state"] for k, m in last.items()}
     for m in last.values():  # the cheating estimate stays near a real phone

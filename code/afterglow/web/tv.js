@@ -1,0 +1,1084 @@
+// AFTERGLOW operator TV: the panels around the live map (livemap.js), for a TV in the ops room.
+// Modes: Day sweep (patrol), Night sweep (night), Trail pathing (search), Emergency (investigate).
+// Every command here comes from a click. Nothing auto-confirms a ping or accepts a leg: the drone
+// never decides. "Ping" is the screen word for a pin (an ag/target record).
+import { html, render, useState, useEffect, useRef } from './vendor/htm-3.1.1/standalone.module.js';
+import { connect } from './store.js';
+import { LiveMap, PRIO_COLOR } from './livemap.js';
+
+const MODES = [['patrol', 'Day sweep'], ['night', 'Night sweep'], ['search', 'Trail pathing'], ['investigate', 'Emergency']];
+const MODE_NAME = Object.fromEntries(MODES);
+const CLS_PLAIN = {
+  findmy: 'Lost iPhone or AirTag (Find My)', findhub: 'Lost Android phone or tag (Find Hub)',
+  samsung_off: 'Lost Samsung phone', ref: 'Our reference tag', wifi: 'SOS Wi-Fi answer',
+};
+const CLS_SHORT = { findmy: 'Find My', findhub: 'Find Hub', samsung_off: 'Samsung', ref: 'Ref tag', wifi: 'SOS' };
+const CARRY = [['iphone', 'iPhone'], ['airtag', 'AirTag'], ['android', 'Android phone'], ['samsung', 'Samsung phone'], ['unknown', 'Not known']];
+const CARRY_NAME = Object.fromEntries(CARRY);
+const PRIO_NAME = { 1: 'urgent', 2: 'strong ping', 3: 'possible', 4: 'heard only' };
+const STATUS_ORDER = { investigating: 0, new: 1, acknowledged: 2, confirmed: 3, cleared: 4 };
+const LIVE_SRC = new Set(['gps', 'waypoint']);
+const POSE_STALE_MS = 10000;   // no pose this long: the Wi-Fi link to the pod is down
+const ALERT_FRESH_MS = 20000;  // a LoRa alert this recent: LoRa is still getting through
+const BLE_SILENT_MS = 15000;
+const BIN_M = 10;              // trail progress is counted in 10 m pieces
+const CHECK_MS = 12000;        // over a ping this long (bus time) with nobody seen: "no one here"
+const WALK_TRAIL = 1.1, WALK_OFF = 0.4; // ground team, m/s on a trail and off it
+const FORCE = new URLSearchParams(location.search).get('force');
+const NO_CASE = { case: null, ranking: [], route: [], start: null, trail: null };
+const FOREST = {
+  day: { bg: '#0e1510', camp: '#b9772f', park: '#5f8f52', road: '#7d7a70', casing: '#0b100c' },
+  night: { bg: '#080c09', camp: '#b9772f', park: '#3f5f37', road: '#5d5b54', casing: '#060906' },
+};
+
+// ---------- helpers ----------
+async function post(url, body) {
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    return { ok: r.ok && j.ok, problems: j.problems || [`HTTP ${r.status}`], data: j };
+  } catch (e) {
+    return { ok: false, problems: [String(e.message || e)] };
+  }
+}
+const pad = (n) => String(n).padStart(2, '0');
+const fmtClock = (t) => (t ? new Date(t).toLocaleTimeString([], { hour12: false }) : '--:--:--');
+const fmtHM = (t) => (t ? new Date(t).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' }) : '--:--');
+function fmtDur(ms) {
+  if (ms == null || !isFinite(ms)) return '—';
+  const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+}
+function fmtAgo(ms) {
+  if (ms == null || !isFinite(ms)) return '—';
+  const s = ms / 1000;
+  if (s < 2) return 'now';
+  if (s < 60) return `${Math.round(s)} s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  return `${Math.floor(s / 3600)} h ago`;
+}
+const fmtM = (v) => (v == null || !isFinite(v) ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)} km` : v >= 100 ? `${Math.round(v)} m` : `${Math.round(v * 10) / 10} m`);
+const pinNum = (p) => Number(String(p).replace(/\D/g, '')) || 0;
+const isOpen = (p) => p.status !== 'cleared' && p.status !== 'confirmed';
+const prioColor = (p) => PRIO_COLOR[p] || PRIO_COLOR[4];
+function loadPref(k, d) { try { const v = localStorage.getItem(`ag.tv.${k}`); return v == null ? d : JSON.parse(v); } catch { return d; } }
+function savePref(k, v) { try { localStorage.setItem(`ag.tv.${k}`, JSON.stringify(v)); } catch { /* private mode */ } }
+
+function segDist(px, py, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
+  const t = L2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / L2));
+  return Math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy));
+}
+function inRing(px, py, ring) {
+  let inside = false;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const [x1, y1] = ring[i], [x2, y2] = ring[i + 1];
+    if ((y1 > py) !== (y2 > py) && px < x1 + ((py - y1) * (x2 - x1)) / (y2 - y1)) inside = !inside;
+  }
+  return inside;
+}
+function distToCamp(meta, x, y) { // 0 inside a campground, Infinity if there are none
+  let best = Infinity;
+  for (const z of meta.map.zones) {
+    if (z.kind !== 'campground') continue;
+    if (inRing(x, y, z.ring)) return 0;
+    for (let i = 0; i < z.ring.length - 1; i++) best = Math.min(best, segDist(x, y, z.ring[i], z.ring[i + 1]));
+  }
+  return best;
+}
+function nearestTrail(meta, x, y) {
+  let best = { name: null, d: Infinity };
+  for (const l of meta.map.lines) {
+    if (l.kind === 'road' || !l.name) continue;
+    for (let i = 0; i < l.pts.length - 1; i++) {
+      const d = segDist(x, y, l.pts[i], l.pts[i + 1]);
+      if (d < best.d) best = { name: l.name, d };
+    }
+  }
+  return best;
+}
+const heading = (dx, dy) => (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
+function routeBins(route) { // points every BIN_M metres along the route (evenly, across vertices)
+  const out = [];
+  let carry = 0;
+  for (let i = 0; i < route.length - 1; i++) {
+    const [ax, ay] = route[i], [bx, by] = route[i + 1], seg = Math.hypot(bx - ax, by - ay);
+    let d = carry;
+    for (; d < seg; d += BIN_M) out.push([ax + (bx - ax) * d / seg, ay + (by - ay) * d / seg]);
+    carry = d - seg;
+  }
+  if (route.length) out.push(route[route.length - 1]);
+  return out;
+}
+const routeLen = (r) => r.reduce((a, p, i) => (i ? a + Math.hypot(p[0] - r[i - 1][0], p[1] - r[i - 1][1]) : 0), 0);
+
+function verdict(c, bt) { // what the check found so far
+  if (!c || c.closeSince == null) return 'flying';
+  if (c.person && c.warm) return 'person';
+  if (bt - c.closeSince >= CHECK_MS) return c.person || c.warm ? 'unclear' : 'none';
+  return 'checking';
+}
+const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+const compassWord = (deg) => COMPASS[Math.round(deg / 45) % 8];
+function rescuePlan(meta, cv, p) { // the ground team's walk: along the searched trail, then off it to the person
+  const start = cv.case && cv.start ? cv.start : { x: meta.search.entrance_xy[0], y: meta.search.entrance_xy[1], label: 'Park entrance' };
+  const route = cv.case ? cv.route : [];
+  let best = null;
+  for (let i = 0, run = 0; i < route.length - 1; i++) {
+    const a = route[i], b = route[i + 1], seg = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const t = seg ? Math.max(0, Math.min(1, ((p.x - a[0]) * (b[0] - a[0]) + (p.y - a[1]) * (b[1] - a[1])) / (seg * seg))) : 0;
+    const q = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])], d = Math.hypot(p.x - q[0], p.y - q[1]);
+    if (!best || d < best.off) best = { i, q, off: d, along: run + t * seg };
+    run += seg;
+  }
+  const toFirst = route.length ? Math.hypot(route[0][0] - start.x, route[0][1] - start.y) : 0;
+  if (best && best.off < 150) {
+    const pts = [[start.x, start.y], ...route.slice(0, best.i + 1), best.q, [p.x, p.y]];
+    const onTrail = toFirst + best.along;
+    return { start, pts, trail: cv.trail, onTrail, off: best.off, dir: compassWord(heading(p.x - best.q[0], p.y - best.q[1])),
+             secs: onTrail / WALK_TRAIL + best.off / WALK_OFF };
+  }
+  const off = Math.hypot(p.x - start.x, p.y - start.y);
+  return { start, pts: [[start.x, start.y], [p.x, p.y]], trail: null, onTrail: 0, off, dir: compassWord(heading(p.x - start.x, p.y - start.y)), secs: off / WALK_OFF };
+}
+function weather(bt) { // simulated, for the TV: mild and slowly changing
+  const d = new Date(bt || Date.now()), h = d.getHours() + d.getMinutes() / 60;
+  const temp = 11 + 5 * Math.sin(((h - 9) / 24) * 2 * Math.PI);
+  const wind = 12 + 5 * Math.sin((bt || 0) / 900000) + 2 * Math.sin((bt || 0) / 170000);
+  return { temp: Math.round(temp), wind: Math.max(0, Math.round(wind)), dir: COMPASS[(Math.floor((bt || 0) / 3600000) + 7) % 8] };
+}
+
+// ---------- the chime (Web Audio: no sound file) ----------
+const Sound = {
+  ctx: null,
+  on: loadPref('chime', true),
+  unlock() {
+    try {
+      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (this.ctx.state === 'suspended') this.ctx.resume();
+    } catch { /* no audio on this device */ }
+  },
+  ready() { return !!this.ctx && this.ctx.state === 'running'; },
+  play(urgent) {
+    if (!this.on || !this.ready()) return;
+    const c = this.ctx, t0 = c.currentTime + 0.02, notes = urgent ? [880, 660, 880, 660] : [660, 880];
+    notes.forEach((f, i) => {
+      const o = c.createOscillator(), g = c.createGain(), t = t0 + i * 0.22;
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.35, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+      o.connect(g).connect(c.destination);
+      o.start(t); o.stop(t + 0.22);
+    });
+  },
+};
+
+// ---------- what the page remembers between renders (not part of the bus state) ----------
+function loadChecks() { try { return JSON.parse(sessionStorage.getItem('ag.tv.checks') || '{}'); } catch { return {}; } }
+function saveChecks(c) { try { sessionStorage.setItem('ag.tv.checks', JSON.stringify(c)); } catch { /* private mode */ } }
+function makeMemory() {
+  return {
+    ready: false, known: new Map(), sosSeen: new Set(), firstSeen: {}, events: [], mode: null, modeSince: null,
+    alerts: {}, lastAlert: null, lastAlertWall: 0, poseRef: null, lastPoseWall: 0, bleCount: 0, lastBleWall: 0,
+    cov: [], covT: null, bins: [], binsHit: null, binsRoute: null, binsPose: null, chimedAt: 0, checks: loadChecks(),
+  };
+}
+
+function track(mem, st, view) {
+  const s = st.state, bt = s.bus_t;
+  const log = (text) => { mem.events.unshift({ t: bt, text }); mem.events.length = Math.min(mem.events.length, 20); };
+  // link watch
+  const pose = s.poses.pod || Object.values(s.poses)[0];
+  if (pose !== mem.poseRef) { mem.poseRef = pose; if (pose) mem.lastPoseWall = Date.now(); }
+  const ble = s.counts['ag/obs/ble'] || 0;
+  if (ble !== mem.bleCount) { mem.bleCount = ble; mem.lastBleWall = Date.now(); }
+  const al = s.latest['ag/alert'];
+  if (al && al !== mem.lastAlert) {
+    mem.lastAlert = al; mem.lastAlertWall = Date.now();
+    if (al.kind !== 4) mem.alerts[`T${al.track}`] = { ...al, wall: Date.now() };
+  }
+  // coverage history, for the time-to-finish estimate
+  const cov = s.latest['ag/coverage'];
+  if (cov && cov.t !== mem.covT) {
+    mem.covT = cov.t;
+    mem.cov.push([bt || cov.t, cov.pct]);
+    if (mem.cov.length > 120) mem.cov.shift();
+  }
+  // mode changes
+  const mode = s.latest['ag/mode']?.mode || 'patrol';
+  if (mode !== mem.mode) {
+    if (mem.ready && mem.mode) log(`${MODE_NAME[mode] || mode} started`);
+    mem.mode = mode; mem.modeSince = bt || null; mem.cov = [];
+  }
+  if (!mem.modeSince && bt) mem.modeSince = bt;
+  // trail progress: which 10 m pieces of the route the pod has passed within the corridor
+  const route = view?.route || [];
+  if (route !== mem.binsRoute) {
+    mem.binsRoute = route; mem.bins = routeBins(route); mem.binsHit = new Uint8Array(mem.bins.length); mem.binsPose = null;
+    if (mem.mode === 'search') for (const [x, y] of s.trails.pod || []) hitBins(mem, x, y, st.corridor);
+  }
+  if (pose && pose !== mem.binsPose) { mem.binsPose = pose; hitBins(mem, pose.x, pose.y, st.corridor); }
+  // checking a ping: is the drone over it, is it warm, has the camera seen someone
+  for (const p of Object.values(s.pins)) {
+    if (p.status === 'cleared' || p.status === 'new' || p.status === 'acknowledged') { delete mem.checks[p.pin]; continue; }
+    const c = (mem.checks[p.pin] ||= { closeSince: null, maxC: null, warm: false, person: null, dist: null });
+    if (p.status !== 'investigating' || !pose) continue; // a confirmed ping keeps what was found
+    c.dist = Math.hypot(pose.x - p.x, pose.y - p.y);
+    if (c.dist > st.checkM) continue;
+    if (c.closeSince == null) c.closeSince = bt;
+    const th = s.latest['ag/thermal'], v = s.latest['ag/vision'];
+    if (th && bt - th.t < 5000) { c.maxC = Math.max(c.maxC ?? -99, th.max_c); if (th.hot) c.warm = true; }
+    if (v && v.kind === 'person' && bt - v.t < 5000) c.person = Math.max(c.person ?? 0, v.conf);
+  }
+  for (const p of Object.values(s.pins)) {
+    if (p.status === 'confirmed' && pose && Math.hypot(pose.x - p.x, pose.y - p.y) <= st.checkM) (mem.checkins ||= {})[p.pin] = bt;
+  }
+  saveChecks(mem.checks); // what a check found survives a reload
+  // pings: new ones chime, status changes go in the log
+  if (!mem.ready) {
+    if (st.link !== 'live') return;
+    for (const p of Object.values(s.pins)) { mem.known.set(p.pin, p.status); if (p.sos) mem.sosSeen.add(p.pin); mem.firstSeen[p.pin] = bt; }
+    mem.ready = true;
+    return;
+  }
+  let chime = 0;
+  for (const p of Object.values(s.pins)) {
+    const was = mem.known.get(p.pin);
+    if (was === undefined) {
+      mem.firstSeen[p.pin] = bt;
+      log(`New ping ${p.pin}: ${CLS_SHORT[p.cls] || p.cls}`);
+      chime = Math.max(chime, p.prio === 1 ? 2 : 1);
+    } else if (was !== p.status) {
+      log(`${p.pin} ${p.status}`);
+      if (p.status === 'investigating') mem.lastChecked = p.pin;
+    }
+    if (p.sos && !mem.sosSeen.has(p.pin)) {
+      mem.sosSeen.add(p.pin);
+      log(`SOS answered on ${p.pin}`);
+      chime = 2;
+    }
+    mem.known.set(p.pin, p.status);
+  }
+  if (chime && Date.now() - mem.chimedAt > 1500) { mem.chimedAt = Date.now(); Sound.play(chime === 2); }
+}
+function hitBins(mem, x, y, r) {
+  const b = mem.bins, h = mem.binsHit;
+  for (let i = 0; i < b.length; i++) if (!h[i] && Math.abs(b[i][0] - x) <= r && Math.abs(b[i][1] - y) <= r && Math.hypot(b[i][0] - x, b[i][1] - y) <= r) h[i] = 1;
+}
+
+// ---------- app ----------
+function App() {
+  const [meta, setMeta] = useState(null);
+  const [err, setErr] = useState(null);
+  const [, setTick] = useState(0);
+  const store = useRef(null);
+  const mem = useRef(makeMemory());
+  const caseRef = useRef(null);
+  const [caseView, setCaseView] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [follow, setFollow] = useState(() => loadPref('follow', false));
+  const [form, setForm] = useState(null); // null, or the case form's starting values
+  const [toasts, setToasts] = useState([]);
+  const [busy, setBusy] = useState({}); // pin or key -> true while a click is in flight
+  const [chimeOn, setChimeOn] = useState(Sound.on);
+  const [sim, setSim] = useState(null); // {paused, speed} when the fake pod runs (local_stack.py)
+
+  useEffect(() => {
+    fetch('/api/map').then((r) => r.json()).then((m) => {
+      setMeta(m);
+      document.title = `AFTERGLOW · ${m.name} · operator TV`;
+      const st = connect({
+        trailStep: m.trail_step_m,
+        on: { case: (v) => { caseRef.current = v; setCaseView(v); }, sim: (v) => setSim(v),
+              reset: () => { try { sessionStorage.removeItem('ag.tv.checks'); } catch { /* private mode */ } location.reload(); } },
+        onChange: () => { track(mem.current, st, caseRef.current); setTick((t) => t + 1); },
+      });
+      st.corridor = m.search?.corridor_m ?? 40;
+      st.checkM = Math.max(1, (m.detect_m ?? 40) / 2); // the drone is "over" a ping within this
+      store.current = st;
+      window.tvStore = st; // for poking at it from the browser console
+      setTick((t) => t + 1);
+    }).catch((e) => setErr(String(e)));
+    const id = setInterval(() => { store.current?.sampleRates(); setTick((t) => t + 1); }, 1000);
+    const unlock = () => Sound.unlock();
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    return () => { clearInterval(id); window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
+  }, []);
+  useEffect(() => savePref('follow', follow), [follow]);
+
+  const toast = (text, kind = 'info') => {
+    const id = Math.random();
+    setToasts((ts) => [...ts.slice(-3), { id, text, kind }]);
+    setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), 4000);
+  };
+
+  if (err) return html`<div class="boot">Can't reach the dashboard server: ${err}<br />Start it with python -m afterglow.dashboard or python tools/local_stack.py.</div>`;
+  if (!meta || !store.current) return html`<div class="boot">Loading the map…</div>`;
+
+  const st = store.current, s = st.state, m = mem.current, bt = s.bus_t;
+  const mode = s.latest['ag/mode']?.mode || 'patrol';
+  const night = mode === 'night';
+  document.documentElement.toggleAttribute('data-night', night);
+  const pose = s.poses.pod || Object.values(s.poses)[0] || null;
+  const cv = caseView || NO_CASE;
+  const kase = cv.case;
+
+  // links and health
+  const paused = !!sim?.paused;
+  if (paused) m.lastPoseWall = Date.now(); // a paused sim isn't a lost link
+  const podStale = FORCE === 'lora' || (m.lastPoseWall > 0 && Date.now() - m.lastPoseWall > POSE_STALE_MS) || st.link !== 'live' || !s.broker;
+  const loraFresh = FORCE === 'lora' || (m.lastAlertWall > 0 && Date.now() - m.lastAlertWall < ALERT_FRESH_MS);
+  const locked = podStale; // commands go over Wi-Fi: none while it's down
+  const problems = [];
+  if (st.link !== 'live') problems.push('Dashboard server unreachable');
+  else if (!s.broker) problems.push('Message broker down');
+  else if (podStale) problems.push('Pod Wi-Fi lost');
+  const sys = s.latest['ag/sys'];
+  if (sys) {
+    if (sys.cpu_c >= 80) problems.push(`Pod hot ${Math.round(sys.cpu_c)}°C`);
+    if (sys.throttled && sys.throttled !== '0x0') problems.push('Pod throttling');
+    if (sys.lora === false) problems.push('LoRa radio down');
+    if (typeof sys.disk_free_gb === 'number' && sys.disk_free_gb < 2) problems.push('Pod disk nearly full');
+    if (typeof sys.batt_pct === 'number' && sys.batt_pct < 20) problems.push(`Pod battery ${sys.batt_pct}%`);
+  }
+  if (paused) m.lastBleWall = Date.now();
+  if (!podStale && m.bleCount > 0 && Date.now() - m.lastBleWall > BLE_SILENT_MS) problems.push('Bluetooth scanner silent');
+
+  // pings
+  const pins = Object.values(s.pins);
+  const open = pins.filter(isOpen).sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || (a.prio - b.prio) || (pinNum(b.pin) - pinNum(a.pin)));
+  // the alert stays on the highest priority, then the one waiting longest, so it doesn't jump about
+  const fresh = pins.filter((p) => p.status === 'new').sort((a, b) => (a.prio - b.prio) || ((m.firstSeen[a.pin] ?? 0) - (m.firstSeen[b.pin] ?? 0)) || (pinNum(a.pin) - pinNum(b.pin)));
+  const sosPin = pins.filter((p) => p.sos && p.status !== 'cleared').sort((a, b) => pinNum(b.pin) - pinNum(a.pin))[0] || null;
+  const investigating = (m.lastChecked && s.pins[m.lastChecked]?.status === 'investigating' ? s.pins[m.lastChecked] : null)
+    || pins.filter((p) => p.status === 'investigating').sort((a, b) => b.t - a.t)[0] || null;
+  const selPin = sel && s.pins[sel] ? s.pins[sel] : null;
+  const alertPin = fresh.find((p) => !p.sos) || null;
+  const linked = kase?.ping && s.pins[kase.ping] ? s.pins[kase.ping] : null;
+  const confirmed = pins.filter((p) => p.status === 'confirmed' && !m.donePins?.[p.pin]).sort((a, b) => b.t - a.t)[0] || null; // a closed case's person is done
+  const focus = selPin || alertPin || (mode !== 'investigate' ? investigating : null);
+  const target = mode === 'investigate' ? (selPin || (linked && linked.status !== 'cleared' ? linked : null) || investigating || sosPin || confirmed) : null;
+  const rescue = target && mode === 'investigate' ? rescuePlan(meta, cv, target) : null;
+  const stage = mode === 'investigate' || confirmed ? 4 : investigating ? 3 : fresh.length ? 2 : 1;
+
+  // clicks
+  const pick = (pin) => setSel(pin); // the map flies to it (MapPane)
+  const sendCtrl = async (body, label, key) => {
+    setBusy((b) => ({ ...b, [key]: true }));
+    const r = await post('/api/ctrl', body);
+    setBusy(({ [key]: _, ...rest }) => rest);
+    if (!r.ok) toast(`${label} failed: ${r.problems.join('; ')}`, 'bad'); else toast(`Sent: ${label}`);
+    return r.ok;
+  };
+  const linkPing = async (pin) => {
+    const r = await post('/api/case', { ping: pin || '' });
+    if (r.ok) { caseRef.current = r.data; setCaseView(r.data); } else toast(r.problems.join('; '), 'bad');
+  };
+  const pinCmd = async (pin, cmd, label) => {
+    const ok = await sendCtrl({ cmd, pin }, `${label} ${pin}`, pin);
+    if (ok && cmd === 'investigate') { mem.current.lastChecked = pin; setSel(pin); }
+    if (ok && cmd === 'investigate' && caseRef.current?.case && !caseRef.current.case.ping) linkPing(pin); // the case's first checked ping
+    return ok;
+  };
+  const confirmRescue = async (pin) => { // 4a: the ranger confirms; then the emergency view and the rescue route
+    if (await pinCmd(pin, 'confirm', 'Confirm person')) {
+      if (caseRef.current?.case && caseRef.current.case.ping !== pin) linkPing(pin);
+      setSel(pin);
+      await setMode('investigate');
+    }
+  };
+  const notPerson = async (pin) => { // 4b: clear it; the drone goes back to its path
+    if (await pinCmd(pin, 'clear', 'Not a person:')) {
+      if (caseRef.current?.case?.ping === pin) linkPing('');
+      setSel(null);
+    }
+  };
+  const setMode = async (md) => {
+    const r = await post('/api/mode', { mode: md });
+    if (!r.ok) toast(`Mode change failed: ${r.problems.join('; ')}`, 'bad');
+    return r.ok;
+  };
+  const saveCase = async (body, startTrail) => {
+    const r = await post('/api/case', startTrail ? { ...body, prior_mode: mode === 'night' ? 'night' : 'patrol' } : body);
+    if (!r.ok) return r.problems;
+    caseRef.current = r.data; setCaseView(r.data);
+    if (startTrail && mode !== 'search') await setMode('search');
+    setForm(null);
+    toast(startTrail ? 'Case opened: trail pathing' : 'Case saved');
+    return null;
+  };
+  const closeCase = async () => {
+    const r = await post('/api/case/close', {});
+    if (r.ok) for (const p of Object.values(store.current.state.pins)) if (p.status === 'confirmed') (mem.current.donePins ||= {})[p.pin] = true;
+    if (r.ok) { caseRef.current = r.data; setCaseView(r.data); toast('Case closed'); } else toast(`Close failed: ${r.problems.join('; ')}`, 'bad');
+  };
+  const pickTrail = async (name) => {
+    const r = await post('/api/case', { trail: name });
+    if (r.ok) { caseRef.current = r.data; setCaseView(r.data); toast(`Trail: ${name}`); } else toast(r.problems.join('; '), 'bad');
+  };
+  const setSimState = async (body) => {
+    const r = await post('/api/sim', body);
+    if (r.ok) setSim({ paused: r.data.paused, speed: r.data.speed }); else toast(`Simulation: ${r.problems.join('; ')}`, 'bad');
+  };
+  const teamOnWay = async (pin) => { // after a person is confirmed: the team is sent, the drone goes back to its sweep
+    if (caseRef.current?.case) {
+      const r = await post('/api/case', { team: true, ping: pin });
+      if (r.ok) { caseRef.current = r.data; setCaseView(r.data); }
+    }
+    mem.current.teamPins = { ...(mem.current.teamPins || {}), [pin]: mem.current.teamPins?.[pin] || s.bus_t };
+    setSel(null);
+    await setMode(caseRef.current?.case?.prior_mode || 'patrol');
+    toast(`Team on the way to ${pin}. The drone will check in on them.`);
+  };
+  const toggleChime = () => { Sound.unlock(); Sound.on = !Sound.on; savePref('chime', Sound.on); setChimeOn(Sound.on); if (Sound.on) Sound.play(false); };
+
+  const ctx = { meta, st, s, m, bt, mode, pose, cv, kase, locked, busy, pick, pinCmd, sendCtrl, setMode, setForm, closeCase, pickTrail, setSel, sel, open, focus, target, linked, linkPing, confirmRescue, notPerson, rescue, confirmed, teamOnWay };
+  const wide = !!focus && mode !== 'investigate';
+
+  return html`
+    <div class="tv">
+      <${TopBar} ...${ctx} problems=${problems} chimeOn=${chimeOn} toggleChime=${toggleChime} sim=${sim} setSimState=${setSimState} />
+      <div class="banners">
+        <${Steps} stage=${stage} mode=${mode} cv=${cv} />
+        ${podStale && html`<${LoraBanner} m=${m} loraFresh=${loraFresh} />`}
+        ${sosPin && html`<${SosBanner} p=${sosPin} mode=${mode} setMode=${setMode} locked=${locked} pick=${pick} />`}
+        ${alertPin && html`<${PingBanner} p=${alertPin} m=${m} bt=${bt} kase=${kase} pick=${pick} />`}
+      </div>
+      <div class=${`grid ${wide ? 'wide-right' : ''}`}>
+        <div class="col">${left(ctx)}</div>
+        <${MapPane} meta=${meta} s=${s} sel=${sel} follow=${follow} setFollow=${setFollow} night=${night} cv=${cv} podStale=${podStale} m=${m} setSel=${setSel} mode=${mode} target=${target} rescue=${rescue} />
+        <div class="col">${right(ctx, podStale)}</div>
+      </div>
+      ${form && html`<${CaseForm} meta=${meta} init=${form} editing=${!!kase} save=${saveCase} cancel=${() => setForm(null)} />`}
+      ${chimeOn && !Sound.ready() && html`<div class="soundhint" role="status">Click anywhere to turn on the ping chime</div>`}
+      <div class="toasts">${toasts.map((t) => html`<div key=${t.id} class=${`toast ${t.kind}`}>${t.text}</div>`)}</div>
+    </div>`;
+}
+
+// ---------- top bar and banners ----------
+function TopBar({ meta, s, bt, mode, pose, kase, locked, setMode, problems, chimeOn, toggleChime, sim, setSimState }) {
+  const src = !pose ? null : pose.src === 'sim' ? ['b-sim', 'SIMULATED'] : pose.src === 'replay' ? ['b-replay', 'REPLAY'] : LIVE_SRC.has(pose.src) ? null : ['b-none', pose.src];
+  const showCase = kase && (mode === 'search' || mode === 'investigate');
+  return html`
+    <header class="top">
+      <div class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="#e0a43a" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><circle cx="12" cy="12" r="9" stroke-opacity=".5"></circle></svg>AFTERGLOW</div>
+      ${showCase ? html`<div class="casechip" title=${`Case: ${kase.name}`}>${kase.name} · <span class="mono">${fmtDur(Date.now() - kase.opened_t)}</span></div>`
+                 : html`<div class="area">${meta.name}</div>`}
+      <div class="spacer"></div>
+      <div class="modes" role="group" aria-label="Mode">
+        ${MODES.map(([k, label]) => html`<button class=${`${mode === k ? 'on' : ''} ${k === 'investigate' ? 'emerg' : ''}`} aria-pressed=${mode === k}
+          disabled=${locked} onClick=${() => mode !== k && setMode(k)}>${label}</button>`)}
+      </div>
+      ${src && html`<span class=${`badge ${src[0]}`}>${src[1]}</span>`}
+      ${sim && html`<span class="simctl" role="group" aria-label="Simulation">
+        <button class=${sim.paused ? 'paused' : ''} onClick=${() => setSimState({ paused: !sim.paused })} aria-label=${sim.paused ? 'Resume the simulation' : 'Pause the simulation'}>
+          ${sim.paused ? html`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14l12-7z" fill="currentColor"></path></svg> Paused`
+                       : html`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"></path></svg>`}
+        </button>
+        ${[1, 2, 4].map((v) => html`<button class=${sim.speed === v ? 'on' : ''} aria-pressed=${sim.speed === v} onClick=${() => setSimState({ speed: v })}>${v}×</button>`)}
+        <${ResetButton} setSimState=${setSimState} />
+      </span>`}
+      <${Weather} bt=${bt} />
+      <span class=${`health ${problems.length ? 'bad' : ''}`} title=${problems.join(' · ')}><i></i>${problems.length ? problems[0] + (problems.length > 1 ? ` +${problems.length - 1}` : '') : 'System OK'}</span>
+      <button class=${`iconbtn ${chimeOn ? '' : 'off'}`} aria-label=${chimeOn ? 'Chime on: click to mute' : 'Chime muted: click to turn on'} title=${chimeOn ? 'Chime on' : 'Chime muted'} onClick=${toggleChime}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5z"></path>${chimeOn ? html`<path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M18.5 5.5a9 9 0 0 1 0 13"></path>` : html`<path d="m16 9 5 6"></path><path d="m21 9-5 6"></path>`}</svg>
+      </button>
+      <div class=${`clock ${sim?.paused ? 'paused' : ''}`} title="Bus time: the latest pose's time">${fmtClock(bt)}</div>
+    </header>`;
+}
+
+function ResetButton({ setSimState }) { // two clicks, so nobody resets the demo by accident
+  const [sure, setSure] = useState(false);
+  useEffect(() => { if (!sure) return; const id = setTimeout(() => setSure(false), 4000); return () => clearTimeout(id); }, [sure]);
+  return html`<button class=${sure ? 'paused' : ''} title="Back to the start: no pings, no case, day sweep"
+    onClick=${() => (sure ? setSimState({ reset: true }) : setSure(true))}>${sure ? 'Sure? Reset' : 'Reset'}</button>`;
+}
+
+function Steps({ stage, mode, cv }) {
+  const first = cv.case ? `Trail: ${cv.trail || '—'}` : mode === 'search' ? 'Trail pathing' : mode === 'night' ? 'Night sweep' : 'Day sweep';
+  const steps = [['Search', first], ['Signal', 'a ping'], ['Check', 'heat and camera'], ['Rescue', cv.case?.team_t ? 'team on the way' : 'route the team']];
+  return html`<ol class="steps" aria-label="Where the search is">${steps.map(([t, sub], i) => html`
+    <li class=${i + 1 === stage ? 'now' : i + 1 < stage ? 'done' : ''} aria-current=${i + 1 === stage ? 'step' : null}>
+      <b>${i + 1}</b><span>${t}</span><small>${sub}</small></li>`)}</ol>`;
+}
+
+function Weather({ bt }) {
+  const w = weather(bt);
+  return html`<span class=${`wx ${w.wind > 30 ? 'windy' : ''}`} title="Simulated weather">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 8h11a3 3 0 1 0-3-3"></path><path d="M3 12h16a3 3 0 1 1-3 3"></path><path d="M3 16h8"></path></svg>
+    <span>${w.temp}°C<br />${w.wind} km/h ${w.dir}</span></span>`;
+}
+
+function LoraBanner({ m, loraFresh }) {
+  const since = m.lastPoseWall ? Date.now() - m.lastPoseWall : null;
+  return html`<div class="banner ban-lora" role="status">
+    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#e0a43a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 21h20L12 3z"></path><path d="M12 10v5"></path><path d="M12 18h.01"></path></svg>
+    <div>
+      <div class="big">${loraFresh ? 'LoRa only · ' : ''}Wi-Fi to the pod lost${since != null ? html` <span class="mono" style="color:var(--amber)">${fmtDur(since)}</span> ago` : ''}</div>
+      <div class="sub">${loraFresh ? 'Pings and SOS still arrive by LoRa. No video, no coverage, no commands until the link is back.' : 'No LoRa alerts either. Pings on screen are the last known.'}</div>
+    </div>
+    <div class="spacer"></div>
+    ${m.lastAlertWall > 0 && html`<div style="text-align:right"><div class="small dim">Last LoRa packet</div><div class="mono" style="font-size:1.6rem;font-weight:600">${fmtAgo(Date.now() - m.lastAlertWall)}</div></div>`}
+  </div>`;
+}
+
+function SosBanner({ p, mode, setMode, locked, pick }) {
+  const sos = p.sos || {};
+  const bits = [sos.hurt ? 'hurt' : 'not hurt', sos.walk ? 'can walk' : "can't walk", sos.count ? `${sos.count} ${sos.count === 1 ? 'person' : 'people'}` : null].filter(Boolean);
+  return html`<div class="banner ban-sos" role="alert">
+    <span class="chipbig">${p.pin}</span>
+    <div><div class="big">SOS answered: ${bits.join(', ')}</div><div class="sub">Priority ${p.prio} · from the pod's SOS Wi-Fi page</div></div>
+    <div class="spacer"></div>
+    ${mode !== 'investigate'
+      ? html`<button disabled=${locked} onClick=${() => { pick(p.pin); setMode('investigate'); }}>Open emergency view</button>`
+      : html`<button onClick=${() => pick(p.pin)}>Show on map</button>`}
+  </div>`;
+}
+
+function PingBanner({ p, m, bt, kase, pick }) {
+  const match = kase?.expect_cls && kase.expect_cls === p.cls;
+  return html`<div class="banner ban-ping" role="alert" style=${`background:${prioColor(p.prio)}`}>
+    <span class="chipbig" style=${`color:${prioColor(p.prio)}`}>${p.pin}</span>
+    <div><div class="big">New ping needs a ranger decision</div><div class="sub">${CLS_PLAIN[p.cls] || p.cls}${match ? ' · matches what the person is carrying' : ''}</div></div>
+    <div class="spacer"></div>
+    <span class="sub">Waiting</span><span class="timer">${fmtDur(bt - (m.firstSeen[p.pin] ?? bt))}</span>
+    <button onClick=${() => pick(p.pin)}>Show</button>
+  </div>`;
+}
+
+// ---------- columns ----------
+function left(c) {
+  if (c.mode === 'investigate') return html`<${PilotCard} ...${c} /><${SosCard} ...${c} />`;
+  if (c.mode === 'search') return c.kase ? html`<${CaseCard} ...${c} /><${TrailProgress} ...${c} /><${TrailsCard} ...${c} />` : html`<${CaseEntry} ...${c} big=${true} />`;
+  return html`<${SweepCard} ...${c} /><${RuleCard} mode=${c.mode} meta=${c.meta} />${c.confirmed ? html`<${RescueWatch} ...${c} p=${c.confirmed} />` : html`<${CaseEntry} ...${c} />`}`;
+}
+
+function right(c, podStale) {
+  const loraList = podStale && Object.keys(c.m.alerts).length ? html`<${LoraPings} m=${c.m} />` : null;
+  if (c.mode === 'investigate') {
+    return html`${loraList}${c.target ? html`<${CameraCard} ...${c} /><${RescueCard} ...${c} p=${c.target} />` : html`<div class="p calm"><div class="t">Nothing to investigate</div><div class="lbl">Pick a ping, then press Investigate.</div></div><${PingsCard} ...${c} />`}`;
+  }
+  if (c.focus) return html`${loraList}<${PingCard} ...${c} p=${c.focus} /><${OtherPings} ...${c} />`;
+  return html`
+    ${loraList}
+    <${LegCard} ...${c} />
+    <${PingsCard} ...${c} />
+    ${c.mode !== 'search' && html`<${EventsCard} m=${c.m} />`}`;
+}
+
+function SweepCard({ s, m, bt, mode }) {
+  const cov = s.latest['ag/coverage'];
+  const pct = cov ? cov.pct : null;
+  let eta = null;
+  const h = m.cov;
+  if (h.length > 3 && pct != null && pct < 1) {
+    const [t0, p0] = h[0], [t1, p1] = h[h.length - 1];
+    const rate = (p1 - p0) / Math.max(1, t1 - t0); // share per ms of bus time
+    if (rate > 0) eta = (1 - p1) / rate;
+  }
+  const th = s.latest['ag/thermal'];
+  return html`<section class="p grow">
+    <h2 class="h">${mode === 'night' ? 'Night sweep' : 'Lawn-mower sweep'}</h2>
+    <div style="display:flex;align-items:baseline;gap:0.7rem"><span class="hero">${pct != null ? Math.round(pct * 100) + '%' : '—'}</span><span class="lbl">of the search box covered</span></div>
+    <div class="bar"><i style=${`width:${Math.round((pct || 0) * 100)}%`}></i></div>
+    <div class="row"><span class="lbl">In this mode</span><span class="num">${fmtDur(m.modeSince ? bt - m.modeSince : null)}</span></div>
+    <div class="row"><span class="lbl">Est. to finish</span><span class="num">${eta != null ? '~' + fmtDur(eta) : '—'}</span></div>
+    ${mode === 'night' && html`<div class="row"><span class="lbl">Thermal</span><span>${th && bt - th.t < 15000 ? `On · ${Math.round(th.max_c * 10) / 10}°C max` : 'No thermal data'}</span></div>`}
+  </section>`;
+}
+
+function RuleCard({ mode, meta }) {
+  const text = mode === 'night'
+    ? 'Any lost-phone beacon outside the campground. Campers’ phones are ignored.'
+    : `A lost-phone beacon more than ${meta.offtrail_m} m off trail, heard on 2+ passes, outside campgrounds.`;
+  return html`<section class="p"><h2 class="h">Pings on</h2><div style="line-height:1.45">${text}</div></section>`;
+}
+
+function CaseEntry({ kase, setForm, setMode, locked, big }) {
+  if (kase) {
+    return html`<section class="p accent">
+      <h2 class="h">Case open</h2>
+      <div style="font-size:1.3rem;font-weight:700">${kase.name}${kase.age ? `, ${kase.age}` : ''}</div>
+      <button class="btn primary" disabled=${locked} onClick=${() => setMode('search')}>Go to trail pathing</button>
+    </section>`;
+  }
+  return html`<section class=${`p ${big ? 'grow' : ''}`} style=${big ? 'justify-content:center;text-align:center' : ''}>
+    <h2 class="h">Missing person reported?</h2>
+    <div class="lbl">Open a case to rank the trails from their car park, or from the park entrance if the car isn't found.</div>
+    <button class=${`btn ${big ? 'primary big' : ''}`} onClick=${() => setForm({ name: '', age: '', details: '', carrying: 'iphone', car_park: '' })}>Open a case</button>
+  </section>`;
+}
+
+function CaseCard({ kase, cv, setForm, closeCase }) {
+  const [sure, setSure] = useState(false);
+  return html`<section class="p">
+    <div style="display:flex;align-items:center;gap:0.8rem">
+      <span class="carp" aria-hidden="true">${kase.car_park ? 'P' : 'E'}</span>
+      <div style="flex:1"><div style="font-size:1.25rem;font-weight:700">${kase.name}${kase.age ? `, ${kase.age}` : ''}</div>
+        <div class="lbl small">From ${cv.start?.label || 'the park entrance'} · ${CARRY_NAME[kase.carrying] || 'carrying not known'} · reported ${fmtHM(kase.opened_t)}</div></div>
+    </div>
+    ${kase.details && html`<div style="line-height:1.4">${kase.details}</div>`}
+    ${kase.ping && html`<div class="row"><span class="lbl">Linked ping</span><b>${kase.ping}</b></div>`}
+    <div style="display:flex;gap:1rem">
+      <button class="link" onClick=${() => setForm({ ...kase })}>Edit case</button>
+      ${sure ? html`<button class="link" style="color:#ff8f93" onClick=${() => { setSure(false); closeCase(); }}>Sure? Close it</button>`
+             : html`<button class="link" onClick=${() => setSure(true)}>Close case</button>`}
+    </div>
+  </section>`;
+}
+
+function TrailsCard({ cv, pickTrail }) {
+  return html`<section class="p grow">
+    <h2 class="h">Most likely trails</h2>
+    ${cv.ranking.slice(0, 3).map((r, i) => html`<button class=${`trail ${r.name === cv.trail ? 'on' : ''}`} key=${r.name} aria-pressed=${r.name === cv.trail}
+        onClick=${() => r.name !== cv.trail && pickTrail(r.name)} title=${r.name === cv.trail ? 'Being searched' : 'Search this trail instead'}>
+      <span class="num" style="font-size:1.1rem;color:${r.name === cv.trail ? 'var(--text)' : 'var(--muted)'}">${i + 1}</span>
+      <span><b style="font-weight:${r.name === cv.trail ? 700 : 600}">${r.name}</b><div class="lbl small">${r.name === cv.trail ? 'being searched' : r.dist_m < 50 ? 'starts by the car' : `${fmtM(r.dist_m)} from the car`}</div><div class="bar"><i style=${`width:${r.pct}%`}></i></div></span>
+      <span class="num" style="font-size:1.25rem;text-align:right">${r.pct}%</span>
+    </button>`)}
+    <div class="lbl small" style="margin-top:auto">Sample numbers. Click a trail to search it instead.</div>
+  </section>`;
+}
+
+function TrailProgress({ cv, m, mode, st }) {
+  if (!cv.trail || !m.bins.length) return null;
+  const hit = m.binsHit.reduce((a, v) => a + v, 0);
+  const total = routeLen(cv.route);
+  const pct = Math.min(100, Math.round((100 * hit) / m.bins.length));
+  const flown = (total * pct) / 100;
+  return html`<section class="p accent">
+    <h2 class="h">Searching · ${cv.trail}</h2>
+    <div style="display:flex;align-items:baseline;gap:0.7rem"><span class="hero">${pct}%</span><span class="lbl">of the first ${fmtM(total)} from the car</span></div>
+    <div class="bar tan"><i style=${`width:${pct}%`}></i></div>
+    <div class="row"><span class="lbl">Searched</span><span class="num">${fmtM(flown)} of ${fmtM(total)}</span></div>
+    <div class="lbl small">${pct >= 100 ? 'Stretch done. Pick the next trail, or keep flying it.' : mode === 'search' ? `The drone hears ±${st.corridor} m either side of the trail.` : 'Trail pathing is off.'}</div>
+  </section>`;
+}
+
+function LegCard({ s, locked, busy, sendCtrl }) {
+  const plan = Object.values(s.plans || {}).filter((p) => p.status === 'proposed').sort((a, b) => b.t - a.t)[0];
+  if (!plan) return null;
+  const leg = plan.legs?.[0] || {};
+  const key = `leg:${plan.id}`;
+  return html`<section class="p legc">
+    <h2 class="h">Next leg · needs ranger</h2>
+    <div style="font-size:1.1rem;font-weight:600">${plan.id} · ${plan.kind}${plan.legs?.length > 1 ? ` · ${plan.legs.length} legs` : ''}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0.5rem;text-align:center">
+      <div><div class="num" style="font-size:1.7rem">${leg.heading_deg != null ? Math.round(leg.heading_deg) + '°' : '—'}</div><div class="lbl small">heading</div></div>
+      <div><div class="num" style="font-size:1.7rem">${fmtM(leg.dist_m)}</div><div class="lbl small">distance</div></div>
+      <div><div class="num" style="font-size:1.7rem">${leg.alt_m != null ? Math.round(leg.alt_m) + ' m' : '—'}</div><div class="lbl small">altitude</div></div>
+    </div>
+    <div class="btns even">
+      <button class="btn primary" disabled=${locked || busy[key]} onClick=${() => sendCtrl({ cmd: 'accept_leg', id: plan.id }, `Accept ${plan.id}`, key)}>Accept leg</button>
+      <button class="btn" disabled=${locked || busy[key]} onClick=${() => sendCtrl({ cmd: 'reject_leg', id: plan.id }, `Reject ${plan.id}`, key)}>Reject</button>
+    </div>
+  </section>`;
+}
+
+function PingsCard({ open, bt, sel, pick, mode }) {
+  if (!open.length) {
+    return html`<section class="p calm grow">
+      <svg viewBox="0 0 24 24" fill="none" stroke="var(--moss)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="m8 12 3 3 5-6"></path></svg>
+      <div class="t">No pings</div>
+      <div class="lbl">${mode === 'night' ? 'A chime plays when one arrives.' : 'Nothing needs the ranger.'}</div>
+    </section>`;
+  }
+  return html`<section class="p grow">
+    <h2 class="h">Pings · ${open.length} open</h2>
+    <div class="pinglist">
+      ${open.map((p) => html`<button class=${`pingrow ${p.pin === sel ? 'sel' : ''}`} key=${p.pin} onClick=${() => pick(p.pin)}>
+        <span class="chip" style=${`background:${prioColor(p.prio)}`}>${p.pin}</span>
+        <span><div class="l1">${CLS_SHORT[p.cls] || p.cls} · ±${fmtM(p.r95)}</div><div class="l2">${p.off_trail_m != null ? `${p.off_trail_m} m off trail · ` : ''}heard ${fmtAgo(bt - (p.t - (p.last_s || 0) * 1000))}</div></span>
+        <span class="st" style=${`color:${p.status === 'new' ? prioColor(p.prio) : 'var(--muted)'}`}>${p.status.toUpperCase()}</span>
+      </button>`)}
+    </div>
+  </section>`;
+}
+
+function OtherPings({ open, focus, bt, pick }) { // the rest, small, so the ranger can switch
+  const rest = open.filter((p) => p.pin !== focus.pin);
+  if (!rest.length) return null;
+  return html`<section class="p" style="gap:0.3rem;padding:0.7rem 0.9rem">
+    <h2 class="h">Other pings</h2>
+    ${rest.map((p) => html`<button class="pingrow" key=${p.pin} onClick=${() => pick(p.pin)} style="padding:0.35rem">
+      <span class="chip" style=${`background:${prioColor(p.prio)};height:1.6rem;min-width:2.3rem`}>${p.pin}</span>
+      <span class="l2">${CLS_SHORT[p.cls] || p.cls} · ${p.status} · heard ${fmtAgo(bt - (p.t - (p.last_s || 0) * 1000))}</span>
+    </button>`)}
+  </section>`;
+}
+
+function RescueWatch({ p, kase, m, bt, s, setMode, closeCase, locked }) { // back on the sweep, a person found: keep an eye on them
+  const last = m.checkins?.[p.pin];
+  const th = s.latest['ag/thermal'], v = s.latest['ag/vision'];
+  const near = last != null && bt - last < 5000;
+  const [sure, setSure] = useState(false);
+  return html`<section class="p" style="border-color:var(--p1)">
+    <h2 class="h">Rescue under way · ${p.pin}${kase?.ping === p.pin ? ` · ${kase.name}` : ''}</h2>
+    <div class="row"><span class="lbl">Team</span><span>${kase?.team_t ? `on the way · ${fmtDur(Date.now() - kase.team_t)}` : m.teamPins?.[p.pin] ? 'on the way' : 'not sent yet'}</span></div>
+    <div class="row"><span class="lbl">Drone check-in</span><span>${near ? 'over them now' : last != null ? fmtAgo(bt - last) : 'soon'}</span></div>
+    ${near && html`<div class="row"><span class="lbl">Seen</span><span class="warmtxt">${th?.hot ? `${th.max_c.toFixed(1)}°C warm` : 'cool'}${v && bt - v.t < 5000 ? ' · person on camera' : ''}</span></div>`}
+    <div style="display:flex;gap:1rem">
+      <button class="link" disabled=${locked} onClick=${() => setMode('investigate')}>Show the rescue route</button>
+      ${kase && (sure ? html`<button class="link" style="color:#ff8f93" onClick=${() => { setSure(false); closeCase(); }}>Sure? Close the case</button>`
+                      : html`<button class="link" onClick=${() => setSure(true)}>Person safe · close case</button>`)}
+    </div>
+  </section>`;
+}
+
+function EventsCard({ m }) {
+  const ev = m.events.slice(0, 3);
+  return html`<section class="p">
+    <h2 class="h">Last 3 events</h2>
+    <div class="events">${ev.length ? ev.map((e) => html`<div><span class="mono">${fmtHM(e.t)}</span>${e.text}</div>`) : html`<div class="dim">Nothing yet</div>`}</div>
+  </section>`;
+}
+
+function PingCard({ p, meta, s, m, bt, cv, kase, locked, busy, pinCmd, setSel, sel, linkPing, confirmRescue, notPerson }) {
+  const camp = distToCamp(meta, p.x, p.y);
+  const start = cv.start && kase ? cv.start : null;
+  const fromStart = start ? Math.hypot(p.x - start.x, p.y - start.y) : null;
+  const th = s.latest['ag/thermal'];
+  const warm = p.flags?.thermal;
+  const match = kase?.expect_cls && kase.expect_cls === p.cls;
+  const b = busy[p.pin];
+  return html`<section class=${`p ping-p${p.prio || 4}`} style="gap:0.9rem">
+    <div style="display:flex;align-items:center;gap:0.9rem">
+      <span class="chip xl" style=${`background:${prioColor(p.prio)}`}>${p.pin}</span>
+      <div style="flex:1"><div style="font-size:1.45rem;font-weight:700">Priority ${p.prio} · ${PRIO_NAME[p.prio] || ''}</div><div class="lbl">${CLS_PLAIN[p.cls] || p.cls}</div></div>
+      ${sel === p.pin && html`<button class="link" onClick=${() => setSel(null)}>Back</button>`}
+    </div>
+    ${match && html`<div style="color:var(--moss);font-weight:600">Matches what the person is carrying</div>`}
+    ${kase && html`<div class="row" style="align-items:center"><span class="lbl">${kase.ping === p.pin ? `This is ${kase.name}'s ping` : kase.ping ? `Case is linked to ${kase.ping}` : 'Not linked to the case'}</span>
+      <button class="link" onClick=${() => linkPing(kase.ping === p.pin ? '' : p.pin)}>${kase.ping === p.pin ? 'Unlink' : 'Link to case'}</button></div>`}
+    ${p.sos && html`<div style="color:#ff8f93;font-weight:700">SOS: ${p.sos.hurt ? 'hurt' : 'not hurt'}, ${p.sos.walk ? 'can walk' : "can't walk"}, ${p.sos.count || '?'} people</div>`}
+    <div class="facts">
+      <div class="fact"><b>±${fmtM(p.r95)}</b><span class="lbl">search circle</span></div>
+      <div class="fact"><b>${fmtAgo(bt - (p.t - (p.last_s || 0) * 1000))}</b><span class="lbl">last heard</span></div>
+      <div class="fact"><b>${p.off_trail_m != null ? `${p.off_trail_m} m` : '—'}</b><span class="lbl">off trail</span></div>
+      <div class="fact"><b>${camp === 0 ? 'inside' : fmtM(camp)}</b><span class="lbl">${camp === 0 ? 'the campground' : 'from campground'}</span></div>
+      ${fromStart != null && html`<div class="fact"><b>${fmtM(fromStart)}</b><span class="lbl">from ${start.label === 'Park entrance' ? 'the entrance' : 'the car'} (straight line)</span></div>`}
+      ${warm && html`<div class="fact warm"><b>${th ? `${Math.round(th.max_c * 10) / 10}°C` : 'warm'}</b><span>thermal: warm spot</span></div>`}
+    </div>
+    <div style="flex:1"></div>
+    ${p.status === 'new' || p.status === 'acknowledged' ? html`
+      <div class="btns">
+        <button class="btn primary big" disabled=${locked || b} onClick=${() => pinCmd(p.pin, 'investigate', 'Investigate')}>Investigate</button>
+        <button class="btn big" disabled=${locked || b} onClick=${() => pinCmd(p.pin, 'clear', 'Clear')}>Clear</button>
+      </div>
+      <button class="btn" disabled>Confirm person · unlocks while investigating</button>`
+    : p.status === 'investigating' ? html`<${CheckPanel} p=${p} c=${m.checks[p.pin]} bt=${bt} locked=${locked} b=${b} confirmRescue=${confirmRescue} notPerson=${notPerson} />`
+    : html`<div class="lbl" style="text-align:center;font-size:1.1rem">${p.status === 'confirmed' ? 'Person confirmed by the ranger' : 'Cleared by the ranger'}</div>`}
+    ${locked && html`<div class="lbl small">Commands need the Wi-Fi link to the pod.</div>`}
+  </section>`;
+}
+
+function CheckPanel({ p, c, bt, locked, b, confirmRescue, notPerson }) {
+  const v = verdict(c, bt);
+  const heat = !c || c.closeSince == null ? 'waiting' : c.warm ? `${c.maxC?.toFixed(1)}°C · warm` : c.maxC != null ? `${c.maxC.toFixed(1)}°C · nothing warm` : 'reading…';
+  const cam = !c || c.closeSince == null ? 'waiting' : c.person ? `person seen · ${Math.round(c.person * 100)}%` : v === 'none' || v === 'unclear' ? 'no person seen' : 'looking…';
+  const head = { flying: `Drone flying to ${p.pin} · ${c?.dist != null ? fmtM(c.dist) : '…'}`, checking: `Over ${p.pin} · checking`,
+    person: 'Person found: warm, and seen on camera', none: 'No one here: nothing warm, no person seen', unclear: 'Not sure: check the camera yourself' }[v];
+  return html`<div class=${`check v-${v}`} role="status">
+    <div class="check-head">${head}</div>
+    <div class="row"><span class="lbl">Drone</span><span>${c?.closeSince != null ? 'over the ping' : c?.dist != null ? `${fmtM(c.dist)} away` : 'on its way'}</span></div>
+    <div class="row"><span class="lbl">Heat</span><span class=${c?.warm ? 'warmtxt' : ''}>${heat}</span></div>
+    <div class="row"><span class="lbl">Camera</span><span>${cam}</span></div>
+  </div>
+  ${v === 'person' ? html`<button class="btn danger big" disabled=${locked || b} onClick=${() => confirmRescue(p.pin)}>Confirm person · start rescue</button>
+      <button class="btn" disabled=${locked || b} onClick=${() => notPerson(p.pin)}>Not a person · continue search</button>`
+    : v === 'none' ? html`<button class="btn primary big" disabled=${locked || b} onClick=${() => notPerson(p.pin)}>Not a person · continue search</button>
+      <button class="btn" disabled=${locked || b} onClick=${() => confirmRescue(p.pin)}>Confirm person anyway</button>`
+    : html`<div class="btns even">
+        <button class="btn danger" disabled=${locked || b} onClick=${() => confirmRescue(p.pin)}>Confirm person</button>
+        <button class="btn" disabled=${locked || b} onClick=${() => notPerson(p.pin)}>Not a person</button></div>`}`;
+}
+
+function PilotCard({ s, pose, target }) {
+  const plan = Object.values(s.plans || {}).filter((p) => p.kind === 'homing' && (p.status === 'accepted' || p.status === 'proposed')).sort((a, b) => b.t - a.t)[0];
+  const leg = plan?.legs?.[0];
+  let hdg = null, dist = null, alt = pose?.z ?? null, how = '';
+  if (leg) { hdg = leg.heading_deg; dist = leg.dist_m; alt = leg.alt_m ?? alt; how = `${plan.id} · ${plan.status === 'accepted' ? 'accepted by ranger' : 'proposed, not accepted yet'}`; }
+  else if (pose && target) { hdg = heading(target.x - pose.x, target.y - pose.y); dist = Math.hypot(target.x - pose.x, target.y - pose.y); how = `Worked out from the drone to ${target.pin}`; }
+  return html`<section class="p podc">
+    <h2 class="h">Read to pilot${target ? ` · to ${target.pin}` : ''}</h2>
+    ${hdg == null ? html`<div class="lbl">Pick a ping to get a heading.</div>` : html`
+      <div style="display:flex;align-items:center;gap:1.1rem">
+        <svg class="compass" viewBox="0 0 100 100" role="img" aria-label=${`Heading ${Math.round(hdg)} degrees`}>
+          <circle cx="50" cy="50" r="44" fill="none" stroke="var(--line-2)" stroke-width="3"></circle>
+          <text x="50" y="17" fill="var(--muted)" font-size="11" text-anchor="middle">N</text>
+          <g transform=${`rotate(${hdg} 50 50)`}><path d="M50 14 L60 52 L50 46 L40 52 Z" fill="var(--pod)"></path></g>
+        </svg>
+        <div><div class="num" style="font-size:4rem;line-height:1">${Math.round(hdg)}°</div><div class="lbl">heading</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+        <div><div class="num" style="font-size:2.3rem">${fmtM(dist)}</div><div class="lbl">to ping</div></div>
+        <div><div class="num" style="font-size:2.3rem">${alt != null ? Math.round(alt) + ' m' : '—'}</div><div class="lbl">altitude</div></div>
+      </div>
+      <div class="lbl small">${how}</div>`}
+  </section>`;
+}
+
+function SosCard({ target, locked, busy, sendCtrl }) {
+  const sos = target?.sos;
+  return html`<section class="p grow">
+    <h2 class="h">SOS answer</h2>
+    ${sos ? html`<div class="sosgrid">
+        <div class=${sos.hurt ? 'bad' : ''}><b>Hurt</b><span class="lbl">${sos.hurt ? 'yes' : 'no'}</span></div>
+        <div class=${sos.walk ? '' : 'bad'}><b>Walk</b><span class="lbl">${sos.walk ? 'yes' : 'no'}</span></div>
+        <div><b>${sos.count ?? '?'}</b><span class="lbl">people</span></div>
+      </div>` : html`<div class="lbl">No answer yet. Turn the SOS Wi-Fi page on when the pod is near the ping.</div>`}
+    <div style="flex:1"></div>
+    <div class="row" style="align-items:center"><span class="lbl">SOS Wi-Fi page</span>
+      <span style="display:flex;gap:0.5rem">
+        <button class="btn" disabled=${locked || busy.sos} onClick=${() => sendCtrl({ cmd: 'sos_on' }, 'SOS page on', 'sos')}>On</button>
+        <button class="btn" disabled=${locked || busy.sos} onClick=${() => sendCtrl({ cmd: 'sos_off' }, 'SOS page off', 'sos')}>Off</button>
+      </span></div>
+  </section>`;
+}
+
+function CameraCard({ s, bt, m, target }) {
+  const [broken, setBroken] = useState(false);
+  const v = s.latest['ag/vision'], th = s.latest['ag/thermal'];
+  const src = v?.snap ? `/${v.snap}` : `/live/camera.jpg?t=${Math.floor(Date.now() / 2000)}`;
+  return html`<section class="p grow">
+    <h2 class="h">Camera check${v ? ` · ${v.kind} ${Math.round(v.conf * 100)}%` : ''}</h2>
+    <div class="snap">${broken && !v?.snap ? html`<span>${v && bt - v.t < 10000 ? `Person seen · ${Math.round(v.conf * 100)}% (no picture in the sim)` : 'No camera feed'}</span>` : html`<img src=${src} alt=${v ? `Camera snapshot: ${v.kind}` : 'Live camera'} onError=${() => setBroken(true)} onLoad=${() => setBroken(false)} />`}</div>
+    ${(() => {
+      const c = target && m.checks[target.pin];
+      if (c?.warm) return html`<div class="row"><span class="lbl">Thermal</span><span class="num warmtxt" style="font-size:1.4rem">${c.maxC.toFixed(1)}°C · warm</span></div>`;
+      return html`<div class="row"><span class="lbl">Thermal</span><span class="num" style="font-size:1.4rem">${th && bt - th.t < 15000 ? `${Math.round(th.max_c * 10) / 10}°C` : '—'}</span></div>`;
+    })()}
+  </section>`;
+}
+
+function RescueCard({ p, rescue, kase, locked, busy, pinCmd, confirmRescue, notPerson, m, bt, teamOnWay }) {
+  const b = busy[p.pin];
+  const r = rescue;
+  return html`<section class="p" style="border-color:#f2f2f2">
+    <h2 class="h">Rescue route · ${p.pin}${kase?.ping === p.pin ? ` · ${kase.name}` : ''}</h2>
+    <div class="num" style="font-size:1.45rem">${p.lat != null ? `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` : `${Math.round(p.x)} E, ${Math.round(p.y)} N (local m)`}</div>
+    ${r && html`<ol class="route">
+      <li>Start at <b>${r.start.label}</b></li>
+      ${r.trail && r.onTrail > 5 && html`<li>Walk <b>${fmtM(r.onTrail)}</b> along ${r.trail}</li>`}
+      <li>Leave ${r.trail ? 'the trail' : 'the start'} heading <b>${r.dir}</b>, <b>${fmtM(r.off)}</b> through the woods</li>
+    </ol>
+    <div class="row"><span class="lbl">On foot</span><span class="num" style="font-size:1.3rem">~${fmtDur(r.secs * 1000)}</span></div>`}
+    ${p.status === 'investigating' ? html`<${CheckPanel} p=${p} c=${m.checks[p.pin]} bt=${bt} locked=${locked} b=${b} confirmRescue=${confirmRescue} notPerson=${notPerson} />`
+    : p.status === 'confirmed' ? (kase?.team_t || m.teamPins?.[p.pin]
+      ? html`<div style="color:var(--moss);font-weight:700;text-align:center">Team on the way · sent ${fmtAgo(Date.now() - (kase?.team_t || Date.now()))}</div>`
+      : html`<div style="color:var(--moss);font-weight:700;text-align:center">Person confirmed · the drone stays over them</div>
+        <button class="btn primary big" disabled=${locked} onClick=${() => teamOnWay(p.pin)}>Team on the way · back to scanning</button>`)
+    : p.status === 'cleared' ? html`<div class="lbl" style="text-align:center">Cleared</div>`
+    : html`<button class="btn primary big" disabled=${locked || b} onClick=${() => pinCmd(p.pin, 'investigate', 'Investigate')}>Investigate</button>`}
+  </section>`;
+}
+
+function LoraPings({ m }) {
+  const rows = Object.values(m.alerts).sort((a, b) => (a.prio - b.prio) || (b.wall - a.wall));
+  return html`<section class="p" style="border-color:var(--amber)">
+    <h2 class="h">Pings from LoRa</h2>
+    <div class="pinglist">${rows.map((a) => html`<div class="pingrow" key=${a.track}>
+      <span class="chip" style=${`background:${prioColor(a.prio)}`}>T${a.track}</span>
+      <span><div class="l1">${a.kind === 2 ? 'SOS' : CLS_SHORT[a.cls] || a.cls || 'Beacon'} · ±${fmtM(a.r95)}</div>
+        <div class="l2">${a.sos ? `${a.sos.hurt ? 'hurt' : 'not hurt'}, ${a.sos.walk ? 'can walk' : "can't walk"} · ` : ''}alert ${fmtAgo(Date.now() - a.wall)}</div></span>
+    </div>`)}</div>
+  </section>`;
+}
+
+// ---------- the map: livemap.js as built, seen from straight above, with less on it ----------
+// Its own extras (beacon dots, track circles, heatmap, labels, key, tools) are switched off through
+// its public options, and we add the trail stretch, the car park, a clearer drone marker and a short key.
+const MAP_LAYERS = { probability: false, trail: false, tracks: false, heard: false, roads: true, labels: false };
+const SWEEP = new Set(['patrol', 'night']);
+
+function MapPane({ meta, s, sel, follow, setFollow, night, cv, podStale, m, setSel, mode, target, rescue }) {
+  const host = useRef(null);
+  const lm = useRef(null);
+  const ex = useRef({ car: null, pod: null, hits: -1, fitKey: null });
+  const [ready, setReady] = useState(false);
+  const [base, setBase] = useState(() => loadPref('base', 'sat'));
+  const [mapErr, setMapErr] = useState(null);
+
+  useEffect(() => {
+    try {
+      lm.current = new LiveMap(host.current, meta, { onPick: (pin) => setSel(pin), status: false, key: false, tools: false, labels: false });
+      window.tvMap = lm.current; // for poking at it from the browser console
+      const map = lm.current.map;
+      map.dragRotate.disable();
+      map.touchZoomRotate.disableRotation();
+      map.keyboard.disableRotation();
+      map.once('load', () => { setupMap(lm.current); setReady(true); });
+    } catch (e) { setMapErr(String(e.message || e)); }
+    return () => { lm.current?.destroy(); lm.current = null; };
+  }, []);
+
+  const map = ready ? lm.current?.map : null;
+  useEffect(() => { if (map) styleMap(map, night, base); savePref('base', base); }, [ready, night, base]);
+  useEffect(() => { if (map) drawCase(lm.current, ex.current, cv); }, [ready, cv]);
+  useEffect(() => { const p = sel && s.pins[sel]; if (p) lm.current?.flyTo(p.x, p.y); }, [sel]);
+
+  if (map) {
+    // what to show: the swept ground in the sweeps, the search area box, and frame the map on the job at hand
+    const area = SWEEP.has(mode) ? meta.search.area : null;
+    map.getSource('tv-area')?.setData(fc(area ? [box(lm.current, area)] : []));
+    map.getSource('tv-rescue')?.setData(fc(rescue ? [lineF(lm.current, rescue.pts)] : []));
+    const fitKey = `${mode}|${cv.case ? cv.route.length : 0}|${mode === 'investigate' ? target?.pin : ''}`;
+    if (fitKey !== ex.current.fitKey) { ex.current.fitKey = fitKey; frame(lm.current, meta, mode, cv, target, s, rescue); }
+    const hits = m.binsHit ? m.binsHit.reduce((a, v) => a + v, 0) : 0;
+    if (hits !== ex.current.hits) { ex.current.hits = hits; map.getSource('tv-flown')?.setData(fc(flownParts(lm.current, m))); }
+    const pose = s.poses.pod || Object.values(s.poses)[0];
+    if (pose) {
+      if (!ex.current.pod) ex.current.pod = new maplibregl.Marker({ element: Object.assign(document.createElement('div'), { className: 'podmark', title: 'Drone' }) }).setLngLat(lm.current.toLL(pose.x, pose.y)).addTo(map);
+      ex.current.pod.setLngLat(lm.current.toLL(pose.x, pose.y));
+      ex.current.pod.getElement().classList.toggle('stale', podStale);
+    }
+  }
+  // the map gets the same state, but only the pings worth seeing: heard-only and cleared ones stay in the list
+  if (!ex.current.view || ex.current.base !== s) { ex.current.base = s; ex.current.view = Object.create(s); }
+  ex.current.view.pins = Object.fromEntries(Object.entries(s.pins).filter(([k, p]) =>
+    k === sel || p.status === 'investigating' || p.status === 'confirmed' || (p.status !== 'cleared' && p.prio < 4)));
+  lm.current?.update(ex.current.view, { sel, follow, layers: { ...MAP_LAYERS, coverage: SWEEP.has(mode) } });
+
+  return html`<div class="mapbox">
+    <div class="lmhost" ref=${host}></div>
+    ${mapErr && html`<div class="boot">Map failed to start: ${mapErr}</div>`}
+    <div class="maptag">
+      <span class="seg" role="group" aria-label="Map imagery">
+        <button class=${base === 'sat' ? 'on' : ''} aria-pressed=${base === 'sat'} onClick=${() => setBase('sat')}>Satellite</button>
+        <button class=${base === 'topo' ? 'on' : ''} aria-pressed=${base === 'topo'} onClick=${() => setBase('topo')}>Map</button>
+      </span>
+      <button class=${follow ? 'on' : ''} aria-pressed=${follow} onClick=${() => setFollow(!follow)}>Follow drone</button>
+      <button onClick=${() => lm.current && frame(lm.current, meta, mode, cv, target, s, rescue)}>Fit</button>
+      ${podStale && m.lastPoseWall > 0 && html`<span class="stale">Drone last seen ${fmtAgo(Date.now() - m.lastPoseWall)}</span>`}
+    </div>
+    <${MapKey} mode=${mode} kase=${cv.case} rescue=${!!rescue} />
+  </div>`;
+}
+
+function MapKey({ mode, kase, rescue }) {
+  const rows = [['pod', 'Drone and what it can hear']];
+  if (SWEEP.has(mode)) rows.push(['cov', 'Ground already searched'], ['area', 'Search area']);
+  if (mode === 'search' && kase) rows.push(['route', 'Trail stretch to search'], ['flown', 'Searched so far'], ['car', 'Where the car is']);
+  if (rescue) rows.push(['rescue', 'Route for the ground team']);
+  rows.push(['ping', 'Ping: colour shows how urgent']);
+  return html`<div class="mapkey" aria-label="Map key">${rows.map(([k, t]) => html`<div key=${k}><i class=${`k-${k}`}>${k === 'car' ? 'P' : k === 'ping' ? 'P1' : ''}</i>${t}</div>`)}</div>`;
+}
+
+const fc = (f) => ({ type: 'FeatureCollection', features: f || [] });
+const lineF = (live, pts) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: pts.map(([x, y]) => live.toLL(x, y)) } });
+const box = (live, [x0, y0, x1, y1]) => lineF(live, [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]);
+
+function setupMap(live) {
+  const map = live.map;
+  // straight down, flat: no terrain tilt, no rotation
+  map.setTerrain(null);
+  live.exag = 0;
+  map.setMaxPitch(0);
+  map.jumpTo({ pitch: 0, bearing: 0 });
+  for (const id of ['drone', 'hill']) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none');
+  if (map.getLayer('foot')) map.setPaintProperty('foot', 'fill-opacity', 0.1);
+  const before = map.getLayer('tracks') ? 'tracks' : undefined;
+  for (const id of ['tv-area', 'tv-route', 'tv-flown', 'tv-rescue']) map.addSource(id, { type: 'geojson', data: fc() });
+  map.addLayer({ id: 'tv-area', type: 'line', source: 'tv-area', paint: { 'line-color': '#e6eadf', 'line-width': 2, 'line-opacity': 0.7, 'line-dasharray': [3, 2] } }, before);
+  map.addLayer({ id: 'tv-route-glow', type: 'line', source: 'tv-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#e0a43a', 'line-width': 16, 'line-opacity': 0.35, 'line-blur': 4 } }, before);
+  map.addLayer({ id: 'tv-route', type: 'line', source: 'tv-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#f2c26b', 'line-width': 4 } }, before);
+  map.addLayer({ id: 'tv-rescue', type: 'line', source: 'tv-rescue', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 4, 'line-dasharray': [1.5, 1.2] } }, before);
+  map.addLayer({ id: 'tv-flown', type: 'line', source: 'tv-flown', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#7fe08a', 'line-width': 7 } }, before);
+}
+
+function styleMap(map, night, base) {
+  const c = night ? FOREST.night : FOREST.day;
+  const set = (id, prop, v) => { if (map.getLayer(id)) map.setPaintProperty(id, prop, v); };
+  const vis = (id, on) => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); };
+  vis('sat', base === 'sat');
+  vis('topo', base === 'topo');
+  set('sat', 'raster-brightness-max', night ? 0.5 : 0.95);
+  set('topo', 'raster-brightness-max', night ? 0.5 : 0.95);
+  set('bg', 'background-color', c.bg);
+  set('zones-fill', 'fill-color', c.camp);
+  set('zones-line', 'line-color', ['match', ['get', 'kind'], 'park', c.park, c.camp]);
+  set('lines-road', 'line-color', c.road);
+  set('lines-casing', 'line-color', c.casing);
+}
+
+function drawCase(live, ex, cv) {
+  const map = live.map;
+  const route = cv.case && cv.route?.length > 1 ? cv.route : [];
+  map.getSource('tv-route')?.setData(fc(route.length ? [lineF(live, route)] : []));
+  ex.car?.remove();
+  ex.car = null;
+  if (cv.case && cv.start) {
+    const el = Object.assign(document.createElement('div'), { className: 'carmark', textContent: cv.case.car_park ? 'P' : 'E', title: cv.start.label });
+    ex.car = new maplibregl.Marker({ element: el }).setLngLat(live.toLL(cv.start.x, cv.start.y)).addTo(map);
+  }
+}
+
+function flownParts(live, m) { // the 10 m pieces of the stretch already searched, as lines
+  const out = [];
+  let run = [];
+  m.bins.forEach((b, i) => {
+    if (m.binsHit[i]) run.push(b);
+    else { if (run.length > 1) out.push(lineF(live, run)); run = []; }
+  });
+  if (run.length > 1) out.push(lineF(live, run));
+  return out;
+}
+
+function frame(live, meta, mode, cv, target, s, rescue) { // zoom to the job at hand
+  let pts;
+  if (mode === 'search' && cv.case && cv.route.length > 1) pts = [...cv.route, [cv.start.x, cv.start.y]];
+  else if (mode === 'investigate' && rescue) pts = rescue.pts;
+  else if (mode === 'investigate' && target) {
+    const pose = s.poses.pod || Object.values(s.poses)[0];
+    pts = [[target.x, target.y], ...(pose ? [[pose.x, pose.y]] : [])];
+  } else { const [x0, y0, x1, y1] = meta.search.area; pts = [[x0, y0], [x1, y1]]; }
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const padM = Math.max(40, 0.15 * Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)));
+  live.map.fitBounds([live.toLL(Math.min(...xs) - padM, Math.min(...ys) - padM), live.toLL(Math.max(...xs) + padM, Math.max(...ys) + padM)],
+    { padding: 40, duration: 900, maxZoom: live.big ? 18 : 22 });
+}
+
+// ---------- the case form ----------
+function CaseForm({ meta, init, editing, save, cancel }) {
+  const [v, setV] = useState({ name: '', age: '', details: '', carrying: 'iphone', car_park: '', ...init });
+  const [problems, setProblems] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const first = useRef(null);
+  useEffect(() => { first.current?.focus(); }, []);
+  const f = (k) => (e) => setV({ ...v, [k]: e.target.value });
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!v.name.trim()) { setProblems(['A name is needed.']); return; }
+    setSaving(true);
+    const p = await save({ name: v.name, age: v.age, details: v.details, carrying: v.carrying, car_park: v.car_park }, !editing);
+    setSaving(false);
+    if (p) setProblems(p);
+  };
+  return html`<div class="overlay" role="dialog" aria-modal="true" aria-labelledby="case-title" onKeyDown=${(e) => e.key === 'Escape' && cancel()}>
+    <form class="form" onSubmit=${submit}>
+      <h2 id="case-title">${editing ? 'Edit the case' : 'Open a case'}</h2>
+      <div class="lbl">Kept on this laptop only. Never sent over the radio or to the drone.</div>
+      <div class="two">
+        <label>Name<input ref=${first} value=${v.name} onInput=${f('name')} maxlength="80" required autocomplete="off" /></label>
+        <label>Age<input value=${v.age} onInput=${f('age')} maxlength="12" inputmode="numeric" autocomplete="off" /></label>
+      </div>
+      <label>What they look like (clothing, colours, anything identifying)<textarea value=${v.details} onInput=${f('details')} maxlength="400"></textarea></label>
+      <div class="two">
+        <label>Car found at<select value=${v.car_park} onChange=${f('car_park')}>
+          <option value="">Not found: start from the park entrance</option>
+          ${(meta.search?.car_parks || []).map((cp) => html`<option value=${cp.name}>${cp.name}</option>`)}
+        </select></label>
+        <label>Carrying<select value=${v.carrying} onChange=${f('carrying')}>${CARRY.map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></label>
+      </div>
+      ${problems && html`<div class="err" role="alert">${problems.join(' ')}</div>`}
+      <div class="btns even">
+        <button type="button" class="btn big" onClick=${cancel}>Cancel</button>
+        <button type="submit" class="btn primary big" disabled=${saving}>${editing ? 'Save' : 'Save and start trail pathing'}</button>
+      </div>
+    </form>
+  </div>`;
+}
+
+render(html`<${App} />`, document.getElementById('app'));

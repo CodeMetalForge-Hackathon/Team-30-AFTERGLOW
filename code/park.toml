@@ -80,7 +80,7 @@ rssi_sigma = 4.0
 [rules]
 offtrail_m = 30
 min_passes = 2
-pin_hold_s = 15
+pin_hold_s = 5             # short for the quick demo (afterglow.toml keeps 15)
 sos_r95_m = 30.0
 night_start = "21:00"
 night_end = "06:00"
@@ -92,9 +92,9 @@ zones_geojson = "data/park_zones.geojson"
 [locate]
 cell_m = 10.0
 detect_m = 40.0
-# The search box between the Quarry and Otter Cove trails and Ocean Path (80 x 80 cells). The
-# whole park map would be 221 x 211, too big to send every second.
-area_m = [500.0, 300.0, 1300.0, 1100.0]
+# A small search box from Gorham Mountain lot south along Ocean Path (30 x 46 cells), so a sweep
+# takes minutes, not hours. The whole park map would be 221 x 211, too big to send every second.
+area_m = [1000.0, 400.0, 1300.0, 860.0]
 stale_s = 30
 
 [http]
@@ -112,23 +112,45 @@ repeat_s = 5
 pod_every_s = 2
 circles = true
 
+[search]
+# Trail pathing on the TV dashboard (tv.html). SAMPLE car parks and trail popularity until we
+# have the published trail-use data. The case is saved under runs/, never on the bus or LoRa.
+case_file = "runs/case_park.json"
+corridor_m = 40.0
+segment_m = 600.0          # search the first 600 m of the trail from the car
+near_m = 800.0
+default_popularity = 0.1
+entrance_xy = [0.0, -470.0]   # Blackwoods Campground entrance
+car_parks = [
+  { name = "Gorham Mountain lot", x = 1150.0, y = 820.0 },
+  { name = "Otter Point lot", x = 1080.0, y = -250.0 },
+  { name = "Blackwoods trailhead lot", x = 150.0, y = 110.0 },
+  { name = "Otter Cove lot", x = 1045.0, y = 880.0 },
+  { name = "Cadillac South Ridge lot", x = -120.0, y = -400.0 },   # the trailhead by Blackwoods Campground: shows off trail following
+]
+popularity = { "Ocean Path" = 1.0, "Gorham Mountain Trail" = 0.75, "Cadillac South Ridge Trail" = 0.5, "Cadillac Cliffs Path" = 0.35, "Quarry Trail" = 0.3, "Otter Cove Trail" = 0.3, "Cadillac South Ridge Trail Access" = 0.15, "Sea Path" = 0.1 }
+
 [sim]
 # Lanes over the search box ([locate] area_m).
 # A dumb stand-in path; real routes come from planner.py.
 path = "lanes"
-speed_mps = 8.0
+speed_mps = 14.0           # quick for the demo: the false signal pings in about 1 minute, the person about 1 minute later
 height_m = 15.0
 lane_m = 40.0
+lanes_from = "north" # start the lanes by Gorham Mountain lot (the north edge)
 area_m = []
 rssi_p0 = -48.0
 rssi_n = 2.4
 rssi_sigma = 4.0
 rssi_floor = -98.0
-# Off-trail distances measured with parkmap.dist_to_trail (trails and roads).
+checkin_s = 120.0          # after "team on the way", the pod drops by the person this often...
+checkin_dwell_s = 30.0     # ...and circles this long, then goes back to its sweep
+# Two things to find, so the map stays readable: a false signal first, then the person. Off-trail distances measured with
+# parkmap.dist_to_trail (trails and roads).
 phones = [
-  { name = "dead_iphone", cls = "findmy", x = 950.0, y = 690.0 },    # 68 m off trail
-  { name = "airtag_pack", cls = "findmy", x = 1130.0, y = 780.0 },   # 39 m off trail
-  { name = "pixel_off",   cls = "findhub", x = 640.0, y = 960.0 },   # 9 m: near a trail, search-only
+  { name = "airtag_lost", cls = "findmy", x = 1215.0, y = 795.0 },                 # a false signal first: a dropped AirTag 40 m off Ocean Path, ~30 m along from the lot, nobody with it
+  { name = "dead_iphone", cls = "findmy", x = 1220.0, y = 690.0, person = true },   # the missing person: 40 m off Ocean Path, ~140 m along from Gorham Mountain lot
+  { name = "hiker_ridge", cls = "findmy", x = -385.0, y = -205.0, person = true },  # only trail following finds them: 38 m off Cadillac South Ridge Trail, ~330 m from its lot
   { name = "team_phone",  cls = "findmy" },
 ]
 

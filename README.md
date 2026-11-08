@@ -45,6 +45,7 @@ cd code && python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop
 .venv/bin/python tools/fake_bus.py --speed 5     # fake pod + hidden phones, indoor; or --print without a broker
 .venv/bin/python tools/fake_bus.py --config park.toml --speed 10   # the same at park scale
 .venv/bin/python -m afterglow.dashboard          # then open http://localhost:8080 (add --config park.toml for the park)
+                                                 # the operator TV is http://localhost:8080/tv.html (docs/TV.md)
 mosquitto_sub -v -t 'ag/#'                       # watch the bus
 ```
 

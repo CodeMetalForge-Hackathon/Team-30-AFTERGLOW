@@ -43,8 +43,11 @@ code/
     lora_out.py         pod: ag/target (+ ag/pose, ag/sys) -> 16-byte alerts on the RFM95W every [lora] repeat_s, plus a heartbeat; obeys lora_off
     lora_rx.py          laptop: receiver lines (Pluto SDR via tools/pluto_rx.py) -> ag/alert (drops other teams' packets)
     cot_out.py          laptop: ag/alert (or ag/target + ag/pose with --wifi) -> CoT XML: UDP multicast for ATAK, TCP server for iTAK ([atak] table)
-    dashboard.py        web server on [http] port: SSE state stream, /api/ctrl and /api/mode, live/ and snaps/
-    web/                dashboard front end: app.js (Preact+htm panels), map.js (Leaflet, metres), store.js (SSE reducer)
+    trails.py           trail pathing: rank trails from a start point ([search] popularity), the route along one
+    case.py             the open missing-person case (laptop only, runs/; never on the bus or LoRa)
+    dashboard.py        web server on [http] port: SSE state stream, /api/ctrl, /api/mode, /api/case, live/ and snaps/
+    web/                dashboard front end: app.js (Preact+htm panels), map.js (Leaflet, metres), store.js (SSE reducer);
+                        tv.html/tv.js/tv.css (operator TV around livemap.js, docs/TV.md); livemap.js (3D map, docs/LIVEMAP.md)
   afterglow.toml        DEMO profile (taped indoor park); must be identical on the pod and the laptop
   park.toml             PARK profile (realistic view, real Acadia trails), laptop only; same keys as afterglow.toml
   data/                 trails/zones.geojson (indoor) and park_trails/park_zones.geojson (OSM); all lon/lat
@@ -78,7 +81,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop.txt   # la
 mosquitto_sub -v -t 'ag/#'                                               # watch the whole bus
 .venv/bin/python -m afterglow.tracker & .venv/bin/python -m afterglow.locate & .venv/bin/python -m afterglow.geofence [--fresh]   # real modules, with fake_bus --only pose,ble
 .venv/bin/python -m afterglow.thermal --fake [--dry-run --frames 8]      # fake thermal: live/thermal.png + ag/thermal
-.venv/bin/python -m afterglow.dashboard [--config park.toml]             # dashboard on http://localhost:8080
+.venv/bin/python -m afterglow.dashboard [--config park.toml]             # dashboard on http://localhost:8080 (operator TV: /tv.html)
+.venv/bin/python tools/local_stack.py --config park.toml --speed 10      # whole laptop stack, no broker; open /tv.html
 .venv/bin/python -m afterglow.dashboard --broker <pi-ip>                 # laptop dashboard against the pod's broker
 mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log                      # record a run
 .venv/bin/python tools/replay.py runs/1432.log [--loop] [--topics 'ag/obs/#,ag/pose']   # replay it
@@ -133,6 +137,7 @@ Anything past `--print` or `--dry-run` needs Mosquitto on the laptop (`brew inst
 - Call it "patrol" or "search-assist", never "surveillance", in UI text, docs and the pitch.
 - LoRa is plain and unencrypted, so an alert may carry a pin's position and class, but never an address, an `id` or payload bytes.
 - Never commit secrets (`*.key`), camera snapshots (`snaps/`) or run logs (`runs/`).
+- The missing-person case (name, age, description) stays on the laptop: `case.py` saves it under `runs/` and the dashboard streams it to browsers. Never publish it on the bus, send it over LoRa or write it to a log.
 
 ## Hackathon rules
 

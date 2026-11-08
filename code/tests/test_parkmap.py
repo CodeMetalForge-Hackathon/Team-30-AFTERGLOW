@@ -76,8 +76,7 @@ def test_park_phones_are_where_park_toml_says():
     pm = ParkMap.load(PARK)
     off = {p["name"]: pm.dist_to_trail(p["x"], p["y"]) for p in PARK["sim"]["phones"] if "x" in p}
     assert off["dead_iphone"] > PARK["rules"]["offtrail_m"]
-    assert off["airtag_pack"] > PARK["rules"]["offtrail_m"]
-    assert off["pixel_off"] < PARK["rules"]["offtrail_m"]
+    assert off["airtag_lost"] > PARK["rules"]["offtrail_m"]
 
 
 def keys(path):

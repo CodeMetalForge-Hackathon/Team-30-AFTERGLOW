@@ -137,6 +137,22 @@ repeat_s = 5               # --wifi only: resend each live pin this often, as lo
 pod_every_s = 2            # --wifi only: the pod marker at most this often (ag/pose comes at 5 Hz)
 circles = true             # also draw each pin's 95% circle
 
+[search]
+# Trail pathing on the TV dashboard (tv.html) and afterglow/trails.py. Laptop only: the case
+# (name, age, description) is saved to case_file under runs/ and never goes on the bus or LoRa.
+# SAMPLE numbers until we have the published trail-use data.
+case_file = "runs/case_demo.json"
+corridor_m = 1.0           # how far each side of a trail counts as flown
+segment_m = 9.0            # trail pathing searches this much of the trail first, from where it passes the car
+near_m = 5.0               # a trail this far from the car scores about a third of one right next to it
+default_popularity = 0.1   # trails missing from the popularity table
+entrance_xy = [0.0, 0.0]   # the start point when no car park is known
+car_parks = [
+  { name = "Car park A", x = -1.0, y = 0.5 },
+  { name = "Car park B", x = 10.0, y = 1.0 },
+]
+popularity = { "Taped trail" = 1.0 }
+
 [sim]
 # Read only by tools/fake_bus.py (and later sim.py); the pod ignores this table.
 # The fake pod's path is a dumb stand-in. Real routes come from planner.py.
@@ -144,15 +160,19 @@ path = "waypoints"         # "waypoints": loop the [waypoints] in order; "lanes"
 speed_mps = 1.0            # walking pace, carrying the pod
 height_m = 3.0             # same as [pose] carry_height_m
 lane_m = 2.0               # lanes only
+lanes_from = "south" # lanes only: which edge the lanes start from, "south" or "north"
 area_m = []                # [x0, y0, x1, y1] for lanes; empty = the grids' area ([locate] area_m, else the "park" zone)
 # RSSI model, rssi = p0 - 10 n log10(d) + noise; a stand-in until ME 2's range test.
 rssi_p0 = -48.0
 rssi_n = 2.4
 rssi_sigma = 4.0
 rssi_floor = -98.0         # quieter than this is never heard
-# Hidden phones. Omit x and y for one that rides on the pod (the team phone).
+checkin_s = 60.0           # after "team on the way", the pod drops by the person this often (sim seconds)...
+checkin_dwell_s = 15.0     # ...and circles this long, then goes back to its sweep
+# Hidden phones. Omit x and y for one that rides on the pod (the team phone). person = true: someone
+# is with it, so the stand-in thermal reads warm and the camera sees them when the pod is close.
 phones = [
-  { name = "dead_iphone", cls = "findmy", x = 2.0, y = 6.0 },     # 6 m off trail
+  { name = "dead_iphone", cls = "findmy", x = 2.0, y = 6.0, person = true },     # 6 m off trail
   { name = "airtag_camp", cls = "findmy", x = 7.0, y = -2.5 },    # in the campground
   { name = "pixel_off",   cls = "findhub", x = 4.5, y = 1.5 },    # 1.5 m: near the trail, search-only
   { name = "team_phone",  cls = "findmy" },
