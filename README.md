@@ -28,20 +28,12 @@ AFTERGLOW goes after that phone anyway. Even switched off, an iPhone 11 or newer
 
 ## How it works
 
-```
-                         THE POD (Raspberry Pi 5)                                     THE RANGER'S LAPTOP
- BLE scanner (ESP32) ──► bridge ──► tracker ──► geofence ──► lora_out ──► RFM95W ~~~ 915 MHz LoRa ~~~► ADALM-PLUTO SDR
- Wi-Fi + SOS page    ──►  (hashes     (grid       (ranger      (16-byte                                   │
-                          addresses)   estimate)   rules, pins) alerts)                                    ▼
- IMU / GPS ──► position ──► ag/pose          ▲                                       lora_rx ──► cot_out ──► ATAK / iTAK phones
- thermal camera ──► thermal ──► hot spot ────┘                                            │
- camera ──► live view                       planner ──► proposed legs                     ▼
-                                                                                 operator TV (dashboard) ◄── ranger's clicks
-```
+![AFTERGLOW system overview](docs/diagrams/01-system-overview.svg)
 
 - **On the pod:** each box is its own Python process on a Raspberry Pi 5, and they talk over MQTT topics. Only the 16-byte alert leaves the pod over LoRa.
 - **Over Wi-Fi:** when the pod is in Wi-Fi range, the laptop's dashboard also reads the pod's MQTT broker for live pictures, tracks and coverage.
 - **Contracts:** every message format is in [`docs/CONTRACTS.md`](docs/CONTRACTS.md) and checked by `contracts.validate()` in the tests.
+- **More diagrams** in [`docs/diagrams/`](docs/diagrams/): [pod hardware](docs/diagrams/02-pod-hardware.svg), [software data flow](docs/diagrams/03-software-flow.svg), [the LoRa link and 16-byte alert](docs/diagrams/04-lora-link.svg), [the ranger decides](docs/diagrams/05-ranger-decides.svg) and [real, simulated or replayed](docs/diagrams/06-real-sim-replay.svg).
 
 ## Safety and privacy by design
 
@@ -109,7 +101,7 @@ firmware/           ESP32 sketches: BLE scanner, Wi-Fi listener + SOS page
 pi/                 Pi setup, udev rules, Mosquitto config, systemd unit
 tak/                ATAK/iTAK add-on: field teams' phones ↔ the operator TV
 simulator/          TrailSAR: a browser what-if of whole missions in nine real parks (all simulated)
-docs/               CONTRACTS, HARDWARE, TV, DEMO and the original build plan
+docs/               CONTRACTS, HARDWARE, TV, DEMO, diagrams/ and the original build plan
 ```
 
 ## What's next
