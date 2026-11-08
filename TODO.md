@@ -169,7 +169,8 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 - [ ] **`camera.py` (SW)**: a live view from the Camera Module 3 for the dashboard's camera panel, so the ranger sees more than thermal. **Changed Sat 7 Nov:** person detection (Hailo YOLO, tiling, the colour check) is now a stretch goal, and the camera module is `camera.py`, not `person.py`.
   - [x] Written and tested on the laptop (Sat 7 Nov): writes `live/camera.jpg` at `[camera] fps` (2), 1280×720 (temp file, then rename), the whole field of view (the 2304×1296 sensor mode, scaled), continuous autofocus. The time it was taken is drawn bottom left, so a frozen feed is obvious. No MQTT. New `[camera]` table in both profiles.
     - `--fake`: grass, a trail and a person in an orange jacket walking a loop, marked FAKE. **Dashboard teammate: build the camera panel against `python -m afterglow.camera --fake`** (it reloads `/live/camera.jpg`).
-  - [ ] **On the Pi:** `check_hw.py --only camera` passes, then `python -m afterglow.camera` and look at `live/camera.jpg`; set `rotate`/`flip` so it's upright as mounted; then `sudo systemctl enable --now afterglow@camera`.
+  - [x] **On the Pi:** `check_hw.py --only camera` passes (imx708_wide on CAM/DISP 0), `python -m afterglow.camera` writes a sharp `live/camera.jpg` with the time on it, and `afterglow@camera` is enabled. Done Sat 7 Nov ~20:58.
+  - [ ] Set `[camera] rotate`/`flip` once the camera is mounted (it isn't yet).
 - [ ] **health (UT)**: `ag/sys` from `vcgencmd`, ports, disk, GPS fix and LoRa, plus `batt_pct: null`. Reuse the checks in `check_hw.py`.
 - [ ] Put ME 2's range numbers in by hour 7: the localized and pinned radii, the lane spacing and `fake_bus.py`'s RSSI model.
 - [ ] **(I6, hour 7, 17:00):** carried along the taped trail, a pin lands within 5 m and shows its off-trail distance. Save a screenshot and the measured error.
