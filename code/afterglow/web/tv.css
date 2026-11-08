@@ -334,7 +334,9 @@ a.site:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
 /* ---------- 60 State St: pictures, the hall walk, the readings (hairline grid) ---------- */
 .istage { flex: 1; display: grid; grid-template-rows: minmax(0, 1fr) auto auto; gap: 1px; background: var(--hair); min-height: 0; }
 .istage > * { background: var(--bg); min-width: 0; }
-.istage .feeds { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 1px; background: var(--hair); min-height: 0; }
+.istage .feeds { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); gap: 1px; background: var(--hair); min-height: 0; }
+.pane > iframe.nearby { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--hair-2); border-radius: 5px; background: var(--bg); }
+.sh a.aux { color: var(--text-2); text-decoration: none; } .sh a.aux:hover { color: var(--text); }
 .pane { background: var(--bg); padding: 0.8rem 0.9rem 0.9rem; display: flex; flex-direction: column; gap: 0.55rem; min-height: 0; min-width: 0; }
 .pane > .feed { flex: 1; min-height: 0; }
 .walk { padding: 0.8rem 0.9rem 0.7rem; display: grid; grid-template-columns: minmax(0, 1fr) 13rem; gap: 1.4rem; align-items: center; }

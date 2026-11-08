@@ -64,7 +64,9 @@ no case, day sweep, and every open TV reloads.
 
 ### 60 State St (the live demo)
 
-Indoors, so no map: the stage is the pod's **camera and heat pictures**, big, then the **hall
+Indoors, so no map: the stage is the pod's **camera and heat pictures**, big, with **nearby
+signals** beside them (`nearby.html?compact=1`: every signal around the pod, north up; a ring is
+heard, distance only, a dot is located by tracker.py; "Full view" opens the whole page), then the **hall
 walk**, a strip with one straight walk line (`[imu] line_from` to `line_to`, a mark every metre,
 Base at the left, pings beside the line), then the live readings (warmest spot, Bluetooth scans,
 lost devices heard, strongest, last LoRa alert). Carry the pod forward along the line;
