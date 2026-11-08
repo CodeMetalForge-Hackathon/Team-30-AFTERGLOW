@@ -295,7 +295,10 @@ class TcpServer:
     No SSL and no login, so only on our own travel router. It answers pings and ignores the rest."""
 
     def __init__(self, port: int, host: str = ""):
-        self.sock = socket.create_server((host, port))
+        # IPv4 and IPv6 at once: on some phone hotspots the laptop gets an IPv6 address only.
+        dual = not host and socket.has_dualstack_ipv6()
+        self.sock = socket.create_server((host, port), family=socket.AF_INET6 if dual else socket.AF_INET,
+                                         dualstack_ipv6=dual)
         self.port = self.sock.getsockname()[1]
         self.clients = []
         self.lock = threading.Lock()  # one writer at a time, so two events never interleave on a stream
