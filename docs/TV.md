@@ -154,7 +154,7 @@ A thin track in the header shows where the search is: **1 Search · 2 Signal · 
      continue search" clears the ping, and the drone goes back to its path.
 
 In the simulation, phones with `person = true` in `[sim] phones` read warm and show a person
-when the drone is close (stand-ins for thermal.py and person.py). The park's missing iPhone has
+when the drone is close (stand-ins for thermal.py and a person detector, which isn't built). The park's missing iPhone has
 one; the decoy doesn't. The weather and wind in the status bar are simulated too.
 
 ## Camera and heat pictures

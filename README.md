@@ -1,96 +1,139 @@
 # AFTERGLOW
 
-A search-assist sensing pod strapped under an FPV drone. It hears the Bluetooth beacons that lost, dead or switched-off phones and AirTags keep sending, and pins where they are on a park map. It then sends that pin to the ranger's laptop and ATAK phone over LoRa, with no Wi-Fi or cell needed. A live camera view, thermal and radar help a human confirm. **The drone never decides: the planner proposes, and the ranger approves every pin and every leg.**
+**A search-assist payload for drones that hears lost phones, including ones that are switched off or dead, pins them on a park map, and gets each pin to rangers over LoRa with no cell or Wi-Fi.**
 
-Everything runs on the Raspberry Pi 5 in the pod. Programs talk over MQTT topics on the Pi. Only a 16-byte alert leaves the pod.
+Built in 26 hours by Team 30 at the CodeMetalForge hackathon, 7–8 Nov 2026.
 
-## Read in this order
+> **The one rule: the drone never decides.** The planner proposes, and the ranger approves every pin and every flight leg. No code path can confirm a pin or accept a leg by itself.
 
-1. [`TODO.md`](TODO.md): the phased plan for the hackathon. Tick items as they land.
-2. [`docs/HARDWARE.md`](docs/HARDWARE.md): every device, its port or address, how software reaches it, Pi setup and known gotchas. It comes from Rohan's hardware reference ([`docs/AFTERGLOW Hardware.pdf`](<docs/AFTERGLOW Hardware.pdf>)), which lists the parts we actually have.
-3. [`docs/CONTRACTS.md`](docs/CONTRACTS.md): MQTT topics and JSON shapes, ESP32 serial lines, the 16-byte LoRa alert and the ATAK mapping. The source of truth for anything that crosses a module boundary.
-4. [`docs/MODULES.md`](docs/MODULES.md): who builds which module, tiers, integration checkpoints, and how to start without hardware.
-5. [`docs/drone_build_plan.md`](docs/drone_build_plan.md): offline copy of the build doc (decisions, parts, schedule, demo script, risks).
-6. [`docs/wiring/`](docs/wiring/): `pins.csv` is current. The wiring diagram, pod layout and `wiring_and_build.html` are **out of date** (they still show Meshtastic, the BNO085 and a GPS module); use the pin map in HARDWARE.md.
+## The problem
 
-## Layout
+When someone goes missing in a park, rangers have to narrow a whole drainage down to one spot, fast. In an Oregon study of about 3,300 search subjects, search time was the only factor that predicted survival ([Adams et al. 2007](<https://www.wemjournal.org/article/S1080-6032(07)70218-1/fulltext>)).
+
+The lost person's phone is often the best clue, but by the time a search starts it's usually out of coverage, dead or switched off. Existing drone tools need the phone to be powered on.
+
+AFTERGLOW goes after that phone anyway. Even switched off, an iPhone 11 or newer keeps sending a Find My Bluetooth beacon for up to 24 hours, and for about 5 hours after its battery dies ([Macworld](https://www.macworld.com/article/2154248/how-to-find-a-missing-iphone-or-ipad-when-its-nearly-out-of-power.html)). Android phones in Google Find Hub or Samsung lost mode do something similar.
+
+## What it does
+
+1. **Hears.** A passive Bluetooth scanner on the pod picks out lost-device beacons from Apple Find My (separated devices), Google Find Hub and Samsung lost mode. It reads only each beacon's type marker and signal strength.
+2. **Locates.** The tracker combines signal strength with where the pod was to estimate each beacon's position on a grid, with an honest 95% radius. It keeps following a beacon when its key rotates.
+3. **Flags.** The ranger's rules decide which beacons become pins, depending on the mode:
+   - **Day patrol:** a beacon farther off-trail than the set distance, heard on 2 or more passes.
+   - **Night sweep:** any beacon outside the campgrounds.
+   - **Active search:** every lost-device beacon.
+4. **Sends.** Each pin leaves the pod as a 16-byte LoRa alert. A software-defined radio (SDR) on the ranger's laptop receives it, and the pin shows on the operator screen and on field teams' phones (ATAK/iTAK).
+5. **Helps confirm.** The ranger checks each pin with a live camera view and real thermal temperatures. An SOS Wi-Fi page lets the person answer "hurt? can walk? how many?", and each answer lands on the pin.
+6. **Plans.** The planner proposes homing passes over a pin, a search grid or a trail patrol. Once the ranger accepts a leg, an observer reads its heading and distance to the pilot.
+
+## How it works
 
 ```
-README.md            start here
-TODO.md              phased plan, ticked as we go
-CLAUDE.md            instructions for Claude Code
-docs/                CONTRACTS.md, HARDWARE.md, MODULES.md, TV.md, LIVEMAP.md, drone_build_plan.md
-  maps/              indoor_map.png (the taped park), park_map.png (the realistic park view)
-  wiring/            pins.csv (current); diagrams and wiring_and_build.html (out of date)
-code/
-  afterglow.toml     DEMO profile: the taped indoor park, real pod (identical on pod and laptop)
-  park.toml          PARK profile: realistic view on real Acadia trails, laptop only, simulated
-  afterglow/         one module per process (python -m afterglow.<name>):
-                     pod: bridge, position, tracker, locate, geofence, planner, thermal, camera, lora_out, health
-                     laptop: lora_rx, cot_out, dashboard (with case, the missing-person case)
-                     shared: contracts, alert, geo, bus, config, parkmap, trails, radio
-    web/             the dashboard and operator TV (Preact + htm, Leaflet, MapLibre; vendored, no CDN)
-  data/              trails.geojson, zones.geojson, building.geojson (indoor); park_trails.geojson, park_zones.geojson (OSM)
-  tools/             fake_bus.py, local_stack.py, replay.py, check_hw.py, pluto_rx.py, make_indoor_map.py, make_park_map.py, draw_map.py
-  tests/             pytest
-pi/                  setup_pi.sh, config.txt.append, udev rules, Mosquitto config, systemd service
-firmware/            README.md: what the ESP32 boards must send (Serial1 on D9/D10); lora_rx/: old laptop radio sketch (unused, the Pluto replaced it)
-tak/                 TAK add-on: the field teams' phones (iTAK/ATAK) and the operator TV as one system (tak/README.md)
-simulator/           TrailSAR mission simulator: the drone's sweep, beacon homing and thermal check in real parks (browser, all simulated)
+                         THE POD (Raspberry Pi 5)                                     THE RANGER'S LAPTOP
+ BLE scanner (ESP32) ──► bridge ──► tracker ──► geofence ──► lora_out ──► RFM95W ~~~ 915 MHz LoRa ~~~► ADALM-PLUTO SDR
+ Wi-Fi + SOS page    ──►  (hashes     (grid       (ranger      (16-byte                                   │
+                          addresses)   estimate)   rules, pins) alerts)                                    ▼
+ IMU / GPS ──► position ──► ag/pose          ▲                                       lora_rx ──► cot_out ──► ATAK / iTAK phones
+ thermal camera ──► thermal ──► hot spot ────┘                                            │
+ camera ──► live view                       planner ──► proposed legs                     ▼
+                                                                                 operator TV (dashboard) ◄── ranger's clicks
 ```
 
-## Quick start
+- **On the pod:** each box is its own Python process on a Raspberry Pi 5, and they talk over MQTT topics. Only the 16-byte alert leaves the pod over LoRa.
+- **Over Wi-Fi:** when the pod is in Wi-Fi range, the laptop's dashboard also reads the pod's MQTT broker for live pictures, tracks and coverage.
+- **Contracts:** every message format is in [`docs/CONTRACTS.md`](docs/CONTRACTS.md) and checked by `contracts.validate()` in the tests.
 
-**Laptop** (software, before the hardware is ready). Needs Mosquitto: `brew install mosquitto && brew services start mosquitto`.
+## Safety and privacy by design
+
+- **The ranger decides everything.** Geofence accepts Confirm only on a pin that's being investigated. The planner only proposes. The dashboard only relays clicks and never acts on its own. Tests cover each of these.
+- **Passive listening only.** The scanners never transmit. The only transmitters are the LoRa alert and the SOS page. LoRa has an off switch (`lora_off`) that survives a restart, and the SOS page starts switched off. The pilot's control link always wins.
+- **No identities.** The pod replaces raw Bluetooth and Wi-Fi addresses with a salted hash and picks a new salt for every search. It never decodes beacon payloads, and it never writes an address to disk, a log or the screen.
+- **Minimal radio content.** The plain LoRa alert carries a pin's position, class and status, never an address or ID.
+- **The case stays home.** The missing person's details (name, age, description) stay on the ranger's laptop and never go on the bus or over LoRa.
+
+## What's real and what's simulated
+
+We built and tested the payload on its own: the drones available at the hackathon were too small to carry it. It's designed to strap under a larger drone.
+
+| Part | Status | Evidence |
+|---|---|---|
+| Bluetooth scanner → bus | ✅ On hardware | Real Find My beacons reach the bus as hashed IDs. In a crowded building it heard about 1.5 Find My beacons/s against about 240/s of other Apple traffic, so the split works. |
+| LoRa link, pod → laptop | ✅ On hardware | Pod RFM95W → ADALM-PLUTO SDR (GNU Radio + gr-lora_sdr) → decoded alerts. Pins and heartbeat received; `lora_off`/`lora_on` work; packets from 6 other teams heard and dropped. |
+| Thermal (HTI HT-203U) | ✅ On hardware | Reads real temperatures from the raw 16-bit frames. A hand 50 cm away reads hot and a wall doesn't. |
+| Camera (Camera Module 3) | ✅ On hardware | Live view to the dashboard. |
+| SOS Wi-Fi page | ✅ On hardware | A phone joins `SOS-RESCUE`, the page pops up, and the answer reaches the bus. |
+| Wi-Fi listener | ✅ On hardware | Hashed probe IDs on channels 1, 6 and 11. |
+| Pod services | ✅ On hardware | All 9 pod modules start at boot under systemd, and a health module reports each part. |
+| Position | ✅ On hardware | GPS (NEO-F10N) sends NMEA, but gets no fix indoors. The indoor demo uses the IMU step count along a measured line. |
+| Tracking accuracy | 🟡 Simulated | Real tracker on simulated beacons, 20 runs indoors: one track per phone through every key rotation, worst error 1.5 m. Not yet measured with real beacons. |
+| Park-scale mission (Acadia) | 🟡 Simulated | The full mission on real OpenStreetMap trails: sweep, a false alarm, homing, a found person, rescue route. Badged SIMULATED on screen. |
+| ATAK / iTAK markers | 🟡 Built, tested in code | Cursor-on-Target markers plus a small TAK server for iTAK; tests check the XML. |
+| Flight | ⬜ Not flown | Payload only (see above). |
+| Person detection (AI HAT+) | ⬜ Stretch, not built | The live camera view lets a human check instead. |
+
+The code has 378 automated tests (`pytest`), and every module runs on fake data with no hardware.
+
+## Try it (laptop, no hardware)
+
+You need Python 3.11 or newer.
+
 ```
-cd code && python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop.txt
-.venv/bin/python -m pytest -q
-.venv/bin/python tools/fake_bus.py --speed 5     # fake pod + hidden phones, indoor; or --print without a broker
-.venv/bin/python tools/fake_bus.py --config park.toml --speed 10   # the same at park scale
-.venv/bin/python -m afterglow.dashboard          # then open http://localhost:8080, the one dashboard (docs/TV.md)
-                                                 # add --config park.toml for the park (http://localhost:8081)
-mosquitto_sub -v -t 'ag/#'                       # watch the bus
+cd code
+python3 -m venv .venv && .venv/bin/pip install -r requirements-laptop.txt
+.venv/bin/python -m pytest -q                                          # 378 tests
+.venv/bin/python tools/local_stack.py --config park.toml --feeds       # the whole system, simulated, no broker
 ```
 
-Run the dashboard and the fake bus with the same profile.
+Open http://localhost:8081 and click **Send out**. The drone sweeps a box at Acadia; about a minute later a false signal pings, and about a minute after that the missing person's phone. Walk it through Investigate → Confirm, and watch the planner propose legs for you to accept.
 
-**Live map feed.** `web/livemap.js` draws the live bus on a 3D terrain map with labels and a key (pod at height, its hearing radius, where beacons were heard, tracks, pins, coverage). It's the map inside the dashboard. It only draws; the dashboard keeps the buttons. See [`docs/LIVEMAP.md`](docs/LIVEMAP.md).
+To run the whole LoRa path with no radio and no broker:
 
-**No Mosquitto** (e.g. Windows): `tools/local_stack.py` runs a source, the real tracker, locate and geofence, and the dashboard in one process:
 ```
-.venv/bin/python tools/local_stack.py --config park.toml --speed 10            # fake pod
-.venv/bin/python tools/local_stack.py --config park.toml --feeds               # ... plus fake camera and heat pictures
-.venv/bin/python tools/local_stack.py --config park.toml --replay runs/1432.log --loop   # a recorded real run
+.venv/bin/python tools/fake_bus.py --print --duration 120 | .venv/bin/python -m afterglow.lora_out --dry-run \
+  | .venv/bin/python -m afterglow.lora_rx --dry-run | .venv/bin/python -m afterglow.cot_out --dry-run
 ```
 
-To record a run and play it back, the demo backup:
+The live demo with the real pod is in [`docs/DEMO.md`](docs/DEMO.md).
+
+## What's in the repo
+
 ```
-mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log
-.venv/bin/python tools/replay.py runs/1432.log --loop
+code/afterglow/     one Python module per process (python -m afterglow.<name>)
+  pod:              bridge, position, tracker, locate, geofence, planner, thermal, camera, lora_out, health
+  laptop:           lora_rx, cot_out, dashboard (+ case: the missing-person case, laptop only)
+  web/              the operator TV (Preact + htm, MapLibre; vendored, no CDN, no build step)
+code/afterglow.toml the live indoor demo (60 State St); code/park.toml is the Acadia simulation
+code/tools/         fake_bus, local_stack, replay, check_hw (on the Pi), pluto_rx (the SDR receiver)
+code/tests/         pytest
+firmware/           ESP32 sketches: BLE scanner, Wi-Fi listener + SOS page
+pi/                 Pi setup, udev rules, Mosquitto config, systemd unit
+tak/                ATAK/iTAK add-on: field teams' phones ↔ the operator TV
+simulator/          TrailSAR: a browser what-if of whole missions in nine real parks (all simulated)
+docs/               CONTRACTS, HARDWARE, TV, DEMO and the original build plan
 ```
 
-**Two profiles.** We don't fly, so there are two views of the same system:
-- **Demo**, `afterglow.toml`: the taped indoor park with real pod data. This is what runs live at the demo.
-- **Park**, `park.toml`: a realistic view at Blackwoods Campground in Acadia, using real OpenStreetMap trails. It's simulated, laptop only, and badged SIMULATED on the dashboard.
+## What's next
 
-Every module takes `--config`, or set `AFTERGLOW_CONFIG=park.toml`. Both files must have the same keys, which a test checks.
+- **Fly it.** Strap it under a larger drone, then add an autopilot (INAV or ArduPilot) that flies the planner's legs, still one ranger approval per leg.
+- **Measure.** Run a range test and blind passes with real beacons to set the signal model and the radii.
+- **Person detection** on the AI HAT+, to point the ranger at likely people in the camera view.
+- **More drones on one map:** the contracts already allow a `drone` field.
+- **Trailhead Bluetooth tags** for children who don't carry a phone.
 
-**Pi** (clone to `/home/pi/afterglow`):
-```
-bash pi/setup_pi.sh                     # packages, config.txt, venv; then reboot
-cd code && .venv/bin/python tools/check_hw.py
-sudo systemctl enable --now afterglow@bridge afterglow@position   # one service per module, starts at boot
-systemctl status 'afterglow@*'                                    # what's running; journalctl -u afterglow@<name> -f for a log
-```
+## Team
 
-## Still open
+Dillon Smith, Rohan Sarkar, Birinder Bachhal, Lucas Marotta.
 
-- **Payload only (decided):** our drones are too small to carry the pod, so we demo the payload on its own and pitch it as ready for a larger drone.
-- **Range numbers** from ME 2's test. They replace the placeholders in both profiles: `[track]` (localized and pinned radii), `[locate]`, and the `[sim]` lane spacing and signal model.
-- **Off-trail distance:** `offtrail_m` is 3 m in `afterglow.toml` (the taped park is only 9 m wide) and 30 m in `park.toml`. Both are placeholders.
-- **Alert version:** v1 (decimetres) for the taped indoor park, v2 (metres) outdoors. Both sides decode either.
+Licensed under Apache 2.0 ([`LICENSE`](LICENSE)). Map data © OpenStreetMap contributors (ODbL).
 
-## Links (private until the owner shares them with you)
+---
 
-- Build doc, "Drone build plan (Nov 7)" tab: https://claude.ai/artifact/Ev2HU2inb5zBq77eHsJLZX
-- Wiring & Build page, live version of `docs/wiring/wiring_and_build.html`: https://claude.ai/artifact/9dFkxY68jSQ399Thspfx1U
+## For the team
+
+- [`TODO.md`](TODO.md) is the phased plan.
+- [`docs/HARDWARE.md`](docs/HARDWARE.md) has parts, ports, pins and Pi setup.
+- [`docs/CONTRACTS.md`](docs/CONTRACTS.md) is the source of truth for anything that crosses a module boundary.
+- [`docs/MODULES.md`](docs/MODULES.md) lists owners and checkpoints, and [`docs/TV.md`](docs/TV.md) covers the operator TV.
+- [`docs/drone_build_plan.md`](docs/drone_build_plan.md) is the original build doc. Its parts list is out of date.
+- [`docs/wiring/`](docs/wiring/): only `pins.csv` is current.
+- `CLAUDE.md` holds the instructions for Claude Code.

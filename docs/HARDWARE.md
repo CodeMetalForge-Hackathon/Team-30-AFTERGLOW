@@ -13,7 +13,7 @@ USB-C power bank 5 V 3 A ──USB-C──► Raspberry Pi 5 16 GB + Active Cool
    WIFI  XIAO ESP32S3 #2 ── UART3  /dev/ttyAMA3  921600 ──┤  Wi-Fi probes, SOS page
    LoRa  RFM95W (SX1276) ── SPI1   /dev/spidev1.0 ────────┤──► 915 MHz ──► ADALM-PLUTO SDR ── USB ── laptop ──► ATAK phone
    IMU   BNO086          ── I²C-1  0x4B, INT + RST ───────┤
-   Thermal HTI HT-203U   ── USB  /dev/v4l/by-id/… (replaces the MLX90640; Linux format still to check)
+   Thermal HTI HT-203U   ── USB  /dev/v4l/by-id/… (replaces the MLX90640; 256×392 YUYV with raw heat values)
    Camera Module 3       ── CSI ribbon
    AI HAT+               ── PCIe ribbon  /dev/hailo0
    Radar MR60BHA2 kit    ── USB  /dev/radar  (tier 3)
@@ -31,7 +31,7 @@ We have three XIAO ESP32S3 boards. There's only **one RFM95W** (the pod's), so t
 | Pod LoRa radio (Adafruit RFM95W) | SPI1: pins 12, 35, 38, 40; RST 22; G0 18; 3.3 V 17; GND 39 | `/dev/spidev1.0` | `[lora]` in the config | adafruit-circuitpython-rfm9x via Blinka; `afterglow/radio.py` | `--only lora` (sends one heartbeat) |
 | Laptop LoRa receiver (ADALM-PLUTO SDR + RX antenna) | Its **USB** micro-USB port (not PWR) to the laptop; antenna on the **RX** SMA | libiio `usb:` (or `ip:192.168.2.1`) | `[lora]` in the config; 915 MHz is inside the stock 325–3800 MHz range | GNU Radio + gr-lora_sdr (conda); `tools/pluto_rx.py` → `lora_rx.py` | `iio_info -s` lists the Pluto; then the pod's heartbeat shows in `ag/alert` |
 | IMU: SparkFun BNO086 (SEN-22857) | Pins 1, 3, 5, 6; INT pin 15 (GPIO22); RST pin 16 (GPIO23) | I²C bus 1, `0x4B` | 400 kHz | adafruit-circuitpython-bno08x | `--only i2c` |
-| Thermal: HTI HT-203U (replaces the MLX90640) | USB-C plug, through a USB-C-to-A adapter to a USB port | a V4L2 video device; use `/dev/v4l/by-id/…`, never `/dev/videoN` | 256×192; whether it sends temperatures over USB is unchecked (TODO, `thermal.py`) | OpenCV (`python3-opencv` from apt) | `v4l2-ctl --list-formats-ext`; `--only thermal` to write |
+| Thermal: HTI HT-203U (replaces the MLX90640) | USB-C plug, through a USB-C-to-A adapter to a USB port | a V4L2 video device; use `/dev/v4l/by-id/…`, never `/dev/videoN` | 256×392 YUYV: rows 0–191 are raw heat (16 counts/°C), rows 196–387 the picture (TODO.md, thermal) | OpenCV (`python3-opencv` from apt) | `v4l2-ctl --list-formats-ext`; `--only thermal` to write |
 | Camera Module 3 (imx708) | CSI ribbon, 22-to-15-pin | libcamera camera 0 | 4608×2592 full frame | picamera2 (apt) | `rpicam-hello --list-cameras` |
 | AI HAT+ 26 TOPS (Hailo-8) | PCIe ribbon + header | `/dev/hailo0` | PCIe Gen 3 | hailo-all (apt) | `hailortcli fw-control identify` |
 | Radar MR60BHA2 kit (tier 3) | USB-C to a USB 2 port | `/dev/ttyACM*` → `/dev/radar` | 115200 JSON lines, from our sketch | pyserial | `--only usb_serial` |
@@ -76,7 +76,7 @@ Hold the Pi with the USB and Ethernet ports toward you and the header on the rig
 
 ## Pi setup (once)
 
-1. Flash Raspberry Pi OS Bookworm 64-bit. Enable SSH, Wi-Fi to the travel router and a hostname such as `afterglow`.
+1. Flash Raspberry Pi OS Bookworm 64-bit. Enable SSH, Wi-Fi to the team's phone hotspot and a hostname such as `afterglow`.
 2. Clone the repo to `/home/pi/afterglow` and run `bash pi/setup_pi.sh`. It:
    - installs Mosquitto, i2c-tools, picamera2, lgpio and `hailo-all`;
    - appends `pi/config.txt.append` to `/boot/firmware/config.txt`;

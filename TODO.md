@@ -1,5 +1,7 @@
 # AFTERGLOW TODO
 
+The team's plan and build log from the hackathon, ticked as each item landed (with the time). For a summary of what works, see `README.md`.
+
 Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is at hour 22 (Sun 08:00) and submission is due by hour 26 (Sun 12:00).
 
 - Owners follow `docs/MODULES.md`: **SW** is Software, **UT** is Utility, and **ME1** and **ME2** are the mechanical leads.
@@ -74,7 +76,7 @@ Hour 0 is Sat 7 Nov 10:00. Tier 1 is due by hour 12 (Sat 22:00), the freeze is a
   - It skips `ag/ctrl` and `ag/mode` unless you pass `--with-ctrl`, because a recorded Confirm shouldn't be made again unasked.
 - [x] **Two config profiles.** Pick one with `--config` or `AFTERGLOW_CONFIG`; `tests/test_parkmap.py` fails if their keys drift apart.
   - **Demo**, `afterglow.toml`: the taped indoor park and real pod data. Now has indoor-scale placeholders: `offtrail_m` 3, `detect_m` 4, and a new `[track]` table with the localized and pinned radii.
-  - **Park**, `park.toml`: realistic view at Blackwoods Campground, Acadia, using real OSM trails and roads (`data/park_*.geojson`, made by `tools/make_park_map.py`; picture in `docs/maps/park_map.png`). Laptop only.
+  - **Park**, `park.toml`: realistic view at Blackwoods Campground, Acadia, using real OSM trails and roads (`data/park_*.geojson`, made by `tools/make_park_map.py`). Laptop only.
 - [x] Sim stub: `fake_bus.py` follows the profile's new `[sim]` table (path, hidden phones, RSSI model). It walks the waypoint loop indoors and flies lanes in the park. It also fakes `ag/track`, `ag/target` and a retained `ag/coverage`, so pins and coverage move for I3. Use `--only pose,ble` once the real modules land. Its tracker cheats (it knows the true positions), so never take accuracy numbers from it.
 - [x] **Contract change, tell the team:** `ag/pose` `src` can now be `sim`, and `validate()` checks `src`. The dashboard badges `sim` and `replay` data.
 - [x] Phase 1 review fixes, each reproduced in a browser first:
@@ -124,19 +126,19 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - **Contract change, tell the team:** `day_offtrail` now skips campgrounds (otherwise the campground tag gets pinned in patrol and demo step 8 can't show night ignoring it). New `[rules]` keys `pin_hold_s`, `pins_file`, `pins_max_age_min` in both profiles. `fake_bus.py` now sends `off_trail_m` `null`, not 9999, when there's no trail.
   - Park sim only: the tracker's key-rotation splits give some phones 2–3 pins, and `airtag_pack` (39 m off trail) is estimated at 20–29 m, under the 30 m threshold, so patrol often misses it. Both are tracker limits (see above).
   - Tier 2: set `flags.thermal` from `ag/thermal` on the investigating pin (done, see Phase 3). (`flags.camera` from `ag/vision` waits for the stretch person detector.)
-- [ ] **`dashboard.py` (SW)**. Most of this landed with the Phase 1 skeleton:
+- [x] **`dashboard.py` (SW)**. Most of this landed with the Phase 1 skeleton (status at the freeze, Sun 8 Nov):
   - [x] pins with Acknowledge, Investigate, Clear and Confirm buttons. Confirm needs two clicks and only works while the pin is being investigated. Each button shows "waiting for geofence" until the status changes, and warns if it never does;
   - [x] a mode switch for patrol, night, investigate and search;
-  - [ ] Baseline and New search buttons. New search should also drop old tracks and pins from the dashboard's state (`dashboard.py` and `store.js`), since the tracker forgets them. Baseline tracks already show grey;
+  - [ ] ~~Baseline and New search buttons.~~ **Cut at the freeze:** send `baseline_start`/`baseline_stop` with `mosquitto_pub` (docs/DEMO.md). New search should also drop old tracks and pins from the dashboard's state (`dashboard.py` and `store.js`), since the tracker forgets them. Baseline tracks already show grey;
   - [x] waypoint taps for the indoor park, on the map and as a 0–7 strip in the Pod panel;
   - [x] the coverage and probability overlays, and pod health from `ag/sys`;
-  - [ ] the thermal and camera panel (it reloads the `live/` images about once a second). **Scale each picture to fit** (`object-fit: contain`): a 90° `rotate` in config makes it portrait (CONTRACTS.md, "Images over HTTP");
+  - [x] the thermal and camera panel, on the operator TV (it reloads the `live/` images about once a second). **Scale each picture to fit** (`object-fit: contain`): a 90° `rotate` in config makes it portrait (CONTRACTS.md, "Images over HTTP");
     - [x] **Live tab on the operator TV (Sat 7 Nov night):** camera, heat with the live `ag/thermal` overlay (crosshair and °C on the warmest spot), a 2-minute temperature line, pod health, Bluetooth and the 60 State Street building map (docs/TV.md, "The Live tab"). Also: the rescue route view no longer changes the mode (Back or Esc leaves it), and the TV asks for a check-in on a found person every `[search] checkin_s` (5 min).
     - [ ] **Demo profile origin moved to 60 State Street** (`afterglow.toml`, map files regenerated): **copy `afterglow.toml` and `data/` to the Pi** so the pod and laptop match. Replace the approximate `data/building.geojson` with the real outline if anyone can;
     - [x] **On the operator TV (Sun 8 Nov):** Emergency's "Camera check" card shows the camera and heat pictures; outside Emergency, a Pictures switch on the map (Auto / On / Off) puts them in the map's corner (Auto: both while a ping is checked, heat alone in a night sweep). Each reloads once a second, swaps in only decoded frames, and says "Feed frozen" or "Feed lost" when the picture is over 5 s old (the server now sends `Last-Modified`). `local_stack.py --feeds` writes fake pictures. The ranger dashboard (`/`) still has no picture panel;
   - [x] serves `live/` and `snaps/` on port 8080;
   - [x] takes a `--broker` flag (it overrides `[mqtt] host`), so it also runs on the laptop. Each instance has its own MQTT client id, so the Pi's and the laptop's can share a broker;
-  - [ ] draw `ag/plan` legs, with Accept and Reject (`accept_leg`, `reject_leg`), once `planner.py` exists.
+  - [x] draw `ag/plan` legs, with Accept and Reject (`accept_leg`, `reject_leg`): the TV's leg card (Trail pathing) and the live map's proposed legs.
 - [x] **`lora_out.py` (UT; written by SW)** sends `ag/target` through `alert.encode` from the RFM95W (CONTRACTS.md, "LoRa alert"):
   - every `[lora] repeat_s` (5 s) per live pin, and at once (at most once a second) when a pin is new or its type, state, prio, flags or SOS change. Priority 1 first; on a channel too busy for every pin, the longest-waiting go next, so none goes silent (tested: 40 pins at SF10); no acks;
   - a heartbeat every `repeat_s` with the pod's latest `x`, `y`; `last_s` ages between repeats; the battery from `ag/sys`;
@@ -220,12 +222,14 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
 - [x] **Fix the simulator's wording (`simulator/`, PR #4).** Done Sat 7 Nov ~23:30: "LIKELY PERSON · RANGER CONFIRM" in place of "PERSON CONFIRMED" and "MISSING PERSON FOUND"; "pin proposed to the ranger" in place of "GPS fix sent to incident command"; the drone's `CONFIRM` mode is now `CHECK`; a supply drop is proposed, never done.
   - [ ] Still to decide: does it stay "TrailSAR" or become AFTERGLOW?
   - Not fixed: the simulated drone still flies its own legs without a ranger's OK. Fine for a what-if, but say so if a judge asks.
-- [ ] Demo setup:
-  - a 10-minute baseline at the demo spot, with any team trackers on the pod, so they show grey instead of relying on `with_drone`;
-  - a team iPhone switched off at least 20 minutes early and hidden;
-  - the travel router on, with the pod and the laptop on it, never the venue Wi-Fi: the dashboard has no login, so anyone on the same network could click;
+- [x] **Judging docs (Sun 8 Nov ~09:30):** the README is now for judges (what's real vs simulated, how to run it); `docs/DEMO.md` is the runbook (setup, the run, fallbacks, judges' questions). Code review at the freeze: no bugs found in the core paths; the one rule and the privacy rules hold (tests and a live API run).
+- [ ] Demo setup, step by step in `docs/DEMO.md`:
+  - a 10-minute baseline at the demo spot, with any team trackers on the pod, so they show grey instead of relying on `with_drone`. **Keep the target out of range (another room, or foil) during the baseline,** or it's greyed out too;
+  - the target (an AirTag away from its owner, or a team iPhone switched off) proved as `findmy` on `ag/obs/ble` first, then hidden;
+  - the phone hotspot on, with the pod, the laptop and the iPhone on it, never the venue Wi-Fi: the dashboard has no login, so anyone on the same network could click;
+  - **`ag/alert` forwarded to the Pi's broker** (`mosquitto_sub -t ag/alert | mosquitto_pub -h <pi-ip> -t ag/alert -l`): the State St TV reads the Pi's broker, and lora_rx publishes on the laptop's, so without it "Last LoRa alert" stays empty;
   - everything charged.
-- [ ] Two clean end-to-end rehearsals of the demo script in `docs/drone_build_plan.md`.
+- [ ] Two clean end-to-end rehearsals of the run in `docs/DEMO.md`.
 - [ ] **Hour 22 (Sun 08:00): freeze.** After it, only fixes that block the demo.
 - [ ] Submit before Sun 12:00.
 

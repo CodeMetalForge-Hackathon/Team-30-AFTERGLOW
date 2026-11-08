@@ -64,8 +64,7 @@ code/
   tools/make_indoor_map.py  writes data/*.geojson from the origin and waypoints
   tools/draw_map.py     draws the map files to docs/maps/indoor_map.png
   tests/                pytest
-docs/                   CONTRACTS.md, HARDWARE.md, MODULES.md, TV.md, LIVEMAP.md, drone_build_plan.md, AFTERGLOW Hardware.pdf
-  maps/                 map pictures
+docs/                   CONTRACTS.md, HARDWARE.md, MODULES.md, TV.md, LIVEMAP.md, DEMO.md (the demo runbook), drone_build_plan.md, AFTERGLOW Hardware.pdf
   wiring/               pins.csv (current); diagrams and wiring_and_build.html (out of date)
 pi/                     setup_pi.sh, config.txt lines, udev rule (radar), Mosquitto conf, systemd unit
 firmware/               what the ESP32 boards must send; lora_rx/ is the old XIAO #3 receiver sketch (unused: the Pluto replaced it)
