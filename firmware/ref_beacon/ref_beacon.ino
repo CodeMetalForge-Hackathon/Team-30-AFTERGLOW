@@ -37,7 +37,12 @@ void setup() {
   BLEAdvertising *adv = BLEDevice::getAdvertising();
   adv->setAdvertisementData(data);
   adv->setScanResponse(false);
+  // Non-connectable. Core 3.3+ runs NimBLE on the S3; older cores run Bluedroid.
+#if defined(CONFIG_NIMBLE_ENABLED)
+  adv->setAdvertisementType(BLE_GAP_CONN_MODE_NON);
+#else
   adv->setAdvertisementType(ADV_TYPE_NONCONN_IND);
+#endif
   adv->setMinInterval(ADV_MS / 0.625);  // units of 0.625 ms
   adv->setMaxInterval(ADV_MS / 0.625);
   adv->start();

@@ -152,11 +152,11 @@ def test_command_line_fake_dry_run(tmp_path):
     assert read_png(tmp_path / "live" / "thermal.png") == (256, 192)
 
 
-def test_real_camera_says_it_is_not_written_yet(tmp_path):
+def test_no_camera_stops_with_a_hint(tmp_path):
     shutil.copy(CODE / "afterglow.toml", tmp_path / "afterglow.toml")
     r = subprocess.run([sys.executable, "-m", "afterglow.thermal", "--config", str(tmp_path / "afterglow.toml")],
                        cwd=CODE, capture_output=True, text=True, timeout=60)
-    assert r.returncode == 2 and "--fake" in r.stderr
+    assert r.returncode == 2 and "no thermal camera" in r.stderr and "--fake" in r.stderr
 
 
 def test_contract_checks_thermal_fields():
@@ -165,3 +165,54 @@ def test_contract_checks_thermal_fields():
     assert validate(THERMAL, {**ok, "hot": "yes"}) != []
     assert validate(THERMAL, {**ok, "max_c": "33"}) != []
     assert validate(THERMAL, {**ok, "src": "mlx"}) != []
+
+
+def ht203u_buffer(raw_top: np.ndarray, sensor_centi_c: int = 2250) -> bytes:
+    """A 256x392 YUYV buffer laid out as the HT-203U sends it: raw heat, header, then a picture."""
+    from afterglow import thermal
+    words = np.full((thermal.RAW_H, thermal.RAW_W), 0x8080, "<u2")
+    words[:thermal.TEMP_ROWS] = raw_top
+    words[thermal.TEMP_ROWS:thermal.TEMP_ROWS + thermal.HEADER_ROWS] = 0
+    words[thermal.TEMP_ROWS, 0] = sensor_centi_c
+    return words.tobytes()
+
+
+def test_parse_raw_matches_the_wall_and_palm_check():
+    from afterglow import config, thermal
+    th = config.load()["thermal"]
+    raw = np.full((192, 256), 5101, np.uint16)  # the wall
+    raw[60:140, 80:180] = 5303                   # the palm
+    c, sensor = thermal.parse_raw(ht203u_buffer(raw), *thermal.calibration(th))
+    assert c.shape == (192, 256) and sensor == 22.5  # the reference sensor temperature: no drift term
+    assert abs(float(np.median(c[:40])) - 22.0) < 0.2       # wall at room temperature
+    assert 33.5 < float(c[100, 120]) < 35.5                  # palm: skin temperature
+    with pytest.raises(ValueError):
+        thermal.parse_raw(b"\0" * 1000, 16.0, 296.8)
+
+
+def test_a_palm_in_view_is_hot():
+    from afterglow import config, thermal
+    cfg = config.load()
+    raw = np.full((192, 256), 5101, np.uint16)
+    raw[80:110, 100:130] = 5303
+    c, _ = thermal.parse_raw(ht203u_buffer(raw), *thermal.calibration(cfg["thermal"]))
+    bus = []
+
+    class B:
+        def publish(self, topic, msg, retain=False):
+            bus.append((topic, msg))
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        thermal.Thermal(cfg, B(), d).handle_frame(c, True, "ht203u")
+    topic, msg = bus[0]
+    assert validate(topic, msg) == [] and msg["hot"] is True and msg["src"] == "ht203u"
+
+
+def test_warm_camera_drift_is_corrected():
+    """The same wall: raw 5101 at sensor 22.5 C, 4998 at 24.66 C. Both must read about 22 C."""
+    from afterglow import config, thermal
+    cal = thermal.calibration(config.load()["thermal"])
+    cold, _ = thermal.parse_raw(ht203u_buffer(np.full((192, 256), 5101, np.uint16), 2250), *cal)
+    warm, _ = thermal.parse_raw(ht203u_buffer(np.full((192, 256), 4998, np.uint16), 2466), *cal)
+    assert abs(float(cold.mean()) - 22.0) < 0.3 and abs(float(warm.mean()) - 22.0) < 0.3
