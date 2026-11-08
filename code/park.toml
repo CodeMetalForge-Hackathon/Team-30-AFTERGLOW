@@ -115,6 +115,10 @@ rssi_sigma = 4.0
 offtrail_m = 30
 min_passes = 2
 pin_hold_s = 5             # short for the quick demo (afterglow.toml keeps 15)
+# The live demo's Find My RSSI rule (afterglow.toml): off here, the park pins by the track-based rules.
+rssi_cls = ["findmy"]
+rssi_window = []
+rssi_hold_n = 2
 sos_r95_m = 30.0
 thermal_near_m = 10.0
 night_start = "21:00"

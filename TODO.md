@@ -137,6 +137,11 @@ The modules are listed roughly in data-flow order, and each one feeds the next. 
   - [x] serves `live/` and `snaps/` on port 8080;
   - [x] takes a `--broker` flag (it overrides `[mqtt] host`), so it also runs on the laptop. Each instance has its own MQTT client id, so the Pi's and the laptop's can share a broker;
   - [ ] draw `ag/plan` legs, with Accept and Reject (`accept_leg`, `reject_leg`), once `planner.py` exists.
+  - [x] **Live demo view, 60 State St (SW, Sun 8 Nov ~03:00):** Find My signal meter with the ping zone, a metre grid map around Base (pod, path, pings, TAK phones), camera and heat; a shorter rail (docs/TV.md, "60 State St"). Acadia unchanged.
+    - **Contract change, tell the team:** geofence's new `rssi` rule (`[rules] rssi_cls`, `rssi_window` = [-75, -60], `rssi_hold_n`; off in park.toml): a Find My beacon in the window makes a pin at the pod, louder readings move it in; `ag/target` may carry `rssi`. Track rules skip Find My while it's on. **Copy afterglow.toml to the Pi and restart `afterglow@geofence`.**
+    - **TAK field pings:** a marker dropped on a phone goes to the TV (`ag/team` kind `mark`). `tak/tak_dashboard.py --broker <pi-ip>` runs the TV with TAK; tak/README.md "The live demo".
+    - [ ] Check on the real pod: are the window values right for our lost phone at the booth (strangers' AirTags in range will ping too)? Tune `rssi_window` in both files' copies on the Pi and laptop.
+    - [ ] On a real iPhone with iTAK: a ping shows as a marker; a dropped marker shows on the TV.
 - [x] **`lora_out.py` (UT; written by SW)** sends `ag/target` through `alert.encode` from the RFM95W (CONTRACTS.md, "LoRa alert"):
   - every `[lora] repeat_s` (5 s) per live pin, and at once (at most once a second) when a pin is new or its type, state, prio, flags or SOS change. Priority 1 first; on a channel too busy for every pin, the longest-waiting go next, so none goes silent (tested: 40 pins at SF10); no acks;
   - a heartbeat every `repeat_s` with the pod's latest `x`, `y`; `last_s` ages between repeats; the battery from `ag/sys`;

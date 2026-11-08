@@ -7,7 +7,7 @@ const OBS_LOG = 60;
 const TRAIL_MAX = 4000;
 
 export function emptyState() {
-  return { poses: {}, trails: {}, pins: {}, tracks: {}, plans: {}, teams: {}, team_log: [], obs: {}, obs_log: [],
+  return { poses: {}, trails: {}, pins: {}, tracks: {}, plans: {}, teams: {}, team_log: [], marks: {}, obs: {}, obs_log: [],
            latest: {}, counts: {}, bus_t: 0, pose_seen: false, broker: false };
 }
 
@@ -53,6 +53,7 @@ export function apply(s, topic, msg, trailStep) {
     s.plans[msg.id] = msg;
   } else if (topic === 'ag/team' && msg.uid) { // the TAK phones: positions by uid, chat and reports newest first
     if (msg.kind === 'pos') (s.teams ||= {})[msg.uid] = msg;
+    else if (msg.kind === 'mark') { s.marks ||= {}; if (msg.gone) delete s.marks[msg.uid]; else s.marks[msg.uid] = msg; } // field pings
     else { (s.team_log ||= []).unshift(msg); if (s.team_log.length > 40) s.team_log.length = 40; }
   } else {
     s.latest[topic] = msg;

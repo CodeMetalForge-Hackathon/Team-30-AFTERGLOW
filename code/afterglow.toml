@@ -140,6 +140,13 @@ rssi_sigma = 4.0
 offtrail_m = 3             # indoor scale (park.toml: 30). Day patrol: pin a beacon farther than this from a trail...
 min_passes = 2             # ...seen on at least this many passes
 pin_hold_s = 15            # a rule must hold this long before a pin: early estimates jump about, with_drone takes a few s
+# The live demo's Find My rule (geofence, rule "rssi"): a beacon of rssi_cls heard between the two
+# rssi_window values (dBm: close to the pod, but quieter than our own phones riding on it) for
+# rssi_hold_n readings in a row becomes a pin where the pod is. A stronger reading later moves the pin
+# to where the pod is then. [] = off. The track-based rules then skip rssi_cls, so a phone never pins twice.
+rssi_cls = ["findmy"]
+rssi_window = [-75, -60]
+rssi_hold_n = 2
 sos_r95_m = 30.0           # r95 of an SOS-only pin: the SOS page's Wi-Fi range (placeholder)
 thermal_near_m = 2.0       # indoor scale (park.toml: 10). flags.thermal on the investigated pin only with the pod this close to its 95% circle (placeholder)
 night_start = "21:00"

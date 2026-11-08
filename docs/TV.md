@@ -64,17 +64,37 @@ no case, day sweep, and every open TV reloads.
 
 ### 60 State St (the live demo)
 
-Indoors, so no map: the stage is the pod's **camera and heat pictures**, big, then the **hall
-walk**, a strip with one straight walk line (`[imu] line_from` to `line_to`, a mark every metre,
-Base at the left, pings beside the line), then the live readings (warmest spot, Bluetooth scans,
-lost devices heard, strongest, last LoRa alert). Carry the pod forward along the line;
-position.py (`[pose] source = "imu"`) turns the BNO086's step count into metres along it, the
-walked part fills in and the side shows "x of 10 m walked". Tapping waypoint 0
-(`{"cmd":"waypoint","n":0}`) puts it back at the start.
+Three things, nothing else (cognitive load):
+
+- **Find My signal** (top strip): the meter runs from far (left, −95 dBm) to near (right, −40). The shaded
+  orange **ping zone** is `[rules] rssi_window` (−75 to −60). Every Find My device heard in the last 6 s is a
+  dot; the big number follows the one in the zone (else the loudest below it). In the zone the strip turns
+  orange: "In the ping zone · ping". A phone louder than −60 is right by the pod (often our own).
+- **The grid map** (left): 60 State St in metres from **Base** (the origin, 42.35889, −71.05667), north up,
+  1 m squares, no tiles (works offline). The pod (blue) and its path, the walk line (dashed), the pings
+  (priority colour, the dashed ring is how far the phone may be, the latest dBm beside it; a new one pulses),
+  the TAK phones (blue diamonds) and their **field pings** (blue flags). Anything over 60 m from Base is
+  listed in the corner instead.
+- **Camera and heat** (right), as before.
+
+**How a ping is made** (geofence's RSSI rule, CONTRACTS.md "The RSSI rule"): two Find My readings in a row
+inside the zone make a pin **where the pod is**. Walk towards it: each louder reading moves the pin to the
+pod's spot then and shrinks its ring. It's still only a proposal: the ranger presses Investigate, Clear or
+Confirm. The track-based rules leave Find My alone here, so a phone never makes two pins.
+
+**The rail** keeps to the decision card (with the ping's signal and its metres E/N of Base), the pings
+(with their signal), **Field phones (TAK)** (who's connected, their field pings) and the activity log.
+
+**Field pings:** a marker a ground team drops in iTAK/ATAK arrives as a blue banner ("ALPHA sent a field ping:
+Backpack", with its note and where it is) and a chime, and as a flag on the map until "Got it". It never makes a
+pin or moves the drone. tak/README.md has the setup.
 
 Nothing here is simulated: no fake weather, no fake pictures. When the pod isn't reachable,
 it says so: **No signal** on the camera and heat pictures (no picture, or one over a minute old),
-"No signal from the pod" in the status bar and beside the hall walk.
+and "No signal from the pod" in the status bar and on the meter.
+
+**Try it with no pod:** `python tak/tak_stack.py --config code/afterglow.toml --port 8095`, open
+`http://localhost:8095/tv.html`, then `POST /api/sim {"flight":"out"}` (or "Send out") to walk the fake pod.
 
 **Pod battery** (health.py's `ag/sys`, every `[health] period_s`): the one health reading shown,
 in the rail and at the bottom of the Live tab. Amber under 40 %, red under 20 %; "not measured"

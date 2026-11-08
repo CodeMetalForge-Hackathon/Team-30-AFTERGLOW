@@ -103,8 +103,8 @@ def wire(cfg, bus, state, pm):
     for topic in (POSE, "ag/obs/#", CTRL):
         bus.subscribe(topic, lambda t, m: guarded(tr, tr.feed, t, m))
     g = Geofence(cfg, bus, pm=pm)  # no pins_file: nothing saved, every run starts at P1
-    for topic in (TRACK, POSE, MODE, CTRL, SOS, THERMAL):
-        bus.subscribe(topic, g.feed)
+    for topic in (TRACK, POSE, MODE, CTRL, SOS, THERMAL) + (("ag/obs/ble",) if g.rssi_window else ()):
+        bus.subscribe(topic, g.feed)  # ag/obs/ble: the live demo's RSSI rule (off in park.toml)
     loc = Locate(cfg, bus, pm=pm)
     last = [0.0]
 

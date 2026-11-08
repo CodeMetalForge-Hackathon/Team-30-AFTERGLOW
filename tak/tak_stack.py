@@ -163,6 +163,7 @@ def main():
         def start_pod():
             run["stop"] = threading.Event()
             pod = local_stack.make_pod(cfg, pm, holder["bus"], cases, a.seed)
+            clock.pod = pod  # so the TV's "Send out" and "Return to base" reach it, as in local_stack.py
             run["thread"] = threading.Thread(target=local_stack.run_fake, args=(pod, holder["bus"], clock, run["stop"]),
                                              daemon=True, name="source")
             run["thread"].start()

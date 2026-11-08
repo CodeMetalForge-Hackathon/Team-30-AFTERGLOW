@@ -75,3 +75,12 @@ def test_http_serves_the_tak_tv_and_takes_rescue_routes():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_field_pings_are_kept_for_a_tv_that_opens_late():
+    from tak_dashboard import TakState
+    st = TakState(1.0)
+    st.apply("ag/team", {"t": 1, "uid": "m-1", "callsign": "ALPHA", "kind": "mark", "x": 2.0, "y": 3.0, "label": "M"})
+    assert st.snapshot()["marks"]["m-1"]["x"] == 2.0
+    st.apply("ag/team", {"t": 2, "uid": "m-1", "callsign": "", "kind": "mark", "x": 2.0, "y": 3.0, "label": "M", "gone": True})
+    assert st.snapshot()["marks"] == {}

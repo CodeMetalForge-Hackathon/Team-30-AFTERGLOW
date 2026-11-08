@@ -89,6 +89,7 @@ mosquitto_sub -v -t 'ag/#'                                               # watch
                                                                          # TV location tabs ([http] sites): Acadia :8081 (sim) <-> 60 State St :8080 (live demo, pod components panel)
 .venv/bin/python tools/local_stack.py --config park.toml --feeds          # ... plus fake camera and heat pictures for the TV (Live tab: /tv.html, Live)
 .venv/bin/python -m afterglow.dashboard --broker <pi-ip>                 # laptop dashboard against the pod's broker; camera/heat pictures come from the Pi's afterglow@dashboard (--pod off: local live/)
+.venv/bin/python ../tak/tak_dashboard.py --broker <pi-ip>                # live demo TV with TAK (field phones, field pings); plus ../tak/tak_link.py --wifi <pi-ip> for the phones
 mosquitto_sub -v -t 'ag/#' > runs/$(date +%H%M).log                      # record a run
 .venv/bin/python tools/replay.py runs/1432.log [--loop] [--topics 'ag/obs/#,ag/pose']   # replay it
 .venv/bin/python -m afterglow.bridge --dry-run < lines.txt               # no hardware, no broker

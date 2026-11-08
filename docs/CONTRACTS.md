@@ -90,6 +90,7 @@ The topics come from the plan doc's contract table. The drone build (FPV, GPS mo
   - `night_outside_camp`: any beacon outside campgrounds after closing.
   - `search`: any `findmy`, `findhub` or `samsung_off` beacon during an active search.
   - `sos`: an SOS answer with no pin under investigation (see "SOS answers").
+  - `rssi` (**new**, the live demo): a `[rules] rssi_cls` beacon (Find My) heard between the two `rssi_window` values (−75 to −60 dBm) for `rssi_hold_n` readings in a row. See "The RSSI rule".
 - **`prio`**, which sets the ATAK colour:
   - 1, red: confirmed, or an SOS that says hurt.
   - 2, orange: pinned and c ≥ 0.8.
@@ -125,6 +126,22 @@ How tracker.py fills `ag/track`. Its numbers live in the config's `[track]` tabl
 - **Restarts:**
   - geofence saves its pins to `[rules] pins_file` (under `runs/`, never committed). At start-up it reloads them, if they're newer than `pins_max_age_min`, and republishes them, so it never hands out `P1` twice. `--fresh` starts over and empties the file at once, so a lora_out restarted after it doesn't reload the old pins.
   - If a linked track comes back with none of its earlier `ids` (the tracker restarted, or wrapped past `T255`), the pin stops following it.
+
+### The RSSI rule (live demo)
+
+`[rules] rssi_window` (`[]` = off; `park.toml` has it off). geofence then also reads `ag/obs/ble`:
+
+- A beacon of `rssi_cls` (`["findmy"]`) heard between the two values (`[-75, -60]` dBm) for `rssi_hold_n` (2)
+  readings in a row (gaps under 10 s) becomes a pin **where the pod is**, with `track` `"T0"`, `rule` `"rssi"`,
+  `status` `new`. Louder than the window is a phone riding on the pod: never a new pin.
+- `r95` is the `[track]` RSSI model's distance for the reading (−60 dBm ≈ 3 m, −75 ≈ 13 m indoors); `c` runs
+  from 0.5 at the weak end to 1 at the strong end; `state` follows `r95` like a track's.
+- A **stronger** reading later (anything above the window's weak end) moves the pin to where the pod is then and
+  shrinks `r95`: walk towards the phone and the pin follows you in. Each reading sets `last_s` 0.
+- The pin carries an optional `rssi` (the latest reading, dBm). Never the beacon's `id`: geofence keeps the
+  id-to-pin link in its pins file only.
+- The track-based rules skip `rssi_cls` while the rule is on, so one phone never makes two pins. Cleared and
+  confirmed pins freeze as usual, and their beacon never gets another pin. `new_search` drops the links.
 
 ### SOS answers
 

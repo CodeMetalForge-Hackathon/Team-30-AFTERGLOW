@@ -84,6 +84,7 @@ Either is enough:
 | **Close case** | The route is removed, plus a chat "Rescue for P2 closed" |
 | Mode buttons | Chat "AFTERGLOW now on: Trail pathing.", and the drone's label shows the mode |
 | Field teams card + blue diamonds on the map | Each phone's GPS position and chat |
+| Blue "field ping" banner + a flag on the map (State St) | A team drops a marker on its map |
 | **Reset** | Every pin and route removed |
 
 Field reports go to **All Chat Rooms**, aren't case-sensitive, and must **start** the message: `found P3, he's
@@ -91,6 +92,29 @@ conscious` is a report, while `P3 is not a person` or `don't check P3` is only c
 report). The four are `ack P3`, `check P3`, `found P3` and `nobody P3` (`found at P3` works too). Anything else is
 just a message on the TV. A phone that connects late is cleaned of old AFTERGLOW markers and gets a catch-up
 message listing the open pins.
+
+## The live demo (60 State St): pings both ways
+
+What the audience sees: a ping appears on the booth TV **and** on the phone's map at the same time, and a
+marker the ground team drops on the phone appears on the booth TV.
+
+On the laptop (the Pi's address is `<pi-ip>`; everything on the same hotspot):
+
+```bash
+python tak/tak_dashboard.py --broker <pi-ip>                                  # the TV, http://localhost:8080/tv.html
+python tak/tak_link.py --config code/afterglow.toml --wifi <pi-ip> --tls-dir tak/runs   # the phones
+```
+
+`tak_dashboard.py` is `dashboard.py` with the field teams kept for a TV that opens late. Use `--wifi` for the
+two-way demo: tak_link then reads pins from the Pi and puts the phones' messages on the Pi's broker, which the TV
+reads. (Over LoRa only, `tak_link.py` without `--wifi`, pins still reach the phones, but the phones' messages
+land on the laptop's broker, not the Pi's.)
+
+- **Booth → phone:** each ping is a marker named `P1 · ranger decision` with a chat "Possible person P1".
+- **Phone → booth:** long-press the map in iTAK/ATAK and drop a marker (any point, spot or waypoint; name it and add
+  a note if you like). The TV shows a blue banner and a flag on the grid map; the phone gets "Got your ping, ALPHA:
+  the operator sees it". Moving the marker moves the flag; deleting it removes it. A field ping never makes a pin:
+  the ranger decides. Chat reports (`found P1`, etc.) work as below.
 
 ## The real system (pod in the air)
 

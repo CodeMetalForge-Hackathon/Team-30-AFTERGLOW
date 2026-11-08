@@ -209,3 +209,46 @@ def test_start_and_pause_are_told_to_the_phones():
     co.sim_state(paused=True, started=True)
     co.sim_state(paused=False, started=True)
     assert [m.split(":")[0].split(".")[0] for m in chats(out)] == ["AFTERGLOW launched", "AFTERGLOW paused by the ranger", "AFTERGLOW resumed"]
+
+
+def dropped(uid="m-1", label="Marker 1", x=5.0, y=2.0, typ="a-u-G", who="ALPHA", remarks="bag by the door"):
+    lat, lon = geo.to_latlon(x, y, *ORIGIN)
+    return (f'<event version="2.0" uid="{uid}" type="{typ}" how="h-g-i-g-o" time="t" start="t" stale="t">'
+            f'<point lat="{lat}" lon="{lon}" hae="0" ce="9" le="9"/><detail><contact callsign="{label}"/>'
+            f'<link uid="iTAK-123" type="a-f-G-U-C" parent_callsign="{who}" relation="p-p"/><archive/>'
+            f'<remarks>{remarks}</remarks></detail></event>').encode()
+
+
+def test_a_dropped_marker_is_a_field_ping_for_the_tv_not_a_team_position():
+    co, out, bus = run()
+    co.from_phone(dropped())
+    co.from_phone(dropped())  # phones repeat their markers: news only once
+    assert len(bus) == 1
+    topic, msg = bus[0]
+    assert topic == TEAM and not validate(TEAM, msg)
+    assert msg["kind"] == "mark" and msg["callsign"] == "ALPHA" and msg["label"] == "Marker 1"
+    assert abs(msg["x"] - 5) < 0.5 and abs(msg["y"] - 2) < 0.5 and msg["text"] == "bag by the door"
+    assert any("operator sees" in c for c in chats(out))
+    assert not any(t == CTRL for t, _ in bus)  # it never makes a pin or moves the drone
+    co.from_phone(dropped(x=8.0))  # moved on the phone
+    assert len(bus) == 2 and abs(bus[1][1]["x"] - 8) < 0.5
+    co.from_phone(dropped(uid="m-2", typ="b-m-p-s-m", label="Spot"))
+    assert bus[-1][1]["kind"] == "mark" and bus[-1][1]["label"] == "Spot"
+
+
+def test_a_deleted_marker_leaves_the_tv():
+    co, _, bus = run()
+    co.from_phone(dropped())
+    co.from_phone(b'<event version="2.0" uid="d" type="t-x-d-d" how="h-g-i-g-o" time="t" start="t" stale="t">'
+                  b'<point lat="0" lon="0" hae="0" ce="0" le="0"/><detail><link uid="m-1" relation="none" type="a-u-G"/>'
+                  b'<__forcedelete/></detail></event>')
+    assert bus[-1][1]["kind"] == "mark" and bus[-1][1]["gone"] is True and not validate(TEAM, bus[-1][1])
+
+
+def test_the_phones_own_position_is_still_a_position():
+    co, _, bus = run()
+    lat, lon = geo.to_latlon(1.0, 1.0, *ORIGIN)
+    co.from_phone((f'<event version="2.0" uid="iTAK-9" type="a-f-G-U-C" how="m-g" time="t" start="t" stale="t">'
+                   f'<point lat="{lat}" lon="{lon}" hae="0" ce="9" le="9"/><detail><contact callsign="BRAVO"/>'
+                   f'<takv platform="iTAK"/></detail></event>').encode())
+    assert bus[0][1]["kind"] == "pos"

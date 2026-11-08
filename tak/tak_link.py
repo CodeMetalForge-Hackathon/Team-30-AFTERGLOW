@@ -30,6 +30,9 @@ Two ways, so the TV (tv.html) and the phones work as one:
   (kind report). The TV shows it to the ranger with the matching button. A phone never publishes
   ag/ctrl: the drone never decides, neither does a chat, and only the ranger sends the drone or
   confirms a person.
+- Field pings: a marker a phone drops on its map (a spot, a waypoint, or any point it made) goes to the TV
+  as ag/team kind mark (moved: sent again; deleted on the phone: gone true), and the phone gets a chat
+  "the operator sees it". Like a report, it only shows the ranger something: it never makes a pin.
 Phones also see each other: positions and chat are passed on to the other phones, as a TAK server does.
 """
 import argparse
@@ -73,6 +76,7 @@ MODE_TEXT = {"patrol": "Day sweep", "night": "Night sweep", "search": "Trail pat
 COMMAND_RE = re.compile(r"^\s*(ack|check|found|nobody)\s+(?:at\s+)?P\s?(\d{1,3})\b", re.I)
 LOOSE_RE = re.compile(r"\b(ack|check|found|nobody)\b.*\bP\s?\d{1,3}\b|\bP\s?\d{1,3}\b.*\b(ack|check|found|nobody)\b", re.I)
 POS_EVERY_S = 2.0  # a phone's position goes on the bus at most this often
+MARK_TYPES = ("b-m-p-s-m", "b-m-p-w", "b-m-p-s-p-i", "b-m-p-c")  # spot, waypoint, point of interest, checkpoint
 UNKNOWN = "9999999.0"  # CoT for "no height" and "no error estimate"
 COLOURS = {1: 0xFFE5484D, 2: 0xFFF76B15, 3: 0xFFF5C13D, 4: 0xFF8B95A3}  # prio -> ARGB: the TV's ping colours (livemap.js PRIO_COLOR)
 # what the TV says about a ping, as the marker's label on the phones
@@ -184,6 +188,7 @@ class CotOut:
         self.sent = {}         # uid -> wall time it last went out
         self.pod_t = {}        # drone -> bus t of its last marker
         self.last_input = None  # wall time of the last message: stop repeating once the bus goes quiet
+        self.marks = {}        # a marker a phone dropped (uid) -> (x, y, label) last put on the bus
         self.stats = Counter()
 
     # ---------- input ----------
@@ -438,6 +443,16 @@ class CotOut:
             self.publish(TEAM, {"t": now_ms(), "uid": sender, "callsign": who, "kind": "chat", "text": text[:300]})
             self.stats["phone_chat"] += 1
             self.command(who, sender, text)
+        elif typ == DELETE:
+            link = d.find("link") if d is not None else None
+            gone = link.get("uid") if link is not None else None
+            if gone in self.marks:
+                x, y, label = self.marks.pop(gone)
+                self.publish(TEAM, {"t": now_ms(), "uid": gone, "callsign": "", "kind": "mark", "x": x, "y": y,
+                                    "label": label, "gone": True})
+                self.stats["phone_unmark"] += 1
+        elif self.is_mark(typ, uid, d) and pt is not None:
+            self.from_mark(uid, d, pt)
         elif typ.startswith("a-") and pt is not None and not uid.startswith("afterglow."):
             now = self.clock()
             if now - self.team_t.get(uid, 0) < POS_EVERY_S:
@@ -455,6 +470,43 @@ class CotOut:
             self.publish(TEAM, {"t": now_ms(), "uid": uid, "callsign": who, "kind": "pos",
                                 "x": round(x, 1), "y": round(y, 1), "lat": round(lat, 7), "lon": round(lon, 7)})
             self.stats["phone_pos"] += 1
+
+    @staticmethod
+    def is_mark(typ, uid, d):
+        """A marker a phone dropped on its map, not the phone's own position (which carries takv)."""
+        if uid.startswith("afterglow.") or typ in (CHAT, DELETE, CIRCLE, ROUTE):
+            return False
+        if d is not None and d.find("takv") is not None:
+            return False  # the phone itself
+        if typ in MARK_TYPES:
+            return True
+        link = d.find("link") if d is not None else None
+        return typ.startswith("a-") and link is not None and link.get("relation") == "p-p"
+
+    def from_mark(self, uid, d, pt):
+        """A field ping: where a ground team marked something. Shown to the ranger, never made a pin."""
+        try:
+            lat, lon = float(pt.get("lat")), float(pt.get("lon"))
+        except (TypeError, ValueError):
+            return
+        if not (math.isfinite(lat) and math.isfinite(lon)) or (lat == 0 and lon == 0):
+            return
+        link = d.find("link") if d is not None else None
+        contact = d.find("contact") if d is not None else None
+        who = (link.get("parent_callsign") if link is not None else None) or "TAK user"
+        label = (contact.get("callsign") if contact is not None else None) or "Marker"
+        text = ((d.findtext("remarks") if d is not None else "") or "").strip()
+        x, y = geo.to_xy(lat, lon, *self.origin)
+        x, y = round(x, 1), round(y, 1)
+        last = self.marks.get(uid)
+        if last is not None and abs(last[0] - x) < 0.5 and abs(last[1] - y) < 0.5 and last[2] == label:
+            return  # the phone repeats its markers: only a new or moved one is news
+        self.marks[uid] = (x, y, label)
+        self.publish(TEAM, {"t": now_ms(), "uid": uid, "callsign": who, "kind": "mark", "x": x, "y": y,
+                            "lat": round(lat, 7), "lon": round(lon, 7), "label": label[:40], "text": text[:300]})
+        self.stats["phone_mark"] += 1
+        if self.chat and last is None:
+            self.send_chat(f"Got your ping, {who}: the operator sees '{label[:40]}' on the booth screen.", lat, lon)
 
     def command(self, who, uid, text):
         """A field report from the chat: "ack P3" (the team has seen it), "check P3" (asks for the drone),

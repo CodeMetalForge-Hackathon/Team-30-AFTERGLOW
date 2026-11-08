@@ -396,6 +396,16 @@ function App() {
   const report = (s.team_log || []).find((r) => r.kind === 'report' && r.verdict !== 'ack' && !m.handledReports?.[`${r.uid}|${r.t}`]
     && s.pins[r.pin] && isOpen(s.pins[r.pin]) && !(r.verdict === 'check' && s.pins[r.pin].status === 'investigating')) || null;
   const dismissReport = (r) => { (m.handledReports ||= {})[`${r.uid}|${r.t}`] = true; setTick((t) => t + 1); };
+  // field pings (a marker a TAK phone dropped), live demo only: newest not yet seen, until "Got it"
+  const markKey = (k) => `${k.uid}|${k.t}`;
+  const newMark = meta.walk && st.link === 'live'
+    ? Object.values(s.marks || {}).sort((a, b) => b.t - a.t).find((k) => !m.seenMarks?.[markKey(k)]) || null : null;
+  if (newMark && !m.chimedMarks?.[markKey(newMark)]) {
+    (m.chimedMarks ||= {})[markKey(newMark)] = true;
+    m.events.unshift({ t: bt, text: `Field ping from ${newMark.callsign}: ${newMark.label}` });
+    if (m.ready) Sound.play(false);
+  }
+  const seeMark = (k) => { (m.seenMarks ||= {})[markKey(k)] = true; setTick((t) => t + 1); };
 
   // clicks
   const pick = (pin) => setSel(pin); // the map flies to it (MapPane)
@@ -499,6 +509,7 @@ function App() {
             ${podStale && html`<${LoraBanner} m=${m} loraFresh=${loraFresh} />`}
             ${sosPin && html`<${SosBanner} p=${sosPin} mode=${mode} setMode=${setMode} locked=${locked} pick=${pick} />`}
             ${report && html`<${FieldBanner} r=${report} p=${s.pins[report.pin]} locked=${locked} pinCmd=${pinCmd} confirmRescue=${confirmRescue} notPerson=${notPerson} pick=${pick} dismiss=${() => dismissReport(report)} />`}
+            ${newMark && html`<${MarkBanner} k=${newMark} dismiss=${() => seeMark(newMark)} />`}
             ${alertPin && !railShowsAlert && html`<${PingBanner} p=${alertPin} list=${alertList} m=${m} bt=${bt} kase=${kase} pick=${pick} />`}
             ${checkin?.due && mode !== 'investigate' && !routeP && html`<${CheckinBanner} p=${confirmed} c=${checkin} pose=${pose} kase=${kase} show=${() => { setLive(false); setRoutePin(confirmed.pin); }} />`}
           </div>
@@ -775,6 +786,13 @@ function Hud(c) {
 function rail(c, podStale) {
   const loraList = podStale && Object.keys(c.m.alerts).length ? html`<${LoraPings} m=${c.m} />` : null;
   const battery = c.podSite ? html`<${BatteryCard} ...${c} />` : null;
+  if (c.meta.walk && !c.routeP && c.mode !== 'investigate') {
+    return html`${loraList}
+      ${c.focus && html`<${PingCard} ...${c} p=${c.focus} />`}
+      <${PingsTable} ...${c} />
+      <${FieldPingsCard} s=${c.s} />
+      <${EventsCard} m=${c.m} />`;
+  }
   if (c.routeP) return html`${loraList}<${RescueCard} ...${c} p=${c.routeP} /><${RescueWatch} ...${c} p=${c.routeP} /><${PingsTable} ...${c} /><${EventsCard} m=${c.m} />`;
   if (c.mode === 'investigate') {
     if (!c.target) return html`${loraList}<section class="p"><h2 class="h">Emergency</h2><div class="lbl">Nothing to investigate. Pick a ping, then press Investigate.</div></section>
@@ -900,16 +918,17 @@ function LegCard({ s, locked, busy, sendCtrl }) {
   </section>`;
 }
 
-function PingsTable({ open, bt, sel, pick, mode }) {
+function PingsTable({ open, bt, sel, pick, mode, meta }) {
+  const sig = !!meta?.walk; // the live demo: signal, not trail distance
   return html`<section class="p">
     <div class="sh"><h2 class="h">Pings</h2><span class="aux">${open.length ? `${open.length} open` : 'none open'}</span></div>
     ${open.length ? html`<table class="tbl">
-      <thead><tr><th></th><th>Beacon</th><th>Status</th><th class="r">Off trail</th><th class="r">Heard</th></tr></thead>
+      <thead><tr><th></th><th>Beacon</th><th>Status</th><th class="r">${sig ? 'Signal' : 'Off trail'}</th><th class="r">Heard</th></tr></thead>
       <tbody>${open.map((p) => html`<tr key=${p.pin} class=${p.pin === sel ? 'sel' : ''} tabindex="0" onClick=${() => pick(p.pin)} onKeyDown=${(e) => e.key === 'Enter' && pick(p.pin)}>
         <td><span class="mini" style=${`background:${prioColor(p.prio)}`}>${p.pin}</span></td>
         <td>${CLS_SHORT[p.cls] || p.cls} <span class="dim">±${fmtM(p.r95)}</span></td>
         <td><span class="stt" style=${`color:${p.status === 'new' ? prioColor(p.prio) : 'var(--muted)'}`}>${p.status}</span></td>
-        <td class="r mono">${p.off_trail_m != null ? `${p.off_trail_m} m` : '—'}</td>
+        <td class="r mono">${sig ? (p.rssi != null ? `${p.rssi} dBm` : '—') : p.off_trail_m != null ? `${p.off_trail_m} m` : '—'}</td>
         <td class="r mono dim">${fmtAgo(bt - (p.t - (p.last_s || 0) * 1000))}</td></tr>`)}</tbody>
     </table>` : html`<div class="lbl">${mode === 'night' ? 'Nothing yet. A chime plays when one arrives.' : 'Nothing needs the ranger.'}</div>`}
   </section>`;
@@ -985,14 +1004,21 @@ function PingCard({ p, alertList = [], meta, s, m, bt, cv, kase, locked, busy, p
     ${kase && html`<div class="row" style="align-items:center"><span class="lbl">${kase.ping === p.pin ? `This is ${kase.name}'s ping` : kase.ping ? `Case is linked to ${kase.ping}` : 'Not linked to the case'}</span>
       <button class="link" onClick=${() => linkPing(kase.ping === p.pin ? '' : p.pin)}>${kase.ping === p.pin ? 'Unlink' : 'Link to case'}</button></div>`}
     ${p.sos && html`<div class="badline">SOS: ${p.sos.hurt ? 'hurt' : 'not hurt'}, ${p.sos.walk ? 'can walk' : "can't walk"}, ${p.sos.count || '?'} people</div>`}
-    <div class="kv">
+    ${p.rule === 'rssi' ? html`<div class="kv">
+      <div><b>${p.rssi != null ? `${p.rssi} dBm` : '—'}</b><span>signal now</span></div>
+      <div><b>±${fmtM(p.r95)}</b><span>phone within</span></div>
+      <div><b>${fmtAgo(bt - (p.t - (p.last_s || 0) * 1000))}</b><span>last heard</span></div>
+      <div><b>${fmtM(Math.abs(p.x))} ${p.x >= 0 ? 'E' : 'W'}</b><span>of Base</span></div>
+      <div><b>${fmtM(Math.abs(p.y))} ${p.y >= 0 ? 'N' : 'S'}</b><span>of Base</span></div>
+      ${warm && html`<div class="warm"><b>${fmtC(th?.max_c) || 'warm'}</b><span>thermal: warm spot</span></div>`}
+    </div>` : html`<div class="kv">
       <div><b>±${fmtM(p.r95)}</b><span>search circle</span></div>
       <div><b>${fmtAgo(bt - (p.t - (p.last_s || 0) * 1000))}</b><span>last heard</span></div>
       <div><b>${p.off_trail_m != null ? `${p.off_trail_m} m` : '—'}</b><span>off trail</span></div>
       <div><b>${camp === 0 ? 'inside' : fmtM(camp)}</b><span>${camp === 0 ? 'the campground' : 'from campground'}</span></div>
       ${fromStart != null && html`<div><b>${fmtM(fromStart)}</b><span>from ${start.label === 'Park entrance' ? 'the entrance' : 'the car'}</span></div>`}
       ${warm && html`<div class="warm"><b>${fmtC(th?.max_c) || 'warm'}</b><span>thermal: warm spot</span></div>`}
-    </div>
+    </div>`}
     ${p.status === 'new' || p.status === 'acknowledged' ? html`
       <div class="btns">
         <button class="btn primary big" disabled=${locked || b} onClick=${() => pinCmd(p.pin, 'investigate', 'Investigate')}>Investigate</button>
@@ -1263,89 +1289,171 @@ function BatteryCard({ s, bt, meta, podStale }) {
 }
 
 
-// ---------- the indoor walk (State St, [pose] source = "imu") ----------
-// The main map for the live demo: inside the building, north up, in local metres. Someone carries
-// the pod forward along one straight line ([imu] line_from -> line_to); position.py counts the
-// IMU's steps along it. The walked part fills in, a mark every metre, base at the start.
-function IndoorStage({ meta, s, st, m, bt, pose, podStale, podSite, sel, setSel }) {
+// ---------- the live demo (60 State St): signal, grid map, camera and heat ----------
+// One look tells the story: the Find My signal meter on top (a ping when it sits in the shaded zone),
+// the grid map of where the pod is and where the pings are, and the two pictures to check them.
+const SIG_MIN = -95, SIG_MAX = -40; // the meter's scale, dBm (weak, far on the left; strong, near on the right)
+const SIG_FRESH_MS = 6000;          // a reading this recent counts as "now" (a tag talks about every 2 s)
+const GRID_LIMIT_M = 60;            // things farther than this from Base are listed, not drawn
+
+function IndoorStage(c) {
+  const { s, st, bt, podSite } = c;
   const th = s.latest['ag/thermal'];
   const fresh = th && bt - th.t < THERMAL_FRESH_MS ? th : null;
   const rate = (t) => st.rates?.[t] ?? 0;
-  return html`<div class="istage">
-    <div class="feeds">
+  return html`<div class="istage2">
+    <${SignalMeter} ...${c} />
+    <div class="ist-main">
       <section class="pane">
-        <div class="sh"><h2 class="h">Camera</h2><span class="aux">Camera Module 3</span></div>
-        <${LiveFeed} file="camera.jpg" name="Camera" every=${500} pod=${podSite} />
+        <div class="sh"><h2 class="h">${c.meta.name}, Boston · map in metres from Base</h2><span class="aux">north up · 1 m squares</span></div>
+        <${GridMap} ...${c} />
+        <div class="gkey" aria-hidden="true">
+          <span><i class="k-pod"></i>Pod</span><span><i class="k-ping"></i>Ping · the ring is how far the phone may be</span>
+          <span><i class="k-team"></i>Field phone (TAK)</span><span><i class="k-mark"></i>Field ping (from TAK)</span>
+        </div>
       </section>
-      <section class="pane">
-        <div class="sh"><h2 class="h">Heat</h2><span class="aux">HT-203U · <b>${rate('ag/thermal').toFixed(1)}</b> fps</span></div>
-        <${LiveFeed} file="thermal.png" name="Heat" every=${250} tag=${heatText(th, bt)} warm=${!!fresh?.hot} pod=${podSite}>
-          ${fresh && html`<${ThermalOverlay} th=${fresh} />`}
-        </${LiveFeed}>
-      </section>
+      <div class="ist-feeds">
+        <section class="pane">
+          <div class="sh"><h2 class="h">Camera</h2><span class="aux">Camera Module 3</span></div>
+          <${LiveFeed} file="camera.jpg" name="Camera" every=${500} pod=${podSite} />
+        </section>
+        <section class="pane">
+          <div class="sh"><h2 class="h">Heat</h2><span class="aux">HT-203U · <b>${rate('ag/thermal').toFixed(1)}</b> fps</span></div>
+          <${LiveFeed} file="thermal.png" name="Heat" every=${250} tag=${heatText(th, bt)} warm=${!!fresh?.hot} pod=${podSite}>
+            ${fresh && html`<${ThermalOverlay} th=${fresh} />`}
+          </${LiveFeed}>
+        </section>
+      </div>
     </div>
-    <${HallWalk} meta=${meta} s=${s} pose=${pose} podStale=${podStale} sel=${sel} setSel=${setSel} />
-    <${Readings} meta=${meta} s=${s} st=${st} m=${m} bt=${bt} fresh=${fresh} />
   </div>`;
 }
 
-// The indoor walk ([pose] source = "imu"): someone carries the pod along one straight line
-// ([imu] line_from -> line_to); position.py counts the IMU's steps along it. Drawn as a strip,
-// base at the left: the walked part fills in, a mark every metre, pings beside the line.
-function HallWalk({ meta, s, pose, podStale, sel, setSel }) {
-  const w = meta.walk;
-  const [ax, ay] = w.from, [bx, by] = w.to;
-  const len = Math.hypot(bx - ax, by - ay) || 1;
-  const ux = (bx - ax) / len, uy = (by - ay) / len, nx = -uy, ny = ux; // along, and across, the line
-  const live = pose && !podStale;
-  const d = pose ? Math.max(0, Math.min(len, pose.dist_m ?? ((pose.x - ax) * ux + (pose.y - ay) * uy))) : 0;
-  const pct = (v) => `${(100 * v) / len}%`;
-  const every = len <= 20 ? 1 : len <= 60 ? 5 : 10;
-  const ticks = [];
-  for (let k = every; k < len - 1e-6; k += every) ticks.push(k);
-  const pins = Object.values(s.pins).filter((p) => p.status !== 'cleared');
-  const hd = pose?.heading;
-  return html`<section class="walk">
-    <div>
-      <div class="sh"><h2 class="h">Hall walk</h2><span class="aux">${meta.building?.name || meta.name} · a mark every ${every} m</span></div>
-      <div class="hall" role="img" aria-label=${`Indoor walk: ${d.toFixed(1)} of ${len.toFixed(0)} metres`}>
-        <div class="h-todo"></div>
-        ${d > 0 && html`<div class="h-done" style=${`width:${pct(d)}`}></div>`}
-        ${ticks.map((k) => html`<div key=${k} class=${`tick ${d > 0 && k <= d + 1e-6 ? 'on' : ''}`} style=${`left:${pct(k)}`}><b>${k}</b></div>`)}
-        ${pins.map((p) => {
-          const along = Math.max(0, Math.min(len, (p.x - ax) * ux + (p.y - ay) * uy)), side = (p.x - ax) * nx + (p.y - ay) * ny;
-          return html`<button key=${p.pin} class=${`h-ping ${side < 0 ? 'below' : ''} ${sel === p.pin ? 'sel' : ''}`} style=${`left:${pct(along)};--c:${prioColor(p.prio)}`}
-            onClick=${() => setSel(p.pin)} title=${`${p.pin} · ${along.toFixed(1)} m along`}>${p.pin}</button>`;
-        })}
-        <div class="h-base" title="Base: the start">B</div><div class="h-end" title=${`End · ${len.toFixed(0)} m`}></div>
-        ${pose && html`<div class=${`h-pod ${live ? '' : 'stale'}`} style=${`left:${pct(d)}`} title="The pod"></div>`}
-      </div>
+// The strongest Find My reading right now against the RSSI rule's window ([rules] rssi_window, the
+// shaded "ping zone"). geofence makes the pin; this only shows the ranger why one appears.
+function SignalMeter({ meta, s, bt, podStale }) {
+  const win = meta.rssi?.window || [-75, -60];
+  const cls = new Set(meta.rssi?.cls || ['findmy']);
+  const [lo, hi] = win;
+  const now = Object.values(s.obs).filter((o) => o.kind === 'ble' && cls.has(o.cls) && typeof o.rssi === 'number' && bt - o.t < SIG_FRESH_MS);
+  // the big number: the loudest phone in the zone, else the loudest under it (still searching), else one
+  // louder than the zone (a phone riding on the pod, or the pod right on top of one). Every phone gets a dot.
+  const loudest = (xs) => xs.reduce((a, o) => (!a || o.rssi > a.rssi ? o : a), null);
+  const best = loudest(now.filter((o) => o.rssi >= lo && o.rssi <= hi)) || loudest(now.filter((o) => o.rssi < lo)) || loudest(now);
+  const v = best?.rssi;
+  const state = podStale ? 'off' : v == null ? 'none' : v < lo ? 'weak' : v <= hi ? 'in' : 'strong';
+  const louder = now.filter((o) => o.rssi > hi).length;
+  const pct = (x) => `${(100 * (Math.max(SIG_MIN, Math.min(SIG_MAX, x)) - SIG_MIN)) / (SIG_MAX - SIG_MIN)}%`;
+  const word = { off: 'No signal from the pod', none: 'No Find My signal', weak: 'Too weak · keep searching',
+                 in: 'In the ping zone · ping', strong: `Louder than ${hi} dBm · right by the pod` }[state];
+  const names = [...cls].map((k) => CLS_SHORT[k] || k).join(', ');
+  return html`<section class=${`sig sig-${state}`} aria-live="polite">
+    <div class="sig-l"><span class="lbl">${names} signal</span>
+      <b class="mono">${v != null && state !== 'off' ? html`${v}<small> dBm</small>` : '—'}</b></div>
+    <div class="sig-bar" role="img" aria-label=${`Signal ${v ?? 'none'} dBm; ping zone ${lo} to ${hi} dBm`}>
+      <div class="sig-track"></div>
+      <div class="sig-zone" style=${`left:${pct(lo)};width:calc(${pct(hi)} - ${pct(lo)})`}><span>ping zone ${lo} to ${hi}</span></div>
+      ${[-90, -75, -60, -45].map((x) => html`<div key=${x} class="sig-tick" style=${`left:${pct(x)}`}><b>${x}</b></div>`)}
+      ${state !== 'off' && now.filter((o) => o !== best).map((o) => html`<div key=${o.id} class="sig-dot2" style=${`left:${pct(o.rssi)}`}></div>`)}
+      ${v != null && state !== 'off' && html`<div class="sig-dot" style=${`left:${pct(v)}`}></div>`}
+      <span class="sig-end l">far</span><span class="sig-end r">near</span>
     </div>
-    <div class="walkside">
-      <div class="bigline"><b>${pose ? d.toFixed(1) : '—'}</b><span>of ${len.toFixed(0)} m walked</span></div>
-      <div class="bar"><i style=${`width:${Math.round((d / len) * 100)}%`}></i></div>
-      <div class="lbl small">${!pose || podStale ? 'No signal from the pod'
-        : pose.src === 'imu' ? `IMU · ${pose.steps ?? 0} steps${hd != null ? ` · heading ${Math.round(hd)}°` : ''}`
-        : `Position from ${pose.src}`}</div>
-    </div>
+    <div class="sig-r"><b>${word}</b><span>${now.length ? `${now.length} ${names} heard now${louder && state !== 'strong' ? ` · ${louder} louder than the zone (on the pod?)` : ''}` : 'listening · passive, addresses hashed'}</span></div>
   </section>`;
 }
 
-// The numbers under the pictures on the live site.
-function Readings({ meta, s, st, m, bt, fresh }) {
-  const rate = (t) => st.rates?.[t] ?? 0;
-  const recent = Object.values(s.obs).filter((o) => bt - o.t < 30000);
-  const beacons = recent.filter((o) => o.kind === 'ble' && o.cls !== 'apple_other' && o.cls !== 'other');
-  const strongest = [...beacons].sort((a, b) => b.rssi - a.rssi)[0];
-  const al = s.latest['ag/alert'];
-  const band = meta.thermal ? [meta.thermal.hot_min_c, meta.thermal.hot_max_c] : null;
-  return html`<section class="readings">
-    <div><span>Warmest spot</span><b class=${fresh?.hot ? 'warmtxt' : ''}>${fresh && typeof fresh.max_c === 'number' ? html`${fresh.max_c.toFixed(1)}<small>°C</small>` : '—'}</b>
-      <${Sparkline} hist=${m.thHist} lo=${band?.[0] - 4} hi=${band?.[0] + 4} band=${band} /></div>
-    <div><span>Bluetooth scans</span><b>${rate('ag/obs/ble').toFixed(1)}<small>/s</small></b><span class="sub">passive · addresses hashed</span></div>
-    <div><span>Lost devices heard</span><b>${beacons.length}</b><span class="sub">of ${recent.length} heard · 30 s</span></div>
-    <div><span>Strongest</span><b>${strongest ? html`${strongest.rssi}<small>dBm</small>` : '—'}</b><span class="sub">${strongest ? CLS_SHORT[strongest.cls] || strongest.cls : 'nothing heard'}</span></div>
-    <div><span>Last LoRa alert</span><b>${m.lastAlertWall > 0 ? fmtAgo(Date.now() - m.lastAlertWall) : '—'}</b><span class="sub">${al?.rssi != null ? `${al.rssi} dBm at the Pluto` : 'none heard yet'}</span></div>
+// The live demo's map: a plain grid in local metres around Base (the mission origin, 60 State St),
+// north up. No tiles, so it works offline. The pod, its path, the pings and the TAK phones on it.
+function GridMap({ meta, s, pose, podStale, sel, setSel, m }) {
+  const w = meta.walk;
+  const pins = Object.values(s.pins).filter((p) => p.status !== 'cleared' && typeof p.x === 'number');
+  const teams = Object.values(s.teams || {}).filter((t) => typeof t.x === 'number');
+  const marks = Object.values(s.marks || {}).filter((k) => typeof k.x === 'number');
+  const trail = (s.trails.pod || []).slice(-600);
+  const near = ([x, y]) => Math.hypot(x, y) <= GRID_LIMIT_M;
+  const pts = [[0, 0], ...(w ? [w.from, w.to] : []), ...Object.values(meta.waypoints || {}), ...trail,
+               ...(pose ? [[pose.x, pose.y]] : []), ...pins.map((p) => [p.x, p.y]),
+               ...teams.map((t) => [t.x, t.y]), ...marks.map((k) => [k.x, k.y])].filter(near);
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  let [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const grow = (a, b, min) => { const c = (a + b) / 2, h = Math.max(b - a, min) / 2; return [c - h, c + h]; };
+  [x0, x1] = grow(x0 - 2, x1 + 2, 14);
+  [y0, y1] = grow(y0 - 2, y1 + 2, 9);
+  x0 = Math.floor(x0); x1 = Math.ceil(x1); y0 = Math.floor(y0); y1 = Math.ceil(y1);
+  const W = x1 - x0, H = y1 - y0, u = Math.max(W, H) / 45; // u: a unit for marks and text, in metres
+  const step = W > 40 || H > 40 ? 5 : 1, major = step * 5;
+  const lines = [];
+  for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) lines.push(html`<line key=${`x${x}`} class=${x % major === 0 ? 'g-maj' : 'g-min'} x1=${x} y1=${-y1} x2=${x} y2=${-y0}></line>`);
+  for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) lines.push(html`<line key=${`y${y}`} class=${y % major === 0 ? 'g-maj' : 'g-min'} x1=${x0} y1=${-y} x2=${x1} y2=${-y}></line>`);
+  const lab = [];
+  const lstep = W > 40 || H > 40 ? 10 : 2;
+  for (let x = Math.ceil(x0 / lstep) * lstep; x <= x1 - u; x += lstep) lab.push(html`<text key=${`lx${x}`} class="g-lab" x=${x} y=${-y0 - u * 0.5} font-size=${u * 1.1} text-anchor="middle">${x === 0 ? '0' : `${x}`}</text>`);
+  for (let y = Math.ceil(y0 / lstep) * lstep; y <= y1 - u; y += lstep) lab.push(html`<text key=${`ly${y}`} class="g-lab" x=${x0 + u * 0.4} y=${-y + u * 0.4} font-size=${u * 1.1}>${y === 0 ? '' : `${y}`}</text>`);
+  const P = ([x, y]) => `${x.toFixed(2)},${(-y).toFixed(2)}`;
+  const far = [...teams.map((t) => ({ who: t.callsign, x: t.x, y: t.y })), ...marks.map((k) => ({ who: `${k.callsign}'s ping`, x: k.x, y: k.y }))]
+    .filter((o) => !near([o.x, o.y]));
+  const seen = m.seenMarks || {};
+  return html`<div class="gridbox">
+    <svg class="gmap" style=${`--sw:${(u * 0.22).toFixed(3)}`} viewBox=${`${x0} ${-y1} ${W} ${H}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Grid map in metres around Base, 60 State Street">
+      <rect class="g-bg" x=${x0} y=${-y1} width=${W} height=${H}></rect>
+      ${lines}
+      <line class="g-axis" x1=${x0} y1="0" x2=${x1} y2="0"></line><line class="g-axis" x1="0" y1=${-y1} x2="0" y2=${-y0}></line>
+      ${lab}
+      ${w && html`<line class="g-walk" x1=${w.from[0]} y1=${-w.from[1]} x2=${w.to[0]} y2=${-w.to[1]}></line>`}
+      ${trail.length > 1 && html`<polyline class="g-path" points=${trail.map(P).join(' ')}></polyline>`}
+      <g class="g-base"><rect x=${-u * 0.9} y=${-u * 0.9} width=${u * 1.8} height=${u * 1.8}></rect>
+        <text x=${u * 1.4} y=${u * 2.2} font-size=${u * 1.2}>Base</text></g>
+      ${pins.map((p) => {
+        const col = prioColor(p.prio), r = Math.max(p.r95 || 0, u * 0.8), fresh = p.status === 'new';
+        return html`<g key=${p.pin} class=${`g-pin ${fresh ? 'new' : ''} ${sel === p.pin ? 'sel' : ''}`} style=${`--c:${col}`} onClick=${() => setSel(p.pin)}>
+          <title>${`${p.pin} · ${CLS_SHORT[p.cls] || p.cls}${p.rssi != null ? ` · ${p.rssi} dBm` : ''} · within ${fmtM(p.r95)}`}</title>
+          <circle class="ring" cx=${p.x} cy=${-p.y} r=${r}></circle>
+          ${fresh && html`<circle class="pulse" cx=${p.x} cy=${-p.y} r=${u * 1.2}></circle>`}
+          <circle class="dot" cx=${p.x} cy=${-p.y} r=${u * 0.9}></circle>
+          <text x=${p.x + u * 1.4} y=${-p.y - u * 0.9} font-size=${u * 1.7}>${p.pin}${p.rssi != null ? html`<tspan font-size=${u * 1.2} dx=${u * 0.5}>${p.rssi} dBm</tspan>` : ''}</text>
+        </g>`;
+      })}
+      ${teams.filter((t) => near([t.x, t.y])).map((t) => html`<g key=${t.uid} class="g-team">
+        <rect x=${t.x - u * 0.7} y=${-t.y - u * 0.7} width=${u * 1.4} height=${u * 1.4} transform=${`rotate(45 ${t.x} ${-t.y})`}></rect>
+        <text x=${t.x + u * 1.3} y=${-t.y + u * 0.5} font-size=${u * 1.3}>${t.callsign}</text></g>`)}
+      ${marks.filter((k) => near([k.x, k.y])).map((k) => html`<g key=${k.uid} class=${`g-mark ${seen[`${k.uid}|${k.t}`] ? '' : 'new'}`}>
+        <title>${`${k.label} · from ${k.callsign}${k.text ? ` · ${k.text}` : ''}`}</title>
+        <path d=${`M${k.x} ${-k.y} l0 ${-u * 3} l${u * 2} ${u * 0.8} l${-u * 2} ${u * 0.8} z`}></path>
+        <circle cx=${k.x} cy=${-k.y} r=${u * 0.35}></circle>
+        <text x=${k.x + u * 2.3} y=${-k.y - u * 1.8} font-size=${u * 1.3}>${k.label} · ${k.callsign}</text></g>`)}
+      ${pose && html`<g class=${`g-pod ${podStale ? 'stale' : ''}`}><circle class="halo" cx=${pose.x} cy=${-pose.y} r=${u * 2}></circle>
+        <circle cx=${pose.x} cy=${-pose.y} r=${u * 0.95}></circle>
+        <text x=${pose.x} y=${-pose.y + u * 3.2} font-size=${u * 1.2} text-anchor="middle">Pod</text></g>`}
+      <g class="g-north"><path d=${`M${x1 - u * 2} ${-y1 + u * 0.8} l${u} ${u * 2.6} l${-u} ${-u * 0.8} l${-u} ${u * 0.8} z`}></path>
+        <text x=${x1 - u * 2} y=${-y1 + u * 4.8} font-size=${u * 1.2} text-anchor="middle">N</text></g>
+    </svg>
+    ${far.length > 0 && html`<div class="gfar">${far.map((o) => html`<span key=${o.who}>${o.who}: ${fmtM(Math.hypot(o.x, o.y))} ${compassWord(heading(o.x, o.y))} of Base, off the grid</span>`)}</div>`}
+  </div>`;
+}
+
+// A field ping: a marker a TAK phone dropped (tak_link.py -> ag/team kind mark). It only shows the ranger
+// something; nothing here makes a pin or moves the drone.
+function MarkBanner({ k, dismiss }) {
+  return html`<div class="banner ban-field" role="alert">
+    <span class="chipbig">TAK</span>
+    <div><div class="big">${k.callsign} sent a field ping: ${k.label}</div>
+      <div class="sub">${k.text ? `“${k.text}” · ` : ''}${fmtM(Math.abs(k.x))} ${k.x >= 0 ? 'E' : 'W'}, ${fmtM(Math.abs(k.y))} ${k.y >= 0 ? 'N' : 'S'} of Base · on the map</div></div>
+    <div class="spacer"></div>
+    <button onClick=${dismiss}>Got it</button>
+  </div>`;
+}
+
+// The rail's TAK card on the live demo: who's on TAK (they see every ping) and the field pings they sent.
+function FieldPingsCard({ s }) {
+  const teams = Object.values(s.teams || {});
+  const marks = Object.values(s.marks || {}).sort((a, b) => b.t - a.t).slice(0, 5);
+  const now = Date.now();
+  return html`<section class="p">
+    <div class="sh"><h2 class="h">Field phones (TAK)</h2><span class="aux">${teams.length ? `${teams.length} on TAK · they see every ping` : 'none connected'}</span></div>
+    ${marks.length ? html`<div class="events">${marks.map((k) => html`<div key=${k.uid}><time class="mono">${fmtHM(k.t)}</time>
+        <span><b>${k.callsign}</b>: ${k.label} · ${fmtM(Math.hypot(k.x, k.y))} from Base${k.text ? ` · “${k.text}”` : ''}</span></div>`)}</div>`
+      : html`<div class="lbl small">${teams.length ? 'No field pings yet. A team drops a marker in iTAK or ATAK and it shows here and on the map.'
+        : 'Phones join with tak_link.py (tak/README.md). Every ping shows on their map; a marker they drop shows here.'}</div>`}
+    ${teams.length > 0 && html`<div class="lbl small" style="margin-top:.4rem">${teams.map((t) => `${t.callsign} ${fmtAgo(now - t.t)}`).join(' · ')}</div>`}
   </section>`;
 }
 

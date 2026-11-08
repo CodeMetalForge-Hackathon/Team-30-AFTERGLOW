@@ -244,6 +244,9 @@ def make_meta(cfg: dict, pm: ParkMap) -> dict:
         "map": pm.to_json(),
         "building": building(cfg),
         "thermal": {"hot_min_c": cfg["thermal"]["hot_min_c"], "hot_max_c": cfg["thermal"]["hot_max_c"]},
+        # the live demo's Find My RSSI rule (geofence): the TV's signal meter shades this window; None = off
+        "rssi": ({"cls": list(cfg["rules"]["rssi_cls"]), "window": sorted(cfg["rules"]["rssi_window"])}
+                 if len(cfg["rules"].get("rssi_window") or []) == 2 else None),
         # the TV's location tabs, and how often health.py reports (its panel goes grey when ag/sys stops)
         "sites": [dict(s) for s in http.get("sites", [])],
         "health": {"period_s": cfg["health"]["period_s"], "stale_s": cfg["health"]["stale_s"]},
@@ -505,7 +508,8 @@ def connect(host, port, state: State, holder: dict, stop: threading.Event):
         stop.wait(1)
 
 
-def main():
+def main(state_cls=None, cmds_cls=None, handler=None):
+    """state_cls, cmds_cls, handler: the TAK add-on's (tak/tak_dashboard.py main); None = this file's."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config")
     ap.add_argument("--broker", help="MQTT host[:port], overrides [mqtt] (run the dashboard on the laptop)")
@@ -520,7 +524,7 @@ def main():
     cfg = cfgmod.load(a.config)
     pm = ParkMap.load(cfg)
     meta = make_meta(cfg, pm)
-    state = State(meta["trail_step_m"])
+    state = (state_cls or State)(meta["trail_step_m"])
     holder, stop = {}, threading.Event()
     if a.dry_run:
         holder["bus"] = PrintBus()
@@ -530,7 +534,7 @@ def main():
             host, _, p = a.broker.partition(":")
             port = int(p) if p else port
         threading.Thread(target=connect, args=(host, port, state, holder, stop), daemon=True).start()
-    cmds = Commands(lambda: holder.get("bus"), cfg["waypoints"])
+    cmds = (cmds_cls or Commands)(lambda: holder.get("bus"), cfg["waypoints"])
     dirs = {k: cfgmod.resolve(cfg, cfg["http"][f"{k}_dir"]) for k in ("live", "snaps")}
     cases = CaseStore(cfg, pm)
     cases.listeners.append(lambda view: state.broadcast("case", view))
@@ -539,7 +543,7 @@ def main():
     pod = PodPictures(url) if url else None
 
     server = ThreadingHTTPServer((a.host, a.port or cfg["http"]["port"]),
-                                 make_handler(state, cmds, meta, dirs, cases, pod=pod))
+                                 (handler or make_handler)(state, cmds, meta, dirs, cases, pod=pod))
     server.daemon_threads = True
     log.info("dashboard (%s) on http://%s:%d  (operator TV: /tv.html)", meta["name"],
              "localhost" if a.host == "0.0.0.0" else a.host, server.server_address[1])

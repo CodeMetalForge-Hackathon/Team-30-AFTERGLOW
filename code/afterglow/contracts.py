@@ -34,7 +34,7 @@ MODES = ["patrol", "night", "investigate", "search"]
 POSE_SRC = ["gps", "waypoint", "replay", "sim", "imu"]  # gps/waypoint/imu = the real pod; the dashboard badges the others
 THERMAL_SRC = ["ht203u", "fake"]  # optional ag/thermal src; the panel marks fake heat
 PIN_STATUS = ["new", "acknowledged", "investigating", "confirmed", "cleared"]
-RULES = ["day_offtrail", "night_outside_camp", "search", "sos"]
+RULES = ["day_offtrail", "night_outside_camp", "search", "sos", "rssi"]  # rssi: the live demo's Find My rule
 PLAN_KINDS = ["patrol", "grid", "homing"]
 # Only the ranger's accept_leg makes a plan "accepted"; reject_leg makes it "rejected" (docs/CONTRACTS.md, "Plans")
 PLAN_STATUS = ["proposed", "accepted", "rejected", "done", "dropped"]

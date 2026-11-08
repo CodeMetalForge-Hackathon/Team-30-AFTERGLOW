@@ -4,7 +4,7 @@ contracts.py and add the two rows below to docs/CONTRACTS.md, in the same PR.
 
 | topic       | who publishes                         | fields                                                    |
 |-------------|---------------------------------------|-----------------------------------------------------------|
-| `ag/team`   | tak_link.py, from the TAK phones      | t, uid, callsign, kind (pos / chat / report); pos: x, y, lat, lon; chat: text; report: pin, verdict (ack / check / found / nobody), text |
+| `ag/team`   | tak_link.py, from the TAK phones      | t, uid, callsign, kind (pos / chat / report / mark); pos: x, y, lat, lon; chat: text; report: pin, verdict (ack / check / found / nobody), text; mark (a field ping, uid = the marker's): x, y, label, optional lat, lon, text, gone (deleted on the phone) |
 | `ag/rescue` | tak_dashboard.py, on the ranger's click | t, pin, pts [[x, y], ...] (car park to person, metres); optional secs, label. pts [] takes the route away |
 
 Neither carries case details (name, age, what they carry): the case stays on the laptop, as always.
@@ -24,7 +24,7 @@ REQUIRED = {
     TEAM: {"t", "uid", "callsign", "kind"},
     RESCUE: {"t", "pin", "pts"},
 }
-TEAM_KINDS = ["pos", "chat", "report"]
+TEAM_KINDS = ["pos", "chat", "report", "mark"]  # mark: a field ping, a marker a phone dropped
 # a field team's word on a pin: seen it, asks for the drone, a person, no one. Only the ranger acts on it.
 REPORT_VERDICTS = ["ack", "check", "found", "nobody"]
 
@@ -40,6 +40,9 @@ def validate(topic: str, msg: dict) -> list[str]:
         problems.append(f"bad team kind {msg.get('kind')!r}")
     if topic == TEAM and msg.get("kind") == "report" and (msg.get("verdict") not in REPORT_VERDICTS or not msg.get("pin")):
         problems.append(f"a team report needs pin and verdict {' / '.join(REPORT_VERDICTS)}")
+    if topic == TEAM and msg.get("kind") == "mark" and not all(
+            isinstance(msg.get(k), (int, float)) and not isinstance(msg.get(k), bool) for k in ("x", "y")):
+        problems.append("a field ping (mark) needs x and y in metres")
     if topic == RESCUE and not isinstance(msg.get("pts"), list):
         problems.append("rescue pts must be a list of [x, y]")
     return problems

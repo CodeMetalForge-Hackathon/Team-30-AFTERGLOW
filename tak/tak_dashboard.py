@@ -28,6 +28,7 @@ class TakState(State):
         super().clear()
         self.teams = {}  # TAK phone uid -> its latest ag/team position (the field teams on the map)
         self.team_log = []  # newest first: ag/team chat and reports from the phones
+        self.marks = {}  # marker uid -> its latest ag/team mark: the field pings on the map
 
     def apply(self, topic, msg):
         if topic != TEAM:
@@ -37,12 +38,17 @@ class TakState(State):
             return
         if msg.get("kind") == "pos":
             self.teams[str(msg["uid"])] = msg
+        elif msg.get("kind") == "mark":
+            if msg.get("gone"):
+                self.marks.pop(str(msg["uid"]), None)
+            else:
+                self.marks[str(msg["uid"])] = msg
         else:
             self.team_log.insert(0, msg)
             del self.team_log[TEAM_LOG:]
 
     def snapshot(self):
-        return {**super().snapshot(), "teams": self.teams, "team_log": self.team_log}
+        return {**super().snapshot(), "teams": self.teams, "team_log": self.team_log, "marks": self.marks}
 
 
 class TakCommands(Commands):
@@ -65,8 +71,8 @@ class TakCommands(Commands):
         return self._publish(RESCUE, msg, problems)
 
 
-def make_tak_handler(state, cmds: TakCommands, meta, dirs, cases=None, sim=None):
-    Base = make_handler(state, cmds, {**meta, "tak": True}, dirs, cases, sim)  # tak: the TV may POST /api/rescue
+def make_tak_handler(state, cmds: TakCommands, meta, dirs, cases=None, sim=None, pod=None):
+    Base = make_handler(state, cmds, {**meta, "tak": True}, dirs, cases, sim, pod=pod)  # tak: the TV may POST /api/rescue
 
     class TakHandler(Base):
         def do_POST(self):
@@ -87,3 +93,17 @@ def make_tak_handler(state, cmds: TakCommands, meta, dirs, cases=None, sim=None)
             self.send_json(*cmds.rescue(body))
 
     return TakHandler
+
+
+def main():
+    """The live demo's dashboard with TAK: dashboard.py's own main, with the field teams and field pings
+    kept for a TV that opens late, and the rescue route. Same flags as dashboard.py:
+
+        python tak/tak_dashboard.py --broker <pi-ip>      # 60 State St, http://localhost:8080/tv.html
+    """
+    from afterglow import dashboard
+    dashboard.main(state_cls=TakState, cmds_cls=TakCommands, handler=make_tak_handler)
+
+
+if __name__ == "__main__":
+    main()

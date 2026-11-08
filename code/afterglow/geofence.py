@@ -18,7 +18,12 @@ It proposes pins and guards the ranger's clicks; it never confirms anything itse
   keeps its place while its track is with_drone (the tracker then reports the pod's position);
 - attaches ag/sos answers to the pin under investigation, or opens an SOS-only T0 pin at the pod;
 - sets flags.thermal on the pin under investigation when ag/thermal is hot with the pod within
-  [rules] thermal_near_m of the pin's 95% circle. It stays set: a sign for the ranger, not a confirm.
+  [rules] thermal_near_m of the pin's 95% circle. It stays set: a sign for the ranger, not a confirm;
+- the live demo's RSSI rule (rule "rssi", [rules] rssi_window; [] = off): a beacon of [rules] rssi_cls
+  (Find My) heard between the window's two values (close to the pod, but not riding on it) for
+  rssi_hold_n readings in a row becomes a pin where the pod is. A stronger reading later moves the pin
+  to where the pod is then and shrinks its circle (the [track] RSSI model's distance). The track-based
+  rules then leave those classes alone, so one phone never makes two pins.
 
 Pins outlive a restart: they're saved to [rules] pins_file (pins and links only, no addresses), so a
 restarted geofence doesn't hand out P1 again. Its clock is the bus's `t`, so fake, sped-up and
@@ -37,7 +42,7 @@ from collections import Counter
 from . import config as cfgmod
 from . import geo
 from .bus import Bus, PrintBus
-from .contracts import ALWAYS_REPORTED, CTRL, MODE, MODES, POSE, SOS, TARGET, THERMAL, TRACK, validate
+from .contracts import ALWAYS_REPORTED, CTRL, MODE, MODES, OBS_BLE, POSE, SOS, TARGET, THERMAL, TRACK, validate
 from .parkmap import ParkMap
 
 log = logging.getLogger("geofence")
@@ -53,6 +58,8 @@ STEPS = {
 }
 NO_FLAGS = {"sos": False, "thermal": False, "radar": False, "camera": False}
 RESYNC_MS = 60_000  # bus time this far behind ours: a new source (the real pod after fake_bus, a replay)
+RSSI_GAP_MS = 10_000  # the RSSI rule's readings in a row: a gap longer than this starts the count again
+RSSI_EVERY_MS = 1_000  # an RSSI pin that didn't move goes out at most this often (a tag talks every ~2 s)
 
 
 def prio(p: dict) -> int:
@@ -91,6 +98,18 @@ class Geofence:
         self.inv_t = {}            # "P1" -> when it was set to investigating: SOS goes on the latest
         self.sos_pin = None        # the SOS-only pin taking further answers
         self.since = {}            # "T3" -> since when its rule has held (bus t), for pin_hold_s
+        # the RSSI rule (live demo): window (weakest, strongest) dBm, or None when off
+        w = sorted(float(v) for v in (r.get("rssi_window") or []))
+        self.rssi_window = (w[0], w[-1]) if len(w) == 2 else None
+        self.rssi_cls = set(r.get("rssi_cls") or [])
+        self.rssi_hold_n = max(1, int(r.get("rssi_hold_n", 2)))
+        tk = cfg["track"]
+        self.rssi_p0, self.rssi_n = float(tk["rssi_p0"]), float(tk["rssi_n"])
+        self.radii = float(tk["localized_r95_m"]), float(tk["pinned_r95_m"])
+        self.rssi_links = {}       # hashed id -> "P4": the pin each beacon feeds (RSSI rule)
+        self.rssi_seen = {}        # hashed id -> (readings in the window in a row, bus t of the last one)
+        self.rssi_best = {}        # "P4" -> its strongest reading so far (dBm)
+        self.rssi_sent = {}        # "P4" -> bus t it last went out
         self.stats = Counter()
 
     # ---------- input ----------
@@ -98,6 +117,8 @@ class Geofence:
     def feed(self, topic, msg):
         if topic == TRACK:
             self.handle_track(msg)
+        elif topic == OBS_BLE:
+            self.handle_obs(msg)
         elif topic == POSE:
             self.handle_pose(msg)
         elif topic == MODE:
@@ -205,6 +226,8 @@ class Geofence:
         """Why this track should be a pin under the current mode, or None."""
         mode = self.rule_mode if self.mode == "investigate" else self.mode
         cls, x, y = tr["cls"], float(tr["x"]), float(tr["y"])
+        if self.rssi_window and cls in self.rssi_cls:
+            return None  # the RSSI rule pins these (handle_obs), so one phone never makes two pins
         if mode == "search":
             return "search" if cls in LOST else None
         if cls not in ALWAYS_REPORTED or tr["state"] not in PLACED:
@@ -216,6 +239,75 @@ class Geofence:
         if self.pm.dist_to_trail(x, y) > self.offtrail_m and (tr.get("passes") or 0) >= self.min_passes:
             return "day_offtrail"
         return None
+
+    # ---------- the RSSI rule (live demo) ----------
+
+    def rssi_r95(self, rssi):
+        """How far the beacon may be from the pod: the [track] RSSI model's distance, at least 0.5 m."""
+        return max(0.5, round(10 ** ((self.rssi_p0 - rssi) / (10 * self.rssi_n)), 1))
+
+    def rssi_c(self, rssi):
+        """Confidence 0.5 at the window's weak end, rising to 1 at its strong end (and above)."""
+        lo, hi = self.rssi_window
+        return round(max(0.5, min(1.0, 0.5 + 0.5 * (rssi - lo) / max(1.0, hi - lo))), 2)
+
+    def rssi_state(self, r95):
+        return "pinned" if r95 <= self.radii[1] else "localized" if r95 <= self.radii[0] else "heard"
+
+    def handle_obs(self, msg):
+        """ag/obs/ble: a Find My beacon heard in the RSSI window makes a pin where the pod is.
+        Never decodes anything: the class and the RSSI only (CLAUDE.md, privacy rules)."""
+        if self.rssi_window is None or msg.get("cls") not in self.rssi_cls:
+            return
+        oid, rssi, t = msg.get("id"), msg.get("rssi"), msg.get("t")
+        if not isinstance(oid, str) or not isinstance(rssi, (int, float)) or isinstance(rssi, bool) \
+                or not isinstance(t, int) or isinstance(t, bool):
+            self.stats["bad_obs"] += 1
+            return
+        self.advance(t)
+        lo, hi = self.rssi_window
+        pin = self.rssi_links.get(oid)
+        if pin is not None:
+            p = self.pins.get(pin)
+            if p is None or p["status"] in ("cleared", "confirmed") or rssi < lo:
+                return  # cleared or confirmed: frozen, and its beacon never gets another pin
+            moved = rssi > self.rssi_best.get(pin, -999.0) and self.pose is not None
+            if moved:  # stronger: the pod is closer now, so the beacon is near where the pod is
+                self.rssi_best[pin] = rssi
+                p.update(r95=self.rssi_r95(rssi), c=self.rssi_c(rssi))
+                p["state"] = self.rssi_state(p["r95"])
+                self.place(p, *self.pose)
+            p.update(t=max(p.get("t", 0), self.now), last_s=0, rssi=round(rssi))  # heard just now
+            p["prio"] = prio(p)
+            if moved or self.now - self.rssi_sent.get(pin, 0) >= RSSI_EVERY_MS:
+                if moved:
+                    self.save()
+                self.rssi_sent[pin] = self.now
+                self.publish(p)
+            return
+        if not lo <= rssi <= hi or self.pose is None:
+            self.rssi_seen.pop(oid, None)  # out of the window: the count starts again
+            return
+        n, last = self.rssi_seen.get(oid, (0, t))
+        n = n + 1 if t - last <= RSSI_GAP_MS else 1
+        self.rssi_seen[oid] = (n, t)
+        if n < self.rssi_hold_n:
+            return
+        self.rssi_seen.pop(oid, None)
+        self.n += 1
+        pin = f"P{self.n}"
+        r95 = self.rssi_r95(rssi)
+        p = self.pins[pin] = {"pin": pin, "track": "T0", "rule": "rssi", "status": "new", "cls": msg["cls"],
+                              "flags": dict(NO_FLAGS), "br": None, "t": self.now, "last_s": 0, "r95": r95,
+                              "c": self.rssi_c(rssi), "state": self.rssi_state(r95), "rssi": round(rssi)}
+        self.place(p, *self.pose)
+        self.rssi_links[oid] = pin
+        self.rssi_best[pin] = rssi
+        self.rssi_sent[pin] = self.now
+        self.stats["pins"] += 1
+        log.info("%s: new pin for %s at %.0f dBm (rssi), pod at %.1f, %.1f", pin, msg["cls"], rssi, *self.pose)
+        self.save()
+        self.publish(p)
 
     def place(self, p, x, y):
         """Position, lat/lon and the map fields; then prio, which depends on everything else."""
@@ -232,6 +324,8 @@ class Geofence:
             self.links.clear()
             self.ids.clear()
             self.since.clear()
+            self.rssi_links.clear()
+            self.rssi_seen.clear()
             self.sos_pin = None  # an SOS answer from now on opens a new pin, not the old search's
             self.save()
             log.info("new search: tracks unlinked, %d pins kept for the ranger", len(self.pins))
@@ -329,7 +423,8 @@ class Geofence:
         if self.pins_file is None:
             return
         state = {"n": self.n, "pins": self.pins, "links": self.links, "ids": self.ids,
-                 "inv_t": self.inv_t, "sos_pin": self.sos_pin, "rule_mode": self.rule_mode}
+                 "inv_t": self.inv_t, "sos_pin": self.sos_pin, "rule_mode": self.rule_mode,
+                 "rssi_links": self.rssi_links, "rssi_best": self.rssi_best}
         tmp = self.pins_file.with_suffix(".tmp")
         try:
             self.pins_file.parent.mkdir(parents=True, exist_ok=True)
@@ -351,6 +446,7 @@ class Geofence:
             s = json.loads(f.read_text())
             self.n, self.pins, self.links, self.ids = s["n"], s["pins"], s["links"], s["ids"]
             self.inv_t, self.sos_pin, self.rule_mode = s["inv_t"], s["sos_pin"], s["rule_mode"]
+            self.rssi_links, self.rssi_best = s.get("rssi_links", {}), s.get("rssi_best", {})
         except (OSError, ValueError, KeyError, TypeError) as e:
             log.warning("couldn't read saved pins (%s): starting fresh at P1", e)
             return
@@ -391,7 +487,8 @@ def main():
     else:
         g.restore()
     inbox = queue.Queue()  # handlers only queue, so paho's thread stays fast; this loop does the work
-    for topic in (TRACK, POSE, MODE, CTRL, SOS, THERMAL):
+    topics = (TRACK, POSE, MODE, CTRL, SOS, THERMAL) + ((OBS_BLE,) if g.rssi_window else ())
+    for topic in topics:
         bus.subscribe(topic, lambda topic, msg: inbox.put((topic, msg)))
     last_log = time.monotonic()
     try:

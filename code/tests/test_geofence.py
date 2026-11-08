@@ -25,6 +25,7 @@ from fake_bus import FakePod  # noqa: E402
 
 T0 = 1_731_000_000_000
 CFG = config.load(config.DEFAULT)
+CFG["rules"]["rssi_window"] = []  # the track-based rules; the live demo's RSSI rule has its own tests (test_geofence_rssi.py)
 PM = ParkMap.load(CFG)
 OFF_TRAIL = (2.0, 6.0)   # 6 m from the trail
 NEAR_TRAIL = (4.5, 1.5)  # 1.5 m from the trail
