@@ -65,8 +65,6 @@ header .scale { font: 12px var(--mono); color: var(--text-3); }
 .heard circle { fill: none; stroke: var(--c); transition: r .45s ease-out; }
 .heard .band { stroke-width: 5; opacity: .12; }
 .heard .line { stroke-width: 1; stroke-dasharray: 3 2; opacity: .9; }
-.heard.faint .band { display: none; }
-.heard.faint .line { stroke-width: .5; stroke-dasharray: none; opacity: .35; }
 .heard text { fill: var(--c); font: 500 4.4px var(--mono); paint-order: stroke; stroke: var(--bg); stroke-width: 1.4px; }
 .heard.sel .line, .heard.hot .line { stroke-width: 1.8; opacity: 1; }
 
@@ -104,8 +102,6 @@ aside { border-left: 1px solid var(--hair); background: var(--surface); display:
 .list { overflow-y: auto; flex: 1; }
 .sec { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px 6px;
   font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: .08em; }
-.sec button { background: none; border: 1px solid var(--hair-2); color: var(--text-2); border-radius: 3px;
-  font: 11px var(--sans); padding: 2px 7px; cursor: pointer; text-transform: none; letter-spacing: 0; }
 .row { display: grid; grid-template-columns: 4px 1fr auto; gap: 10px; padding: 8px 16px 8px 12px; cursor: pointer;
   border-top: 1px solid var(--hair); }
 .row:hover, .row.hot { background: var(--raised); }
@@ -120,7 +116,6 @@ aside { border-left: 1px solid var(--hair); background: var(--surface); display:
 .row .d { font-size: 15px; font-weight: 500; white-space: nowrap; }
 .row .d i { display: inline-block; font-style: normal; }
 .row .r { font-size: 11px; color: var(--text-3); }
-.row.quiet .name { font-weight: 400; color: var(--text-2); }
 .empty { padding: 10px 16px 14px; color: var(--text-3); font-size: 13px; }
 .foot { padding: 8px 16px; border-top: 1px solid var(--hair); font-size: 12px; color: var(--text-3); }
 
@@ -180,11 +175,11 @@ const DEMO = q.get('demo') === '1';
 const R0 = 16, R1 = 100, K = (R1 - R0) / MAX_M;     // svg radius of 0 m and of the edge; svg units per metre
 let model = { p0: -48, n: 2.4 };                    // replaced by /api/map
 
-// What each beacon type is. alert: the kinds a lost or switched-off phone sends (the ones the tracker pins).
+// What each signal type is. Every signal is shown the same way; the colour says which type it is.
 const KINDS = {
-  findmy:      { name: 'Find My beacon',    short: 'Find My', what: 'iPhone or AirTag away from its owner (lost, dead or off)', c: '--findmy', alert: true },
-  findhub:     { name: 'Find Hub tag',      short: 'Find Hub', what: 'Android phone or tag in offline finding', c: '--findhub', alert: true },
-  samsung_off: { name: 'Samsung lost mode', short: 'Samsung', what: 'Samsung phone or tag in lost mode', c: '--samsung', alert: true },
+  findmy:      { name: 'Find My beacon',    short: 'Find My', what: 'iPhone or AirTag away from its owner (lost, dead or off)', c: '--findmy' },
+  findhub:     { name: 'Find Hub tag',      short: 'Find Hub', what: 'Android phone or tag in offline finding', c: '--findhub' },
+  samsung_off: { name: 'Samsung lost mode', short: 'Samsung', what: 'Samsung phone or tag in lost mode', c: '--samsung' },
   ref:         { name: 'Reference beacon',  short: 'Ref', what: 'Ours, for testing', c: '--ref' },
   apple_other: { name: 'Apple device',      short: 'Apple', what: 'Live iPhone, Watch or AirPods near their owner', c: '--apple' },
   other:       { name: 'Other Bluetooth',   short: 'BT', what: 'Headphones, watches, cars, anything else', c: '--other' },
@@ -241,7 +236,7 @@ function smoothed(o) {
   return s;
 }
 
-let sel = null, hot = null, showOthers = true;
+let sel = null, hot = null;
 const rand = {};   // id -> Wi-Fi rand flag (the obs summary drops it; obs_log has it)
 
 // Everything to draw: located tracks (dots) and heard ids that no located track covers (rings).
@@ -264,7 +259,7 @@ function collect(state) {
     if (m > EDGE_X * MAX_M) { farther++; continue; }
     const k = kindOfCls(tr.cls), kind = KINDS[k];
     items.push({ key: 'T:' + tr.track, located: true, id: ids[ids.length - 1] ?? tr.track, track: tr.track, kind,
-                 alert: !!kind.alert && !tr.baseline, baseline: !!tr.baseline, m, brg: (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360,
+                 baseline: !!tr.baseline, m, brg: (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360,
                  r95: tr.r95, state: tr.state, age: quiet, c: tr.c });
   }
   for (const o of Object.values(state.obs || {})) {
@@ -277,10 +272,9 @@ function collect(state) {
     if (m > MAX_M) { farther++; continue; }
     const kind = KINDS[kindOf(o, rand)], pod = onPod.has(o.id), bl = base.has(o.id);
     const h = s.hist, trend = h.length > 1 ? h[h.length - 1][1] - h[0][1] : 0;
-    items.push({ key: 'O:' + o.id, located: false, id: o.id, kind, alert: !!kind.alert && !pod && !bl, onPod: pod, baseline: bl,
-                 m, rssi: s.rssi, age, n: o.n, trend });
+    items.push({ key: 'O:' + o.id, located: false, id: o.id, kind, onPod: pod, baseline: bl, m, rssi: s.rssi, age, n: o.n, trend });
   }
-  items.sort((a, b) => (b.alert - a.alert) || (b.located - a.located) || a.m - b.m);
+  items.sort((a, b) => (b.located - a.located) || a.m - b.m);
   return { items, farther, havePose };
 }
 
@@ -304,9 +298,8 @@ function syncLayer(layer, list, make, update) {
 }
 
 function makeRing(it) {
-  const g = el('g', { class: 'heard' + (it.alert ? '' : ' faint') });
-  g.append(el('circle', { class: 'band' }), el('circle', { class: 'line' }));
-  if (it.alert) g.append(el('text'));
+  const g = el('g', { class: 'heard' });
+  g.append(el('circle', { class: 'band' }), el('circle', { class: 'line' }), el('text'));
   return g;
 }
 function updateRing(g, it) {
@@ -328,9 +321,7 @@ function makeLocated(it) {
   setR(unc, rpx(Math.min(it.m, MAX_M)));   // starts as wide as the ring it replaces, then shrinks to r95
   g.dataset.fresh = '1';
   g.append(el('line', { class: 'brg' }), unc);
-  if (it.alert) g.append(el('circle', { class: 'halo', r: 5 }));
-  g.append(el('circle', { class: 'core', r: it.alert ? 4 : 2.6 }));
-  if (it.alert) g.append(el('text', { y: 1.6 }));
+  g.append(el('circle', { class: 'halo', r: 5 }), el('circle', { class: 'core', r: 4 }), el('text', { y: 1.6 }));
   return g;
 }
 function updateLocated(g, it) {
@@ -343,7 +334,7 @@ function updateLocated(g, it) {
   for (const c of g.querySelectorAll('.unc, .halo, .core')) { c.setAttribute('cx', x.toFixed(1)); c.setAttribute('cy', y.toFixed(1)); }
   if (g.dataset.fresh) delete g.dataset.fresh;   // first frame: keep the wide circle, so the shrink animates
   else setR(g.querySelector('.unc'), Math.max(2, Math.min(R1, K * (it.r95 || 0))));
-  g.querySelector('.core').setAttribute('r', edge ? 3 : it.alert ? 4 : 2.6);
+  g.querySelector('.core').setAttribute('r', edge ? 3 : 4);
   g.style.opacity = fade(it.age, KEEP_S);
   const t = g.querySelector('text');
   if (t) {
@@ -355,9 +346,8 @@ function updateLocated(g, it) {
 }
 
 function drawRadar(items, havePose) {
-  const shown = items.filter((it) => it.alert || showOthers);
-  syncLayer($('rings'), shown.filter((it) => !it.located), makeRing, updateRing);
-  syncLayer($('dots'), shown.filter((it) => it.located), makeLocated, updateLocated);
+  syncLayer($('rings'), items.filter((it) => !it.located), makeRing, updateRing);
+  syncLayer($('dots'), items.filter((it) => it.located), makeLocated, updateLocated);
   $('nopose').textContent = havePose ? '' : 'No pod position yet: rings only';
 }
 
@@ -373,7 +363,7 @@ function row(it) {
        <div class="r">${it.age < 1 ? 'heard now' : 'heard ' + Math.round(it.age) + ' s ago'}</div>`
     : `<div class="d">≈${it.m.toFixed(1)} m${it.trend > 3 ? ' <span class="up">↑</span>' : it.trend < -3 ? ' <span class="down">↓</span>' : ''}</div>
        <div class="r">${Math.round(it.rssi)} dBm · ${it.age < 1 ? 'now' : Math.round(it.age) + ' s'}</div>`;
-  return `<div class="row${it.alert ? '' : ' quiet'}${it.key === sel ? ' sel' : ''}${it.key === hot ? ' hot' : ''}" data-key="${esc(it.key)}" style="--c:var(${it.kind.c})">
+  return `<div class="row${it.key === sel ? ' sel' : ''}${it.key === hot ? ' hot' : ''}" data-key="${esc(it.key)}" style="--c:var(${it.kind.c})">
     <span class="bar"></span>
     <div><div class="name">${it.kind.name}${it.baseline ? ' (baseline)' : ''}</div><div class="what">${it.kind.what}</div>${status}
       <div class="id">${esc(it.located ? it.track + ' · ' + it.id : it.id + ' · heard ×' + it.n)}</div></div>
@@ -382,9 +372,8 @@ function row(it) {
 }
 
 function drawSide(items, farther) {
-  const alerts = items.filter((it) => it.alert), rest = items.filter((it) => !it.alert);
-  const best = [...alerts].sort((a, b) => a.m - b.m)[0];
-  let html = `<div class="k">Nearest lost-device beacon</div>`;
+  const best = [...items].sort((a, b) => a.m - b.m)[0];
+  let html = `<div class="k">Nearest signal</div>`;
   if (!best) html += `<div class="v" style="color:var(--text-3)">none<small>within ${MAX_M} m</small></div>`;
   else if (best.located) html += `<div class="v" style="color:var(${best.kind.c})">${best.m.toFixed(1)} m<small>${best.kind.name}</small></div>
       <div class="t">Head <b>${compass(best.brg)}</b> (${Math.round(best.brg)}°) · ±${(best.r95 ?? 0).toFixed(1)} m</div>
@@ -394,11 +383,8 @@ function drawSide(items, farther) {
         <span class="${best.trend > 3 ? 'up' : best.trend < -3 ? 'down' : ''}">${best.trend > 3 ? 'getting closer' : best.trend < -3 ? 'getting farther' : 'steady'}</span></div>
       <div class="arrow"><b>?</b></div>`;
   $('nearest').innerHTML = html;
-  $('list').innerHTML =
-    `<div class="sec"><span>Alerts · ${alerts.length}</span></div>` +
-    (alerts.length ? alerts.map(row).join('') : `<div class="empty">No Find My, Find Hub or Samsung lost-mode beacon within ${MAX_M} m.</div>`) +
-    `<div class="sec"><span>Other signals · ${rest.length}</span><button id="tog">${showOthers ? 'Hide' : 'Show'}</button></div>` +
-    (showOthers ? rest.map(row).join('') : '');
+  $('list').innerHTML = `<div class="sec"><span>Signals · ${items.length}</span></div>` +
+    (items.length ? items.map(row).join('') : `<div class="empty">Nothing heard within ${MAX_M} m.</div>`);
   $('foot').textContent = `${farther} more heard farther away · located beacons stay ${KEEP_S} s after their last sighting`;
 }
 
@@ -412,7 +398,6 @@ function render(state, linkLabel, linkCls) {
 
 // Clicks and hovers (rows are redrawn 4 times a second, so these are delegated).
 $('list').addEventListener('click', (e) => {
-  if (e.target.id === 'tog') { showOthers = !showOthers; return; }
   const r = e.target.closest('.row'); if (r) sel = sel === r.dataset.key ? null : r.dataset.key;
 });
 $('list').addEventListener('mouseover', (e) => { hot = e.target.closest('.row')?.dataset.key ?? null; });
